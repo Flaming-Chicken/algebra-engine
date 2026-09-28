@@ -202,3 +202,92 @@ fn test_transcendental_trig_identity_verification() {
     assert!(*verif.as_ref());
     assert!(verif.error_probability() <= 1e-6);
 }
+
+#[test]
+fn test_quantized_transformer_neural_embeddings_and_search_guidance() {
+    use algebra_engine::heuristic::{
+        NeuralExpressionEmbedder, QuantizedTransformerWeights,
+    };
+
+    let graph = ExprGraph::new();
+    let x = graph.symbol("x");
+    let y = graph.symbol("y");
+    let two = graph.integer(2);
+    let one = graph.integer(1);
+
+    // Expression A: x^2 + 1
+    let x2 = graph.pow(x, two);
+    let expr_a = graph.add([x2, one]);
+
+    // Expression B: y^2 + 1 (structurally identical tree)
+    let y2 = graph.pow(y, two);
+    let expr_b = graph.add([y2, one]);
+
+    // Expression C: sin(x) / cos(x) (structurally different)
+    let sin_x = graph.function("sin", [x]);
+    let cos_x = graph.function("cos", [x]);
+    let expr_c = graph.div(sin_x, cos_x);
+
+    let embedder = NeuralExpressionEmbedder::default();
+
+    let emb_a = embedder.embed_expression(&graph, expr_a);
+    let emb_b = embedder.embed_expression(&graph, expr_b);
+    let emb_c = embedder.embed_expression(&graph, expr_c);
+
+    assert_eq!(emb_a.len(), 8);
+    assert_eq!(emb_b.len(), 8);
+    assert_eq!(emb_c.len(), 8);
+
+    // Verify unit length
+    let norm_a: f32 = emb_a.iter().map(|&v| v * v).sum::<f32>().sqrt();
+    assert!((norm_a - 1.0).abs() < 1e-4);
+
+    // Expressions with identical tree structure have high similarity
+    let sim_ab = NeuralExpressionEmbedder::cosine_similarity(&emb_a, &emb_b);
+    let sim_ac = NeuralExpressionEmbedder::cosine_similarity(&emb_a, &emb_c);
+
+    assert!(
+        sim_ab > sim_ac,
+        "Structural isomorphic expressions should have higher similarity: sim_ab={sim_ab} vs sim_ac={sim_ac}"
+    );
+
+    // Test Safetensors ingestion with INT8 quantization
+    let header_json = serde_json::json!({
+        "__metadata__": { "scale": "0.05" },
+        "embeddings": {
+            "dtype": "I8",
+            "shape": [16, 8],
+            "data_offsets": [0, 128]
+        }
+    })
+    .to_string();
+
+    let header_bytes = header_json.as_bytes();
+    let header_len = header_bytes.len() as u64;
+
+    let mut st_buffer = Vec::new();
+    st_buffer.extend_from_slice(&header_len.to_le_bytes());
+    st_buffer.extend_from_slice(header_bytes);
+    // Add 128 bytes of INT8 data
+    let int8_data: Vec<u8> = (0..128).map(|i| (i as i8) as u8).collect();
+    st_buffer.extend_from_slice(&int8_data);
+
+    let loaded_weights =
+        QuantizedTransformerWeights::from_safetensors_bytes(&st_buffer).unwrap();
+    assert_eq!(loaded_weights.vocab_size, 16);
+    assert_eq!(loaded_weights.embed_dim, 8);
+    assert_eq!(loaded_weights.scale, 0.05);
+    assert_eq!(loaded_weights.token_embeddings.len(), 128);
+
+    // Test HeuristicSearchEngine with neural embedder active
+    let search_engine = HeuristicSearchEngine::default().with_neural_embedder(embedder);
+
+    let weight_guided = search_engine.weight_candidate(&graph, expr_b, Some(expr_a));
+    let weight_unguided =
+        ProbabilisticVerifier::compute_candidate_heuristic_weight(&graph, expr_b, Some(expr_a));
+
+    assert!(
+        weight_guided >= weight_unguided,
+        "Neural guidance should amplify promising structurally similar candidate: guided={weight_guided} vs unguided={weight_unguided}"
+    );
+}

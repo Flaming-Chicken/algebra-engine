@@ -332,6 +332,14 @@ impl HeuristicSearchEngine {
         }
     }
 
+    /// Create a new heuristic search engine with calibrated neural embedder active by default.
+    pub fn with_default_neural_guidance(config: EngineConfig) -> Self {
+        Self {
+            config,
+            neural_embedder: Some(NeuralExpressionEmbedder::default()),
+        }
+    }
+
     /// Attach a neural expression embedder for hybrid search guidance.
     pub fn with_neural_embedder(mut self, embedder: NeuralExpressionEmbedder) -> Self {
         self.neural_embedder = Some(embedder);

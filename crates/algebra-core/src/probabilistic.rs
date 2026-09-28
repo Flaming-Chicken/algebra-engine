@@ -658,6 +658,132 @@ impl ProbabilisticVerifier {
         }
     }
 
+    /// Parallel multi-prime Schwartz-Zippel CRT equivalence verification using Rayon on desktop targets.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn verify_equivalence_parallel(
+        graph: &ExprGraph,
+        lhs: ExprId,
+        rhs: ExprId,
+        target_epsilon: f64,
+    ) -> Solution<bool> {
+        if lhs == rhs {
+            return Solution::Deterministic(true);
+        }
+
+        let syms = {
+            let mut s = Self::extract_symbols(graph, lhs);
+            for r_sym in Self::extract_symbols(graph, rhs) {
+                if !s.contains(&r_sym) {
+                    s.push(r_sym);
+                }
+            }
+            s
+        };
+
+        use rayon::prelude::*;
+
+        let primes = [Self::MERSENNE_31, Self::MERSENNE_61, Self::LARGE_PRIME_64];
+        let estimated_degree = 20.0f64;
+
+        // Build all test cases: (prime, round)
+        let test_cases: Vec<(u64, usize)> = primes
+            .iter()
+            .flat_map(|&p| (1..=8).map(move |r| (p, r)))
+            .collect();
+
+        // Evaluate all prime test cases in parallel
+        let results: Vec<Option<(bool, f64)>> = test_cases
+            .par_iter()
+            .map(|&(prime, round)| {
+                let mut env = HashMap::new();
+                for (idx, &sym) in syms.iter().enumerate() {
+                    let seed = ((round as u64) * 999983 + (idx as u64) * 31337 + 7) % prime;
+                    let val = if seed == 0 { 17 } else { seed };
+                    env.insert(sym, val);
+                }
+
+                let val_l = Self::eval_mod_p(graph, lhs, prime, &env);
+                let val_r = Self::eval_mod_p(graph, rhs, prime, &env);
+
+                match (val_l, val_r) {
+                    (Some(vl), Some(vr)) => {
+                        let matches = vl == vr;
+                        let err = estimated_degree / (prime as f64);
+                        Some((matches, err))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        let mut total_samples = 0;
+        let mut current_error_bound = 1.0f64;
+
+        for res in results.into_iter().flatten() {
+            let (matches, err) = res;
+            if !matches {
+                return Solution::Deterministic(false);
+            }
+            total_samples += 1;
+            current_error_bound *= err;
+
+            if total_samples >= 3 && current_error_bound <= target_epsilon {
+                return Solution::Probabilistic {
+                    result: true,
+                    error_probability_upper_bound: current_error_bound,
+                    sample_count: total_samples,
+                    method: "Schwartz-Zippel Multi-Prime CRT (Parallel)",
+                };
+            }
+        }
+
+        // Float validation points in parallel
+        let float_cases: Vec<usize> = (1..=5).collect();
+        let float_results: Vec<Option<bool>> = float_cases
+            .par_iter()
+            .map(|&round| {
+                let mut f_env = HashMap::new();
+                for (idx, &sym) in syms.iter().enumerate() {
+                    let val = ((round as f64) * std::f64::consts::SQRT_2
+                        + (idx as f64) * std::f64::consts::E)
+                        % 10.0
+                        + 0.5;
+                    f_env.insert(sym, val);
+                }
+                match (
+                    Self::eval_float(graph, lhs, &f_env),
+                    Self::eval_float(graph, rhs, &f_env),
+                ) {
+                    (Some(fl), Some(fr)) => {
+                        let diff = (fl - fr).abs();
+                        let tol = 1e-9 * (1.0 + fl.abs() + fr.abs());
+                        Some(diff <= tol)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for f_res in float_results.into_iter().flatten() {
+            if !f_res {
+                return Solution::Deterministic(false);
+            }
+            total_samples += 1;
+            current_error_bound *= 1e-3;
+        }
+
+        if total_samples > 0 {
+            Solution::Probabilistic {
+                result: true,
+                error_probability_upper_bound: current_error_bound,
+                sample_count: total_samples,
+                method: "Schwartz-Zippel Multi-Prime CRT (Parallel)",
+            }
+        } else {
+            Self::verify_equivalence(graph, lhs, rhs, target_epsilon)
+        }
+    }
+
     /// Compute heuristic weight $[0.0, 1.0]$ for candidate search branch prioritization in $O(1)$.
     pub fn compute_candidate_heuristic_weight(
         graph: &ExprGraph,

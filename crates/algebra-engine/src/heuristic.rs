@@ -351,6 +351,30 @@ impl HeuristicSearchEngine {
         }
     }
 
+    /// Parallel batch candidate weighting across multiple rewrite options using Rayon.
+    pub fn weight_candidates_parallel(
+        &self,
+        graph: &ExprGraph,
+        candidates: &[ExprId],
+        target_id: Option<ExprId>,
+    ) -> Vec<f64> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            use rayon::prelude::*;
+            candidates
+                .par_iter()
+                .map(|&c| self.weight_candidate(graph, c, target_id))
+                .collect()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            candidates
+                .iter()
+                .map(|&c| self.weight_candidate(graph, c, target_id))
+                .collect()
+        }
+    }
+
     /// Tier 2: Progressive multi-prime CRT verification down to target epsilon (e.g. $10^{-20}$).
     pub fn verify_candidate(
         &self,
@@ -360,6 +384,18 @@ impl HeuristicSearchEngine {
         target_epsilon: f64,
     ) -> Solution<bool> {
         ProbabilisticVerifier::verify_equivalence(graph, candidate_id, target_id, target_epsilon)
+    }
+
+    /// Parallel multi-prime CRT verification using Rayon on desktop platforms.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn verify_candidate_parallel(
+        &self,
+        graph: &ExprGraph,
+        candidate_id: ExprId,
+        target_id: ExprId,
+        target_epsilon: f64,
+    ) -> Solution<bool> {
+        ProbabilisticVerifier::verify_equivalence_parallel(graph, candidate_id, target_id, target_epsilon)
     }
 
     /// Simplify an expression with opportunistic deterministic proof and probabilistic fallback.

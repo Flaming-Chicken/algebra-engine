@@ -291,3 +291,35 @@ fn test_quantized_transformer_neural_embeddings_and_search_guidance() {
         "Neural guidance should amplify promising structurally similar candidate: guided={weight_guided} vs unguided={weight_unguided}"
     );
 }
+
+#[test]
+fn test_parallel_verification_and_weighting() {
+    let graph = ExprGraph::new();
+    let x = graph.symbol("x");
+    let y = graph.symbol("y");
+
+    // (x + y)^2 vs x^2 + 2xy + y^2
+    let sum = graph.add(vec![x, y]);
+    let two = graph.integer(2);
+    let lhs = graph.pow(sum, two);
+
+    let x2 = graph.pow(x, two);
+    let y2 = graph.pow(y, two);
+    let xy = graph.mul(vec![two, x, y]);
+    let rhs = graph.add(vec![x2, xy, y2]);
+
+    // Test parallel equivalence verification
+    let solution = ProbabilisticVerifier::verify_equivalence_parallel(&graph, lhs, rhs, 1e-12);
+    assert!(solution.is_probabilistic(), "Expected probabilistic solution");
+    assert_eq!(*solution.as_ref(), true);
+    assert!(solution.confidence() > 0.99999);
+
+    // Test parallel candidate weighting
+    let search_engine = HeuristicSearchEngine::default();
+    let candidates = vec![lhs, rhs, x2, y2, sum];
+    let weights = search_engine.weight_candidates_parallel(&graph, &candidates, Some(rhs));
+    assert_eq!(weights.len(), 5);
+    for &w in &weights {
+        assert!(w > 0.0);
+    }
+}

@@ -30,13 +30,16 @@ impl GrobnerBasis {
             return MultiPoly::zero(f.num_vars, f.var_names.clone(), f.order);
         }
 
-        let lt_f = f.leading_term().unwrap();
-        let lt_g = g.leading_term().unwrap();
+        let (Some(lt_f), Some(lt_g)) = (f.leading_term(), g.leading_term()) else {
+            return MultiPoly::zero(f.num_vars, f.var_names.clone(), f.order);
+        };
 
         let lcm = lt_f.monomial.lcm(&lt_g.monomial);
 
         // mono_f = lcm / LM(f)
-        let mono_f = lcm.div(&lt_f.monomial).unwrap();
+        let Some(mono_f) = lcm.div(&lt_f.monomial) else {
+            return MultiPoly::zero(f.num_vars, f.var_names.clone(), f.order);
+        };
         // coeff_f = 1 / LC(f)
         let factor_f = MultiPoly::from_terms(
             vec![Term::new(1.0 / lt_f.coeff, mono_f)],
@@ -46,7 +49,9 @@ impl GrobnerBasis {
         );
 
         // mono_g = lcm / LM(g)
-        let mono_g = lcm.div(&lt_g.monomial).unwrap();
+        let Some(mono_g) = lcm.div(&lt_g.monomial) else {
+            return MultiPoly::zero(f.num_vars, f.var_names.clone(), f.order);
+        };
         // coeff_g = 1 / LC(g)
         let factor_g = MultiPoly::from_terms(
             vec![Term::new(1.0 / lt_g.coeff, mono_g)],
@@ -103,8 +108,9 @@ impl GrobnerBasis {
             let fi = &g[i];
             let fj = &g[j];
 
-            let lm_i = fi.leading_monomial().unwrap();
-            let lm_j = fj.leading_monomial().unwrap();
+            let (Some(lm_i), Some(lm_j)) = (fi.leading_monomial(), fj.leading_monomial()) else {
+                continue;
+            };
 
             // First Buchberger Criterion (Gebauer-Möller):
             // If LCM(LM(fi), LM(fj)) == LM(fi) * LM(fj), then S(fi, fj) reduces to zero without division.
@@ -153,11 +159,15 @@ impl GrobnerBasis {
             if p.is_zero() {
                 continue;
             }
-            let lm_p = p.leading_monomial().unwrap();
+            let Some(lm_p) = p.leading_monomial() else {
+                continue;
+            };
             let mut redundant = false;
             for other in &basis {
                 if !std::ptr::eq(p, other) && !other.is_zero() {
-                    let lm_other = other.leading_monomial().unwrap();
+                    let Some(lm_other) = other.leading_monomial() else {
+                        continue;
+                    };
                     if lm_p != lm_other && lm_p.is_divisible_by(lm_other) {
                         redundant = true;
                         break;
@@ -187,9 +197,12 @@ impl GrobnerBasis {
 
         // Sort polynomials by leading term order
         reduced.sort_by(|a, b| {
-            let lm_a = a.leading_monomial().unwrap();
-            let lm_b = b.leading_monomial().unwrap();
-            lm_a.cmp_with_order(lm_b, order)
+            match (a.leading_monomial(), b.leading_monomial()) {
+                (Some(lm_a), Some(lm_b)) => lm_a.cmp_with_order(lm_b, order),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
         });
 
         Self {

@@ -354,14 +354,19 @@ impl MultiPoly {
         let mut p = self.clone();
 
         while !p.is_zero() {
-            let lt_p = p.leading_term().unwrap().clone();
+            let Some(lt_p_ref) = p.leading_term() else {
+                break;
+            };
+            let lt_p = lt_p_ref.clone();
             let mut division_occurred = false;
 
             for (i, fi) in divisors.iter().enumerate() {
                 if fi.is_zero() {
                     continue;
                 }
-                let lt_fi = fi.leading_term().unwrap();
+                let Some(lt_fi) = fi.leading_term() else {
+                    continue;
+                };
                 if let Some(mono_div) = lt_p.monomial.div(&lt_fi.monomial) {
                     let coeff_div = lt_p.coeff / lt_fi.coeff;
                     let factor = Self::from_terms(

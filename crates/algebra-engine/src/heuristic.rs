@@ -245,16 +245,21 @@ impl NeuralExpressionEmbedder {
         let mut accum = vec![0.0f32; dim];
         let mut node_count = 0usize;
 
-        // BFS traversal with depth tracking
-        let mut queue = std::collections::VecDeque::new();
-        let mut visited = std::collections::HashSet::new();
-        queue.push_back((root, 0usize));
-        visited.insert(root);
+        use smallvec::SmallVec;
 
-        while let Some((curr_id, depth)) = queue.pop_front() {
+        // Zero-heap-allocation BFS traversal with depth tracking using SmallVec stack
+        let mut queue: SmallVec<[(ExprId, usize); 64]> = SmallVec::new();
+        let mut visited: SmallVec<[ExprId; 64]> = SmallVec::new();
+        queue.push((root, 0usize));
+        visited.push(root);
+
+        let mut head = 0usize;
+        while head < queue.len() {
             if node_count >= 64 {
                 break; // Cap traversal depth/size
             }
+            let (curr_id, depth) = queue[head];
+            head += 1;
             node_count += 1;
 
             let node = graph.get(curr_id);
@@ -276,8 +281,9 @@ impl NeuralExpressionEmbedder {
 
             // Enqueue children
             for child in node.children() {
-                if visited.insert(child) {
-                    queue.push_back((child, depth + 1));
+                if !visited.contains(&child) && queue.len() < 64 {
+                    visited.push(child);
+                    queue.push((child, depth + 1));
                 }
             }
         }

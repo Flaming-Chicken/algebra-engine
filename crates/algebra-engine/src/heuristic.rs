@@ -60,8 +60,74 @@ pub struct QuantizedTransformerWeights {
 }
 
 impl QuantizedTransformerWeights {
-    /// Ingest from a SafeTensors binary byte buffer.
+    /// Ingest from a SafeTensors binary byte buffer using `spodeian-ml-utils`.
     pub fn from_safetensors_bytes(bytes: &[u8]) -> Result<Self, String> {
+        // First try central spodeian_ml_utils loader backed by Candle
+        if let Ok(loaded) = spodeian_ml_utils::LoadedModelWeights::from_bytes(bytes, &spodeian_ml_utils::candle_core::Device::Cpu) {
+            let emb_tensor = loaded
+                .get_tensor("embeddings")
+                .or_else(|_| loaded.get_tensor("token_embeddings"));
+
+            if let Ok(tensor) = emb_tensor {
+                let shape = tensor.dims();
+                let vocab_size = *shape.first().unwrap_or(&16);
+                let embed_dim = *shape.get(1).unwrap_or(&8);
+                let scale = 0.05f32;
+
+                let token_embeddings = if tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
+                    spodeian_ml_utils::LoadedModelWeights::dequantize_int8(tensor, scale)
+                        .map_err(|e| e.to_string())?
+                        .flatten_all()
+                        .map_err(|e| e.to_string())?
+                        .to_vec1::<f32>()
+                        .map_err(|e| e.to_string())?
+                } else {
+                    tensor
+                        .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
+                        .map_err(|e| e.to_string())?
+                        .flatten_all()
+                        .map_err(|e| e.to_string())?
+                        .to_vec1::<f32>()
+                        .map_err(|e| e.to_string())?
+                };
+
+                let projection_weights = if let Ok(p_tensor) = loaded.get_tensor("projection").or_else(|_| loaded.get_tensor("projection_weights")) {
+                    if p_tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
+                        spodeian_ml_utils::LoadedModelWeights::dequantize_int8(p_tensor, scale)
+                            .map_err(|e| e.to_string())?
+                            .flatten_all()
+                            .map_err(|e| e.to_string())?
+                            .to_vec1::<f32>()
+                            .map_err(|e| e.to_string())?
+                    } else {
+                        p_tensor
+                            .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
+                            .map_err(|e| e.to_string())?
+                            .flatten_all()
+                            .map_err(|e| e.to_string())?
+                            .to_vec1::<f32>()
+                            .map_err(|e| e.to_string())?
+                    }
+                } else {
+                    let mut id = vec![0.0f32; embed_dim * embed_dim];
+                    for i in 0..embed_dim {
+                        id[i * embed_dim + i] = 1.0;
+                    }
+                    id
+                };
+
+
+                return Ok(Self {
+                    vocab_size,
+                    embed_dim,
+                    token_embeddings,
+                    projection_weights,
+                    scale,
+                });
+            }
+        }
+
+        // Fallback for minimal synthetic buffers without Candle tensors
         if bytes.len() < 8 {
             return Err("SafeTensors buffer too short for header size".to_string());
         }
@@ -84,7 +150,6 @@ impl QuantizedTransformerWeights {
 
         let data_start = 8 + header_len;
 
-        // Extract scale from metadata if available
         let scale = header
             .get("__metadata__")
             .and_then(|m| m.get("scale"))
@@ -92,7 +157,6 @@ impl QuantizedTransformerWeights {
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(0.05);
 
-        // Parse token embeddings
         let emb_info = header
             .get("embeddings")
             .or_else(|| header.get("token_embeddings"))
@@ -103,7 +167,7 @@ impl QuantizedTransformerWeights {
             .and_then(|s| s.as_array())
             .ok_or_else(|| "Missing shape for embeddings".to_string())?;
 
-        let vocab_size = shape.get(0).and_then(|v| v.as_u64()).unwrap_or(16) as usize;
+        let vocab_size = shape.first().and_then(|v| v.as_u64()).unwrap_or(16) as usize;
         let embed_dim = shape.get(1).and_then(|v| v.as_u64()).unwrap_or(8) as usize;
 
         let offsets = emb_info
@@ -127,7 +191,6 @@ impl QuantizedTransformerWeights {
                 .collect()
         };
 
-        // Projection weights (embed_dim x embed_dim)
         let proj_info = header
             .get("projection")
             .or_else(|| header.get("projection_weights"));
@@ -152,7 +215,6 @@ impl QuantizedTransformerWeights {
                     .collect()
             }
         } else {
-            // Identity projection
             let mut id = vec![0.0f32; embed_dim * embed_dim];
             for i in 0..embed_dim {
                 id[i * embed_dim + i] = 1.0;
@@ -168,6 +230,7 @@ impl QuantizedTransformerWeights {
             scale,
         })
     }
+
 
     /// Calibrated compact 8-dimensional quantized representation for core AST symbol tokens.
     pub fn default_quantized_weights() -> Self {

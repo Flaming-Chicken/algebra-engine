@@ -62,6 +62,9 @@ spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens", version = 
 spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry", version = "^1.0.0" }
 spodeian-export = { path = "../spodeian-core/crates/spodeian-export", version = "^1.0.0" }
 spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils", version = "^1.0.0" }
+spodeian-ml-utils = { path = "../spodeian-core/crates/spodeian-ml-utils", version = "^0.1.0" }
+spodeian-lake = { path = "../spodeian-core/crates/spodeian-lake", version = "^0.1.0" }
+
 
 # Numerics & High-Precision CAS
 bnum = "0.13"

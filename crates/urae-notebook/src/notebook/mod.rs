@@ -750,8 +750,43 @@ impl NotebookState {
         None
     }
 
+    /// Enrich a SymbolInfoCard with AST tree depth, proof search depth, and neural embedding telemetry.
+    pub fn enrich_with_ast_and_neural_telemetry(card: &mut SymbolInfoCard) {
+        if card.ast_depth.is_some() && card.neural_embedding.is_some() {
+            return;
+        }
+        let formula = card
+            .formula_references
+            .first()
+            .cloned()
+            .unwrap_or_else(|| card.name.clone());
+        let clean = if let Some((_, rhs)) = formula.split_once('=') {
+            rhs.trim()
+        } else {
+            formula.trim()
+        };
+        let graph = urae::core::ExprGraph::new();
+        let parser = urae::core::parser::ExprParser::new(&graph);
+        if let Ok(id) = parser.parse(clean) {
+            let engine =
+                urae::engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
+                    urae::core::EngineConfig::default(),
+                );
+            let indicator = engine.analyze_ast_proof_depth(&graph, id);
+            card.ast_depth = Some(indicator.ast_depth);
+            card.proof_search_depth = Some(indicator.proof_search_depth);
+            card.neural_embedding = Some(indicator.neural_embedding);
+        }
+    }
+
     /// Retrieve detailed hover inspector card metadata for symbol or object `sym_name`.
     pub fn get_symbol_info_card(&self, sym_name: &str) -> Option<SymbolInfoCard> {
+        let mut card = self.get_symbol_info_card_raw(sym_name)?;
+        Self::enrich_with_ast_and_neural_telemetry(&mut card);
+        Some(card)
+    }
+
+    fn get_symbol_info_card_raw(&self, sym_name: &str) -> Option<SymbolInfoCard> {
         let clean_name = sym_name.trim();
         if clean_name.is_empty() {
             return None;
@@ -781,6 +816,9 @@ impl NotebookState {
                         "Transcendental".to_string(),
                         "Scalar".to_string(),
                     ],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "tau" | "τ" => {
@@ -805,6 +843,9 @@ impl NotebookState {
                         "Transcendental".to_string(),
                         "Scalar".to_string(),
                     ],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "e" => {
@@ -825,6 +866,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "i" => {
@@ -844,6 +888,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "gamma" | "γ" => {
@@ -862,6 +909,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "phi" | "φ" => {
@@ -880,6 +930,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "inf" | "infty" | "∞" => {
@@ -898,6 +951,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Extended Real".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "c" => {
@@ -917,6 +973,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "G" => {
@@ -935,6 +994,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "h" => {
@@ -953,6 +1015,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "hbar" | "ℏ" => {
@@ -973,6 +1038,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "k_B" | "kB" => {
@@ -991,6 +1059,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "N_A" | "NA" => {
@@ -1009,6 +1080,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "e_charge" | "q_e" => {
@@ -1027,6 +1101,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "m_e" | "me" => {
@@ -1045,6 +1122,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             _ => {}
@@ -1081,6 +1161,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "exp" | "ln" | "log" | "log10" | "log2" | "sqrt" | "cbrt" => {
@@ -1112,6 +1195,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "zeta" | "gamma_func" | "besselj" | "erf" | "erfc" => {
@@ -1138,6 +1224,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "diff" | "integrate" | "limit" | "series" | "sum" | "prod" => {
@@ -1167,6 +1256,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             "expand" | "factor" | "solve" | "simplify" | "evalf" | "subs" => {
@@ -1193,6 +1285,9 @@ impl NotebookState {
                     }),
                     computation_time_ms: None,
                     compound_tags: vec!["Constant".to_string(), "Scalar".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
             _ => {}
@@ -1250,6 +1345,9 @@ impl NotebookState {
                         object_kind: Some(kind),
                         computation_time_ms: Some(pl.eval_time_ms as f64),
                         compound_tags: vec!["Computed Result".to_string()],
+                        ast_depth: None,
+                        proof_search_depth: None,
+                        neural_embedding: None,
                     });
                 }
             }
@@ -1324,6 +1422,9 @@ impl NotebookState {
                     object_kind: Some(fn_kind),
                     computation_time_ms: Some(pl.eval_time_ms as f64),
                     compound_tags: vec!["Function".to_string()],
+                    ast_depth: None,
+                    proof_search_depth: None,
+                    neural_embedding: None,
                 });
             }
         }
@@ -1411,6 +1512,9 @@ impl NotebookState {
                 object_kind,
                 computation_time_ms: None,
                 compound_tags: meta.compound_tags(),
+                ast_depth: None,
+                proof_search_depth: None,
+                neural_embedding: None,
             });
         }
 

@@ -120,8 +120,10 @@ impl QuantizedTransformerWeights {
             emb_bytes.iter().map(|&b| (b as i8) as f32 * scale).collect()
         } else {
             emb_bytes
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap_or([0; 4])))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk))
                 .collect()
         };
 
@@ -143,8 +145,10 @@ impl QuantizedTransformerWeights {
                 p_bytes.iter().map(|&b| (b as i8) as f32 * scale).collect()
             } else {
                 p_bytes
-                    .chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap_or([0; 4])))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|chunk| f32::from_le_bytes(*chunk))
                     .collect()
             }
         } else {
@@ -567,4 +571,140 @@ impl HeuristicSearchEngine {
 
         out
     }
+
+    /// Compute rich AST metrics, neural expression embedding, and proof-search depth indicators.
+    pub fn analyze_ast_proof_depth(&self, graph: &ExprGraph, root: ExprId) -> AstProofDepthIndicator {
+        let ast_depth = compute_ast_depth(graph, root);
+        let ast_node_count = count_ast_nodes(graph, root);
+        let embedder = self.neural_embedder.as_ref().cloned().unwrap_or_default();
+        let neural_embedding = embedder.embed_expression(graph, root);
+        let candidate_weight = self.weight_candidate(graph, root, None);
+
+        // Run bounded opportunistic proof search to observe depth reached
+        let budget = &self.config.budget;
+        let max_depth_budget = 16usize;
+        let mut queue = BinaryHeap::new();
+        let mut visited = std::collections::HashSet::new();
+        queue.push(SearchCandidate {
+            expr_id: root,
+            priority_weight: candidate_weight,
+            depth: 0,
+            step_description: "Root".to_string(),
+        });
+        visited.insert(root);
+
+        let mut max_depth_reached = 0usize;
+        let mut is_deterministic = false;
+        let mut best_candidate = root;
+        let (soft_cap, hard_cap) = budget.egraph_nodes;
+        let mut iterations = 0usize;
+
+        while let Some(current) = queue.pop() {
+            iterations += 1;
+            if current.depth > max_depth_reached {
+                max_depth_reached = current.depth;
+            }
+            if iterations >= hard_cap.min(64) {
+                break;
+            }
+            let neighbors = self.expand_rewrites(graph, current.expr_id);
+            for n in neighbors {
+                if visited.insert(n) {
+                    let weight = self.weight_candidate(graph, n, Some(root));
+                    if weight > candidate_weight {
+                        best_candidate = n;
+                    }
+                    if current.depth < max_depth_budget && iterations < soft_cap.min(32) {
+                        queue.push(SearchCandidate {
+                            expr_id: n,
+                            priority_weight: weight,
+                            depth: current.depth + 1,
+                            step_description: "Rewrite".to_string(),
+                        });
+                    }
+                }
+            }
+            if best_candidate != root {
+                let diff = graph.sub(root, best_candidate);
+                let diff_node = graph.get(diff);
+                if let ExprKind::Number(Number::Integer(0)) = diff_node.kind {
+                    is_deterministic = true;
+                    break;
+                }
+            }
+        }
+
+        let certification_status = if is_deterministic {
+            "Deterministic (Identity Certified)".to_string()
+        } else {
+            let verif = self.verify_candidate(graph, best_candidate, root, 1e-10);
+            if verif.is_deterministic() && *verif.as_ref() {
+                is_deterministic = true;
+                "Deterministic Proof Verified".to_string()
+            } else {
+                format!(
+                    "Probabilistic (p_err <= {:.2e}, {} samples)",
+                    verif.error_probability(),
+                    verif.sample_count()
+                )
+            }
+        };
+
+        AstProofDepthIndicator {
+            ast_depth,
+            ast_node_count,
+            proof_search_depth: max_depth_reached,
+            max_depth_budget,
+            is_deterministic,
+            candidate_weight,
+            certification_status,
+            neural_embedding,
+        }
+    }
+}
+
+/// Diagnostic indicators and metrics for an expression AST and its heuristic proof search.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AstProofDepthIndicator {
+    pub ast_depth: usize,
+    pub ast_node_count: usize,
+    pub proof_search_depth: usize,
+    pub max_depth_budget: usize,
+    pub is_deterministic: bool,
+    pub candidate_weight: f64,
+    pub certification_status: String,
+    pub neural_embedding: Vec<f32>,
+}
+
+/// Compute maximum tree depth of an expression AST.
+pub fn compute_ast_depth(graph: &ExprGraph, root: ExprId) -> usize {
+    let node = graph.get(root);
+    let children = node.children();
+    if children.is_empty() {
+        1
+    } else {
+        1 + children
+            .into_iter()
+            .map(|c| compute_ast_depth(graph, c))
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// Compute total node count of an expression AST DAG.
+pub fn count_ast_nodes(graph: &ExprGraph, root: ExprId) -> usize {
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    let mut count = 0;
+    while let Some(curr) = stack.pop() {
+        if visited.insert(curr) {
+            count += 1;
+            let node = graph.get(curr);
+            for child in node.children() {
+                stack.push(child);
+            }
+        }
+    }
+    count
 }

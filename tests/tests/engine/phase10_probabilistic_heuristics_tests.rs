@@ -311,7 +311,7 @@ fn test_parallel_verification_and_weighting() {
     // Test parallel equivalence verification
     let solution = ProbabilisticVerifier::verify_equivalence_parallel(&graph, lhs, rhs, 1e-12);
     assert!(solution.is_probabilistic(), "Expected probabilistic solution");
-    assert_eq!(*solution.as_ref(), true);
+    assert!(*solution.as_ref());
     assert!(solution.confidence() > 0.99999);
 
     // Test parallel candidate weighting

@@ -48,6 +48,8 @@ pub struct UraeJsonRequest {
     pub export_proof: bool,
     #[serde(default)]
     pub ai_explain: bool,
+    #[serde(default)]
+    pub embed_neural: bool,
 
     /// Optional AI configuration if ai_explain is requested
     #[serde(default)]
@@ -73,6 +75,10 @@ pub struct UraeJsonResponse {
     pub lean4_proof: Option<String>,
     pub coq_proof: Option<String>,
     pub ai_explanation: Option<String>,
+    #[serde(default)]
+    pub ast_search_depth: Option<usize>,
+    #[serde(default)]
+    pub neural_embedding: Option<Vec<f32>>,
     pub error_msg: Option<String>,
 }
 
@@ -138,6 +144,8 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
                     lean4_proof: None,
                     coq_proof: None,
                     ai_explanation: None,
+                    ast_search_depth: None,
+                    neural_embedding: None,
                     error_msg: None,
                 };
             }
@@ -159,6 +167,8 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
                     lean4_proof: None,
                     coq_proof: None,
                     ai_explanation: None,
+                    ast_search_depth: None,
+                    neural_embedding: None,
                     error_msg: Some(err),
                 };
             }
@@ -187,6 +197,8 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
                 lean4_proof: None,
                 coq_proof: None,
                 ai_explanation: None,
+                ast_search_depth: None,
+                neural_embedding: None,
                 error_msg: Some(err.to_string()),
             };
         }
@@ -293,6 +305,17 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         None
     };
 
+    // Neural Expression Embedding & AST Proof Search Depth
+    let (ast_search_depth, neural_embedding) = if req.export_proof || req.simplify || req.embed_neural {
+        let engine = algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
+            algebra_core::EngineConfig::default(),
+        );
+        let indicator = engine.analyze_ast_proof_depth(graph, expr_id);
+        (Some(indicator.proof_search_depth), Some(indicator.neural_embedding))
+    } else {
+        (None, None)
+    };
+
     UraeJsonResponse {
         success: true,
         input_raw: raw_input.to_string(),
@@ -310,6 +333,8 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         lean4_proof,
         coq_proof,
         ai_explanation,
+        ast_search_depth,
+        neural_embedding,
         error_msg: None,
     }
 }
@@ -341,6 +366,7 @@ pub fn process_json_request(graph: &ExprGraph, json_req_str: &str) -> String {
                 generate_code: false,
                 export_proof: false,
                 ai_explain: false,
+                embed_neural: false,
                 ai_config: None,
             };
             let resp = process_request(graph, &req);

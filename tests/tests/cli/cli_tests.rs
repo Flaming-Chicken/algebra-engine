@@ -56,3 +56,57 @@ fn test_json_request_response_api() {
     assert!(resp_cmd.success);
     assert!(resp_cmd.output_unicode.contains("3"));
 }
+
+#[test]
+fn test_cli_neural_embedding() {
+    let graph = ExprGraph::new();
+    let formatter = LatexFormatter;
+
+    let res = process_input(&graph, &formatter, "embed x^2 + 2*x + 1").unwrap();
+    assert!(res.contains("Neural Expression Embedding"));
+    assert!(res.contains("AST Structure"));
+    assert!(res.contains("Vector Preview"));
+}
+
+#[test]
+fn test_cli_semantic_similarity() {
+    let graph = ExprGraph::new();
+    let formatter = LatexFormatter;
+
+    let res = process_input(&graph, &formatter, "similarity x^2 - 1, (x - 1)*(x + 1)").unwrap();
+    assert!(res.contains("Neural Semantic Equivalence Score"));
+    assert!(res.contains("Cosine Similarity"));
+}
+
+#[test]
+fn test_cli_proof_search_depth() {
+    let graph = ExprGraph::new();
+    let formatter = LatexFormatter;
+
+    let res = process_input(&graph, &formatter, "proof_search x + 0").unwrap();
+    assert!(res.contains("AST Proof-Search Depth Analysis"));
+    assert!(res.contains("AST Tree Depth"));
+    assert!(res.contains("Proof Search Depth"));
+}
+
+#[test]
+fn test_json_api_neural_embedding() {
+    use algebra_core::ExprGraph;
+    use urae_cli::{UraeJsonResponse, process_json_request};
+
+    let graph = ExprGraph::new();
+    let json_req = r#"{
+        "input": "x^2 + 5",
+        "embed_neural": true,
+        "export_proof": true
+    }"#;
+
+    let json_resp = process_json_request(&graph, json_req);
+    let resp: UraeJsonResponse = serde_json::from_str(&json_resp).expect("Deserialization failed");
+
+    assert!(resp.success);
+    assert!(resp.neural_embedding.is_some());
+    assert!(resp.ast_search_depth.is_some());
+    let emb = resp.neural_embedding.unwrap();
+    assert_eq!(emb.len(), 8);
+}

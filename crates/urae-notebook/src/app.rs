@@ -7113,6 +7113,40 @@ pub fn render_symbol_info_card_content(
         );
     }
 
+    if info.ast_depth.is_some() || info.neural_embedding.is_some() {
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if let Some(d) = info.ast_depth {
+                ui.label(
+                    egui::RichText::new(format!("AST Depth: {}", d))
+                        .size(11.0)
+                        .color(palette.accent_primary)
+                        .strong(),
+                );
+            }
+            if let Some(pd) = info.proof_search_depth {
+                ui.label(
+                    egui::RichText::new(format!("Proof-Search Depth: {}", pd))
+                        .size(11.0)
+                        .color(palette.text_success)
+                        .strong(),
+                );
+            }
+        });
+        if let Some(emb) = &info.neural_embedding {
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(format!("Neural Embedding ({}d):", emb.len()));
+                let preview = emb
+                    .iter()
+                    .take(4)
+                    .map(|v| format!("{:+.3}", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ui.monospace(format!("[{}, ...]", preview));
+            });
+        }
+    }
+
     if !info.dependent_lines.is_empty() {
         ui.horizontal_wrapped(|ui| {
             ui.weak("Used in:");

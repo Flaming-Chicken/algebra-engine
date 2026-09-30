@@ -269,9 +269,16 @@ pub struct NeuralExpressionEmbedder {
 
 impl Default for NeuralExpressionEmbedder {
     fn default() -> Self {
-        Self::new(QuantizedTransformerWeights::default_quantized_weights())
+        // Load production contrastive AST embeddings trained via spodeian-ml
+        const EMBEDDED_MODEL: &[u8] = include_bytes!("../data/algebra_expression_embedder.safetensors");
+        if let Ok(weights) = QuantizedTransformerWeights::from_safetensors_bytes(EMBEDDED_MODEL) {
+            Self::new(weights)
+        } else {
+            Self::new(QuantizedTransformerWeights::default_quantized_weights())
+        }
     }
 }
+
 
 impl NeuralExpressionEmbedder {
     pub fn new(weights: QuantizedTransformerWeights) -> Self {

@@ -58,10 +58,10 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 egui_plot = "0.37"
 winit = { version = "0.30", default-features = false }
 android-activity = { version = "0.6", default-features = false, features = ["native-activity"] }
-spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens" }
-spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry" }
-spodeian-export = { path = "../spodeian-core/crates/spodeian-export" }
-spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils" }
+spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens", version = "^1.0.0" }
+spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry", version = "^1.0.0" }
+spodeian-export = { path = "../spodeian-core/crates/spodeian-export", version = "^1.0.0" }
+spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils", version = "^1.0.0" }
 
 # Numerics & High-Precision CAS
 bnum = "0.13"

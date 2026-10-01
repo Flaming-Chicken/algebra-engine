@@ -171,6 +171,78 @@ impl SmtExpr {
             Self::BvMul(a, b) => format!("(bvmul {} {})", a.to_smtlib2(), b.to_smtlib2()),
         }
     }
+
+    /// Converts an expression node from `ExprGraph` directly into a typed `SmtExpr`.
+    pub fn from_graph(
+        graph: &algebra_core::ExprGraph,
+        expr: algebra_core::ExprId,
+    ) -> Result<Self, algebra_core::error::AlgebraError> {
+        let node = graph.get(expr);
+        match &node.kind {
+            algebra_core::ExprKind::Number(num) => match num {
+                algebra_core::Number::Integer(i) => Ok(Self::Int(*i)),
+                algebra_core::Number::Rational(n, d) => {
+                    Ok(Self::Div(Box::new(Self::Real(*n as f64)), Box::new(Self::Real(*d as f64))))
+                }
+                algebra_core::Number::Float(f) => Ok(Self::Real(f64::from_bits(*f))),
+                _ => Ok(Self::Real(0.0)),
+            },
+            algebra_core::ExprKind::Symbol(sym) => {
+                let name = graph.symbols.resolve(*sym).unwrap_or_else(|| "x".to_string());
+                Ok(Self::Var(name))
+            }
+            algebra_core::ExprKind::Add(terms) => {
+                let mut smt_terms = Vec::with_capacity(terms.len());
+                for &t in terms {
+                    smt_terms.push(Self::from_graph(graph, t)?);
+                }
+                Ok(Self::Add(smt_terms))
+            }
+            algebra_core::ExprKind::Sub(l, r) => {
+                let left = Self::from_graph(graph, *l)?;
+                let right = Self::from_graph(graph, *r)?;
+                Ok(Self::Sub(Box::new(left), Box::new(right)))
+            }
+            algebra_core::ExprKind::Mul(factors) => {
+                let mut smt_factors = Vec::with_capacity(factors.len());
+                for &f in factors {
+                    smt_factors.push(Self::from_graph(graph, f)?);
+                }
+                Ok(Self::Mul(smt_factors))
+            }
+            algebra_core::ExprKind::Div(num, den) => {
+                let left = Self::from_graph(graph, *num)?;
+                let right = Self::from_graph(graph, *den)?;
+                Ok(Self::Div(Box::new(left), Box::new(right)))
+            }
+            algebra_core::ExprKind::Neg(inner) => {
+                let inside = Self::from_graph(graph, *inner)?;
+                Ok(Self::Neg(Box::new(inside)))
+            }
+            algebra_core::ExprKind::Pow(base, exp) => {
+                let b = Self::from_graph(graph, *base)?;
+                let e = Self::from_graph(graph, *exp)?;
+                Ok(Self::Pow(Box::new(b), Box::new(e)))
+            }
+            algebra_core::ExprKind::Relational { op, lhs, rhs } => {
+                let left = Box::new(Self::from_graph(graph, *lhs)?);
+                let right = Box::new(Self::from_graph(graph, *rhs)?);
+                match op {
+                    algebra_core::RelOp::Equal => Ok(Self::Eq(left, right)),
+                    algebra_core::RelOp::LessThan => Ok(Self::Lt(left, right)),
+                    algebra_core::RelOp::LessEqual => Ok(Self::Le(left, right)),
+                    algebra_core::RelOp::GreaterThan => Ok(Self::Gt(left, right)),
+                    algebra_core::RelOp::GreaterEqual => Ok(Self::Ge(left, right)),
+                    _ => Err(algebra_core::error::AlgebraError::EvaluationError(
+                        format!("Unsupported SMT relational operator: {:?}", op),
+                    )),
+                }
+            }
+            _ => Err(algebra_core::error::AlgebraError::EvaluationError(
+                format!("Unsupported ExprKind for SMT translation: {:?}", node.kind),
+            )),
+        }
+    }
 }
 
 /// SMT-LIB2 Problem Container.

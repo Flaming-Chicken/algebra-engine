@@ -9,6 +9,8 @@
 //! - **Reduced Gröbner Bases**: Guarantees uniqueness, monic leading terms, and complete reduction of tail monomials.
 
 use super::multivariate::{MonomialOrder, MultiPoly, Term};
+use algebra_core::error::AlgebraResult;
+use algebra_core::{ExprGraph, ExprId};
 
 /// Structure representing a Gröbner Basis for an ideal $I = \langle f_1, \dots, f_m \rangle$.
 #[derive(Debug, Clone, PartialEq)]
@@ -211,5 +213,33 @@ impl GrobnerBasis {
             var_names,
             order,
         }
+    }
+
+    /// Computes a Gröbner Basis directly from generator expressions in the `ExprGraph` arena.
+    pub fn from_exprs(
+        graph: &ExprGraph,
+        generators: &[ExprId],
+        var_names: &[String],
+        order: MonomialOrder,
+    ) -> AlgebraResult<Self> {
+        let mut polys = Vec::with_capacity(generators.len());
+        for &g in generators {
+            polys.push(MultiPoly::from_expr(graph, g, var_names, order)?);
+        }
+        Ok(Self::buchberger(&polys))
+    }
+
+    /// Reduces an expression modulo the Gröbner basis ideal directly within the `ExprGraph` arena.
+    pub fn reduce_expr(&self, graph: &ExprGraph, expr: ExprId) -> AlgebraResult<ExprId> {
+        let poly = MultiPoly::from_expr(graph, expr, &self.var_names, self.order)?;
+        let (_, rem) = poly.div_rem(&self.polynomials);
+        Ok(rem.to_expr(graph))
+    }
+
+    /// Checks ideal membership: returns true if the expression reduces to 0 modulo the ideal.
+    pub fn contains_expr(&self, graph: &ExprGraph, expr: ExprId) -> AlgebraResult<bool> {
+        let poly = MultiPoly::from_expr(graph, expr, &self.var_names, self.order)?;
+        let (_, rem) = poly.div_rem(&self.polynomials);
+        Ok(rem.is_zero())
     }
 }

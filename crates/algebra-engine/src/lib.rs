@@ -101,7 +101,10 @@ pub use executor::{ExecutionContext, OperationExecutor, OperationResult};
 pub use geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer};
 pub use geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder};
 pub use gpu::{GpuKernelDescriptor, WgslShaderGenerator};
-pub use heuristic::{HeuristicSearchEngine, SearchCandidate};
+pub use heuristic::{
+    CompositeSearchHeuristic, HeuristicSearchEngine, NeuralExpressionEmbedder,
+    SchwartzZippelHeuristic, SearchCandidate, SearchHeuristic, TreeSizeHeuristic,
+};
 pub use html_export::StandaloneHtmlExporter;
 pub use hyperop::{ackermann, hyperoperation, knuth_up_arrow, pentation, super_log, tetration};
 pub use iga::{CoxDeBoor, IgaStiffnessMatrix, MultiPatchBRep, NurbsPatchND, WeightedControlPoint};

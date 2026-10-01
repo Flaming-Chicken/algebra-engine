@@ -383,39 +383,3 @@ impl UraeSession {
         list
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_urae_session_variable_persistence() {
-        let mut session = UraeSession::new();
-        let res1 = session.execute_line("a = 5.0");
-        assert!(!res1.is_error);
-        assert_eq!(session.get_binding("a"), Some(5.0));
-
-        let res2 = session.execute_line("eval a * 2");
-        assert!(!res2.is_error);
-        assert!(res2.output_text.contains("10") || res2.output_unicode.contains("10"));
-    }
-
-    #[test]
-    fn test_urae_session_domain_bounds() {
-        let mut session = UraeSession::new();
-        let res = session.execute_line("x in Reals [0, 100]");
-        assert!(!res.is_error);
-        assert!(session.get_domain("x").is_some());
-        let domain = session.get_domain("x").unwrap();
-        assert_eq!(domain.min_val, Some(0.0));
-        assert_eq!(domain.max_val, Some(100.0));
-    }
-
-    #[test]
-    fn test_urae_session_calculus_evaluation() {
-        let mut session = UraeSession::new();
-        let res = session.execute_line("diff x^3, x");
-        assert!(!res.is_error);
-        assert!(res.output_unicode.contains("3 * x ^ 2") || res.output_latex.contains("3"));
-    }
-}

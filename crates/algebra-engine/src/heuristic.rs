@@ -385,9 +385,107 @@ impl NeuralExpressionEmbedder {
     }
 }
 
+/// Pluggable heuristic evaluator guiding algebraic expression search and simplification.
+pub trait SearchHeuristic: Send + Sync {
+    /// Evaluate heuristic priority / fitness score for candidate expression in `graph`,
+    /// optionally evaluated relative to a target expression `target_id`.
+    fn evaluate(&self, graph: &ExprGraph, candidate_id: ExprId, target_id: Option<ExprId>) -> f64;
+
+    /// Descriptive name of the search heuristic.
+    fn name(&self) -> &'static str;
+}
+
+/// Syntactic complexity minimization heuristic (favors smaller node counts and lower tree depth).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TreeSizeHeuristic;
+
+impl SearchHeuristic for TreeSizeHeuristic {
+    fn evaluate(&self, graph: &ExprGraph, candidate_id: ExprId, _target_id: Option<ExprId>) -> f64 {
+        let nodes = count_ast_nodes(graph, candidate_id) as f64;
+        let depth = compute_ast_depth(graph, candidate_id) as f64;
+        100.0 / (1.0 + nodes + 0.2 * depth)
+    }
+
+    fn name(&self) -> &'static str {
+        "TreeSizeHeuristic"
+    }
+}
+
+/// Schwartz-Zippel numerical equivalence probability heuristic.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SchwartzZippelHeuristic;
+
+impl SearchHeuristic for SchwartzZippelHeuristic {
+    fn evaluate(&self, graph: &ExprGraph, candidate_id: ExprId, target_id: Option<ExprId>) -> f64 {
+        ProbabilisticVerifier::compute_candidate_heuristic_weight(graph, candidate_id, target_id)
+    }
+
+    fn name(&self) -> &'static str {
+        "SchwartzZippelHeuristic"
+    }
+}
+
+impl SearchHeuristic for NeuralExpressionEmbedder {
+    fn evaluate(&self, graph: &ExprGraph, candidate_id: ExprId, target_id: Option<ExprId>) -> f64 {
+        if let Some(target) = target_id {
+            let sim = self.score_similarity(graph, candidate_id, target);
+            (1.0 + sim).max(0.0)
+        } else {
+            let emb = self.embed_expression(graph, candidate_id);
+            let norm_sq: f32 = emb.iter().map(|&x| x * x).sum();
+            norm_sq as f64
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "NeuralExpressionEmbedder"
+    }
+}
+
+/// Weighted composite combination of multiple heuristics.
+pub struct CompositeSearchHeuristic {
+    pub components: Vec<(Box<dyn SearchHeuristic>, f64)>,
+}
+
+impl Default for CompositeSearchHeuristic {
+    fn default() -> Self {
+        Self::default_composite()
+    }
+}
+
+impl CompositeSearchHeuristic {
+    pub fn new(components: Vec<(Box<dyn SearchHeuristic>, f64)>) -> Self {
+        Self { components }
+    }
+
+    pub fn default_composite() -> Self {
+        Self {
+            components: vec![
+                (Box::new(SchwartzZippelHeuristic), 1.0),
+                (Box::new(TreeSizeHeuristic), 0.2),
+            ],
+        }
+    }
+}
+
+impl SearchHeuristic for CompositeSearchHeuristic {
+    fn evaluate(&self, graph: &ExprGraph, candidate_id: ExprId, target_id: Option<ExprId>) -> f64 {
+        let mut total = 0.0;
+        for (h, weight) in &self.components {
+            total += h.evaluate(graph, candidate_id, target_id) * weight;
+        }
+        total
+    }
+
+    fn name(&self) -> &'static str {
+        "CompositeSearchHeuristic"
+    }
+}
+
 /// Multi-tier heuristic search and certification engine.
 pub struct HeuristicSearchEngine {
     pub config: EngineConfig,
+    pub heuristic: Box<dyn SearchHeuristic>,
     pub neural_embedder: Option<NeuralExpressionEmbedder>,
 }
 
@@ -402,15 +500,28 @@ impl HeuristicSearchEngine {
     pub fn new(config: EngineConfig) -> Self {
         Self {
             config,
+            heuristic: Box::new(SchwartzZippelHeuristic),
             neural_embedder: None,
         }
     }
 
+    /// Attach a custom pluggable search heuristic.
+    pub fn with_heuristic(mut self, heuristic: Box<dyn SearchHeuristic>) -> Self {
+        self.heuristic = heuristic;
+        self
+    }
+
     /// Create a new heuristic search engine with calibrated neural embedder active by default.
     pub fn with_default_neural_guidance(config: EngineConfig) -> Self {
+        let embedder = NeuralExpressionEmbedder::default();
         Self {
             config,
-            neural_embedder: Some(NeuralExpressionEmbedder::default()),
+            heuristic: Box::new(CompositeSearchHeuristic::new(vec![
+                (Box::new(SchwartzZippelHeuristic), 1.0),
+                (Box::new(TreeSizeHeuristic), 0.2),
+                (Box::new(embedder.clone()), 0.5),
+            ])),
+            neural_embedder: Some(embedder),
         }
     }
 
@@ -421,15 +532,14 @@ impl HeuristicSearchEngine {
     }
 
     /// Tier 1: Fast heuristic weighting of a candidate search branch.
-    /// Combines $O(1)$ Schwartz-Zippel fingerprinting with neural transformer embeddings.
+    /// Combines active `SearchHeuristic` with neural transformer embeddings.
     pub fn weight_candidate(
         &self,
         graph: &ExprGraph,
         candidate_id: ExprId,
         target_id: Option<ExprId>,
     ) -> f64 {
-        let base_weight =
-            ProbabilisticVerifier::compute_candidate_heuristic_weight(graph, candidate_id, target_id);
+        let base_weight = self.heuristic.evaluate(graph, candidate_id, target_id);
 
         if let (Some(embedder), Some(target)) = (&self.neural_embedder, target_id) {
             let sim = embedder.score_similarity(graph, candidate_id, target);

@@ -21,8 +21,8 @@ version = "0.3.1"
 authors = ["Liam <spodeian@proton.me>"]
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
-repository = "https://github.com/Spodeian/algebra-engine"
-homepage = "https://github.com/Spodeian/algebra-engine"
+repository = "https://github.com/Flaming-Chicken/algebra-engine"
+homepage = "https://github.com/Flaming-Chicken/algebra-engine"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

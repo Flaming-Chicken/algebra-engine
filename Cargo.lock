@@ -4631,6 +4631,8 @@ name = "spodeian-telemetry"
 version = "1.0.0"
 dependencies = [
  "console_error_panic_hook",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "tracing-web",

@@ -187,11 +187,7 @@ pub fn run_gui() -> Result<(), eframe::Error> {
     } else {
         "info"
     };
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .try_init();
+    spodeian_telemetry::init_telemetry(default_filter);
 
     log_debug("Configuring eframe::NativeOptions (inner_size: 1100x750, min: 600x400)...");
     let options = eframe::NativeOptions {

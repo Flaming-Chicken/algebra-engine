@@ -1,10 +1,9 @@
-//! Rayon-powered data parallel operations on Expression DAGs.
+//! Data-parallel operations on Expression DAGs powered by `spodeian-parallel`.
 
 use crate::expr::ExprNode;
 use crate::graph::ExprGraph;
 use crate::id::ExprId;
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
+use spodeian_parallel::prelude::*;
 
 impl ExprGraph {
     /// Parallel search for all nodes matching a predicate in the graph.
@@ -13,35 +12,18 @@ impl ExprGraph {
         F: Fn(&ExprNode) -> bool + Sync + Send,
     {
         let len = self.len();
-        #[cfg(target_arch = "wasm32")]
-        {
-            (0..len)
-                .filter_map(|i| {
-                    let id = ExprId::new(i as u32);
-                    let node = self.get(id);
-                    if predicate(&node) {
-                        Some((id, node))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            (0..len)
-                .into_par_iter()
-                .filter_map(|i| {
-                    let id = ExprId::new(i as u32);
-                    let node = self.get(id);
-                    if predicate(&node) {
-                        Some((id, node))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
+        (0..len)
+            .into_par_iter()
+            .filter_map(|i| {
+                let id = ExprId::new(i as u32);
+                let node = self.get(id);
+                if predicate(&node) {
+                    Some((id, node))
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Parallel mapping over child nodes of an expression.
@@ -52,14 +34,7 @@ impl ExprGraph {
         let node = self.get(id);
         let children = node.children();
         let children_vec: Vec<ExprId> = children.into_iter().collect();
-        #[cfg(target_arch = "wasm32")]
-        {
-            children_vec.into_iter().map(map_fn).collect()
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            children_vec.into_par_iter().map(map_fn).collect()
-        }
+        children_vec.into_par_iter().map(map_fn).collect()
     }
 
     /// Parallel check if any subtree of an expression matches a predicate.
@@ -74,17 +49,9 @@ impl ExprGraph {
 
         let children = root_node.children();
         let children_vec: Vec<ExprId> = children.into_iter().collect();
-        #[cfg(target_arch = "wasm32")]
-        {
-            children_vec
-                .into_iter()
-                .any(|child_id| self.contains_matching(child_id, predicate))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            children_vec
-                .into_par_iter()
-                .any(|child_id| self.contains_matching(child_id, predicate))
-        }
+        children_vec
+            .into_par_iter()
+            .any(|child_id| self.contains_matching(child_id, predicate))
     }
 }
+

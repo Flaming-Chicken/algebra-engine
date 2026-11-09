@@ -3,8 +3,7 @@
 //! Symbolic linear algebra, non-commutative operations, matrix decompositions (LU, QR, Cholesky),
 //! Lie algebra Cartan matrices, and Pauli/Gell-Mann generator matrices for the Universal Rust Algebra Engine (URAE).
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
+use spodeian_parallel::prelude::*;
 
 use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId};
 
@@ -176,7 +175,6 @@ impl SymbolicMatrix {
 
         let total_elems = self.rows * other.cols;
 
-        #[cfg(not(target_arch = "wasm32"))]
         let result_elements: Vec<ExprId> = if total_elems >= 4 {
             (0..self.rows)
                 .into_par_iter()
@@ -194,24 +192,6 @@ impl SymbolicMatrix {
                 })
                 .collect()
         } else {
-            let mut elems = Vec::with_capacity(total_elems);
-            for r in 0..self.rows {
-                for c in 0..other.cols {
-                    let terms: Vec<ExprId> = (0..self.cols)
-                        .map(|k| {
-                            let a = self.get(r, k);
-                            let b = other.get(k, c);
-                            graph.mul([a, b])
-                        })
-                        .collect();
-                    elems.push(graph.add(terms));
-                }
-            }
-            elems
-        };
-
-        #[cfg(target_arch = "wasm32")]
-        let result_elements: Vec<ExprId> = {
             let mut elems = Vec::with_capacity(total_elems);
             for r in 0..self.rows {
                 for c in 0..other.cols {

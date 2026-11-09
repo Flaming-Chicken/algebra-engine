@@ -73,6 +73,8 @@ parking_lot = "0.12"
 smallvec = { version = "1.13", features = ["serde"] }
 ahash = { version = "0.8", features = ["serde"] }
 mimalloc = "0.1"
+spodeian-parallel = { path = "../spodeian-core/crates/spodeian-parallel" }
+spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry" }
 
 # Serialization & formatters
 serde = { version = "1.0", features = ["derive"] }

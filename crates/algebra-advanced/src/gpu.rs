@@ -3,8 +3,7 @@
 //! SIMD-vectorized operations and GPU compute shader offloading abstraction for
 //! large-scale polynomial multiplication, dense matrix blocks, and massive tensor contractions.
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
+use spodeian_parallel::prelude::*;
 
 use algebra_core::{AlgebraError, AlgebraResult, ExprGraph};
 use algebra_engine::matrix::SymbolicMatrix;
@@ -25,15 +24,7 @@ impl SimdPolyVector {
         let max_len = self.coeffs.len().max(other.coeffs.len());
         let mut result = vec![0i64; max_len];
 
-        #[cfg(not(target_arch = "wasm32"))]
         result.par_iter_mut().enumerate().for_each(|(idx, out)| {
-            let a = self.coeffs.get(idx).copied().unwrap_or(0);
-            let b = other.coeffs.get(idx).copied().unwrap_or(0);
-            *out = a.wrapping_add(b);
-        });
-
-        #[cfg(target_arch = "wasm32")]
-        result.iter_mut().enumerate().for_each(|(idx, out)| {
             let a = self.coeffs.get(idx).copied().unwrap_or(0);
             let b = other.coeffs.get(idx).copied().unwrap_or(0);
             *out = a.wrapping_add(b);
@@ -51,24 +42,7 @@ impl SimdPolyVector {
         let res_len = self.coeffs.len() + other.coeffs.len() - 1;
         let mut result = vec![0i64; res_len];
 
-        #[cfg(not(target_arch = "wasm32"))]
         result.par_iter_mut().enumerate().for_each(|(k, out)| {
-            let mut sum = 0i64;
-            let start = if k >= other.coeffs.len() {
-                k + 1 - other.coeffs.len()
-            } else {
-                0
-            };
-            let end = (k + 1).min(self.coeffs.len());
-            for i in start..end {
-                let j = k - i;
-                sum = sum.wrapping_add(self.coeffs[i].wrapping_mul(other.coeffs[j]));
-            }
-            *out = sum;
-        });
-
-        #[cfg(target_arch = "wasm32")]
-        result.iter_mut().enumerate().for_each(|(k, out)| {
             let mut sum = 0i64;
             let start = if k >= other.coeffs.len() {
                 k + 1 - other.coeffs.len()
@@ -86,6 +60,7 @@ impl SimdPolyVector {
         Self { coeffs: result }
     }
 }
+
 
 /// Compute Shader / GPU Execution Kernel Abstraction.
 #[derive(Debug, Clone, Default)]

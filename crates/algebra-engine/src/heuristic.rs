@@ -265,6 +265,7 @@ impl QuantizedTransformerWeights {
 #[derive(Debug, Clone)]
 pub struct NeuralExpressionEmbedder {
     pub weights: QuantizedTransformerWeights,
+    pub evaluator: spodeian_ml_utils::ast::MathAstEvaluator,
 }
 
 impl Default for NeuralExpressionEmbedder {
@@ -282,13 +283,20 @@ impl Default for NeuralExpressionEmbedder {
 
 impl NeuralExpressionEmbedder {
     pub fn new(weights: QuantizedTransformerWeights) -> Self {
-        Self { weights }
+        let mut evaluator = spodeian_ml_utils::ast::MathAstEvaluator::default_with_dim(
+            weights.embed_dim,
+            weights.vocab_size,
+        );
+        if weights.token_embeddings.len() >= weights.vocab_size * weights.embed_dim {
+            evaluator.op_embeddings = weights.token_embeddings.clone();
+        }
+        Self { weights, evaluator }
     }
 
     /// Ingest weights from SafeTensors binary bytes.
     pub fn from_safetensors(bytes: &[u8]) -> Result<Self, String> {
         let weights = QuantizedTransformerWeights::from_safetensors_bytes(bytes)?;
-        Ok(Self { weights })
+        Ok(Self::new(weights))
     }
 
     /// Map expression node to symbolic token ID.
@@ -313,61 +321,84 @@ impl NeuralExpressionEmbedder {
         }
     }
 
-    /// Compute continuous semantic vector embedding for an expression AST DAG.
+    /// Compute continuous semantic vector embedding for an expression AST DAG
+    /// using `spodeian_ml_utils::ast::MathAstEvaluator`.
     pub fn embed_expression(&self, graph: &ExprGraph, root: ExprId) -> Vec<f32> {
-        let dim = self.weights.embed_dim;
-        let mut accum = vec![0.0f32; dim];
-        let mut node_count = 0usize;
-
         use smallvec::SmallVec;
+        use spodeian_ml_utils::ast::{AstNodeKind, CanonicalAstNode};
 
-        // Zero-heap-allocation BFS traversal with depth tracking using SmallVec stack
+        let mut nodes: Vec<CanonicalAstNode> = Vec::new();
+        let mut id_map: ahash::AHashMap<ExprId, usize> = ahash::AHashMap::new();
         let mut queue: SmallVec<[(ExprId, usize); 64]> = SmallVec::new();
-        let mut visited: SmallVec<[ExprId; 64]> = SmallVec::new();
+        let mut var_order: ahash::AHashMap<algebra_core::SymbolId, usize> = ahash::AHashMap::new();
+
         queue.push((root, 0usize));
-        visited.push(root);
+        id_map.insert(root, 0);
 
         let mut head = 0usize;
-        while head < queue.len() {
-            if node_count >= 64 {
-                break; // Cap traversal depth/size
-            }
+        while head < queue.len() && nodes.len() < 64 {
             let (curr_id, depth) = queue[head];
+            let curr_idx = head;
             head += 1;
-            node_count += 1;
 
             let node = graph.get(curr_id);
-            let token_id = Self::node_to_token_id(&node) % self.weights.vocab_size;
+            let kind = match &node.kind {
+                ExprKind::Number(_) => AstNodeKind::Num,
+                ExprKind::Symbol(_) => AstNodeKind::Var,
+                ExprKind::Add(_) => AstNodeKind::Add,
+                ExprKind::Mul(_) => AstNodeKind::Mul,
+                ExprKind::Pow(_, _) => AstNodeKind::Pow,
+                ExprKind::Div(_, _) => AstNodeKind::Div,
+                ExprKind::Sub(_, _) => AstNodeKind::Sub,
+                ExprKind::Neg(_) => AstNodeKind::Neg,
+                ExprKind::Function { .. } => AstNodeKind::Func,
+                ExprKind::Derivative { .. } => AstNodeKind::Derivative,
+                ExprKind::Integral { .. } => AstNodeKind::Integral,
+                ExprKind::Matrix { .. } => AstNodeKind::Matrix,
+                ExprKind::Relational { .. } => AstNodeKind::Relational,
+                ExprKind::SetOperation { .. } => AstNodeKind::SetOp,
+                ExprKind::Sum { .. } => AstNodeKind::Sum,
+                _ => AstNodeKind::Pad,
+            };
 
-            // Token embedding slice
-            let offset = token_id * dim;
-            let token_emb = &self.weights.token_embeddings[offset..offset + dim];
+            let mut c_node = CanonicalAstNode::new(curr_idx, kind, depth);
 
-            // Positional tree depth embedding + projection
-            for d in 0..dim {
-                let pos = (depth as f32 * (d + 1) as f32 * 0.2).cos();
-                let mut proj_sum = 0.0f32;
-                for k in 0..dim {
-                    proj_sum += (token_emb[k] + pos) * self.weights.projection_weights[d * dim + k];
-                }
-                accum[d] += proj_sum;
+            if let ExprKind::Number(num) = &node.kind {
+                let val = match num {
+                    Number::Integer(i) => i.to_string().parse::<f32>().unwrap_or(0.0),
+                    Number::Float(f) => *f as f32,
+                    _ => 0.0,
+                };
+                let sign = if val < 0.0 { -1.0 } else if val > 0.0 { 1.0 } else { 0.0 };
+                let abs_v = val.abs();
+                let exp = if abs_v > 1e-12 { abs_v.log2().floor() } else { 0.0 };
+                let mant = if abs_v > 1e-12 { abs_v / 2.0f32.powf(exp) } else { 0.0 };
+                c_node.num_features = [sign, mant, exp];
+            } else if let ExprKind::Symbol(s) = &node.kind {
+                // Pre-order alpha-equivalence anonymization
+                let next_var = var_order.len();
+                let v_id = *var_order.entry(s.clone()).or_insert(next_var);
+                c_node.var_id = v_id;
             }
 
-            // Enqueue children
             for child in node.children() {
-                if !visited.contains(&child) && queue.len() < 64 {
-                    visited.push(child);
+                let child_idx = if let Some(&existing) = id_map.get(&child) {
+                    existing
+                } else if queue.len() < 64 {
+                    let next_idx = queue.len();
+                    id_map.insert(child, next_idx);
                     queue.push((child, depth + 1));
-                }
+                    next_idx
+                } else {
+                    continue;
+                };
+                c_node.children.push(child_idx);
             }
+
+            nodes.push(c_node);
         }
 
-        // L2-normalize accumulated embedding vector
-        let norm_sq: f32 = accum.iter().map(|&x| x * x).sum();
-        let norm = norm_sq.sqrt().max(1e-8);
-        accum.iter_mut().for_each(|x| *x /= norm);
-
-        accum
+        self.evaluator.evaluate_dag(&nodes, 0)
     }
 
     /// Compute cosine similarity between two expression embeddings in $[-1.0, 1.0]$.

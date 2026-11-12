@@ -62,10 +62,10 @@ spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens", version = 
 spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry", version = "^1.0.0" }
 spodeian-export = { path = "../spodeian-core/crates/spodeian-export", version = "^1.0.0" }
 spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils", version = "^1.0.0" }
-spodeian-ml-utils = { package = "sml-runtime", path = "../spodeian-ml-rs/crates/sml-runtime", version = "^0.1.0" }
-sml-runtime = { path = "../spodeian-ml-rs/crates/sml-runtime", version = "^0.1.0" }
-spodeian-lake = { package = "sml-lake", path = "../spodeian-ml-rs/crates/sml-lake", version = "^0.1.0" }
-sml-lake = { path = "../spodeian-ml-rs/crates/sml-lake", version = "^0.1.0" }
+spodeian-ml-utils = { package = "sml-runtime", path = "../spodeian-core/crates/sml-runtime", version = "^0.1.0" }
+sml-runtime = { path = "../spodeian-core/crates/sml-runtime", version = "^0.1.0" }
+spodeian-lake = { package = "sml-lake", path = "../spodeian-core/crates/sml-lake", version = "^0.1.0" }
+sml-lake = { path = "../spodeian-core/crates/sml-lake", version = "^0.1.0" }
 
 
 # Numerics & High-Precision CAS

@@ -749,21 +749,9 @@ impl UraeNotebookApp {
 
     /// Triggers a cross-platform file download (browser download in WASM, filesystem write on native desktop).
     pub fn trigger_file_download(&self, filename: &str, data: &[u8], _mime_type: &str) {
-        #[cfg(target_arch = "wasm32")]
-        {
-            use base64::Engine;
-            let b64 = base64::engine::general_purpose::STANDARD.encode(data);
-            let code = format!(
-                "if (window.__triggerBinaryDownload) {{ window.__triggerBinaryDownload({:?}, {:?}, {:?}); }}",
-                filename, b64, _mime_type
-            );
-            let _ = js_sys::eval(&code);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = std::fs::write(filename, data);
-        }
+        spodeian_web_utils::trigger_binary_download(filename, data, _mime_type);
     }
+
 
     /// Download active session as a compressed .bson binary file
     pub fn download_bson_backup(&self) {
@@ -7123,6 +7111,40 @@ pub fn render_symbol_info_card_content(
             palette.accent_primary,
             format!("{} Solved in {:.2} ms", tag, t_ms),
         );
+    }
+
+    if info.ast_depth.is_some() || info.neural_embedding.is_some() {
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if let Some(d) = info.ast_depth {
+                ui.label(
+                    egui::RichText::new(format!("AST Depth: {}", d))
+                        .size(11.0)
+                        .color(palette.accent_primary)
+                        .strong(),
+                );
+            }
+            if let Some(pd) = info.proof_search_depth {
+                ui.label(
+                    egui::RichText::new(format!("Proof-Search Depth: {}", pd))
+                        .size(11.0)
+                        .color(palette.text_success)
+                        .strong(),
+                );
+            }
+        });
+        if let Some(emb) = &info.neural_embedding {
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(format!("Neural Embedding ({}d):", emb.len()));
+                let preview = emb
+                    .iter()
+                    .take(4)
+                    .map(|v| format!("{:+.3}", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                ui.monospace(format!("[{}, ...]", preview));
+            });
+        }
     }
 
     if !info.dependent_lines.is_empty() {

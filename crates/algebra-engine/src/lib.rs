@@ -33,11 +33,13 @@ pub mod hyperop;
 pub mod iga;
 pub mod interconnect;
 pub mod lagrange;
+pub mod lemma_miner;
 pub mod lifting;
 pub mod limits;
 pub mod logic;
 pub mod macros;
 pub mod matrix;
+pub mod mcts;
 pub mod neural_ode;
 pub mod noneuclidean;
 pub mod numbertheory;
@@ -101,12 +103,16 @@ pub use executor::{ExecutionContext, OperationExecutor, OperationResult};
 pub use geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer};
 pub use geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder};
 pub use gpu::{GpuKernelDescriptor, WgslShaderGenerator};
-pub use heuristic::{HeuristicSearchEngine, SearchCandidate};
+pub use heuristic::{
+    CompositeSearchHeuristic, HeuristicSearchEngine, NeuralExpressionEmbedder,
+    SchwartzZippelHeuristic, SearchCandidate, SearchHeuristic, TreeSizeHeuristic,
+};
 pub use html_export::StandaloneHtmlExporter;
 pub use hyperop::{ackermann, hyperoperation, knuth_up_arrow, pentation, super_log, tetration};
 pub use iga::{CoxDeBoor, IgaStiffnessMatrix, MultiPatchBRep, NurbsPatchND, WeightedControlPoint};
 pub use interconnect::UniversalBridge;
 pub use lagrange::{InversionSeriesResult, LagrangeBurmann};
+pub use lemma_miner::{AutonomousLemmaMiningPipeline, GrobnerProver, MinedTheoremRecord};
 pub use lifting::{
     DomainCompatibilityChecker, DomainLiftRouter, EulerLiftingFunctor, LiftingFunctor,
     RetractionCleaner, WeierstrassLiftingFunctor,
@@ -114,6 +120,10 @@ pub use lifting::{
 pub use limits::{LimitDirection, LimitEngine};
 pub use logic::{AssumptionsContext, GeneralizedValuedLogic, SatSolver, ThreeValuedLogic};
 pub use matrix::SymbolicMatrix;
+pub use mcts::{
+    MctsAction, MctsConfig, MctsNode, MctsPolicyHead, MctsSearchEngine, MctsSearchResult,
+    MctsValueHead, ProofStep,
+};
 pub use neural_ode::{AdjointSensitivitySolver, NeuralOde, NeuralOdeTrajectory};
 pub use noneuclidean::{
     HyperbolicTessellation, HyperbolicTriangle, PoincareDiskPoint, SchwarzChristoffel,

@@ -274,10 +274,138 @@ pub fn process_input_with_context(
         return agent.query(ai_config, prompt, graph);
     }
 
-    // 2. Parse text into structured MathOperation
+    // 2. Neural Expression Embedding & AST Proof-Search Depth Commands
+    if let Some(expr_str) = input.strip_prefix("embed ") {
+        let parser = algebra_core::parser::ExprParser::new(graph);
+        let id = parser
+            .parse(expr_str.trim())
+            .map_err(|e| format!("Parse error: {}", e))?;
+        let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
+        let vec = embedder.embed_expression(graph, id);
+        let depth = algebra_engine::heuristic::compute_ast_depth(graph, id);
+        let nodes = algebra_engine::heuristic::count_ast_nodes(graph, id);
+        let preview = vec
+            .iter()
+            .take(6)
+            .map(|v| format!("{:+.4}", v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let hex_sample: String = vec
+            .iter()
+            .take(4)
+            .map(|v| format!("{:02X}", (v.abs() * 255.0) as u8))
+            .collect();
+        let mut out = String::new();
+        out.push_str(&format!(
+            "Neural Expression Embedding (dim: {}, L2-norm: 1.000):\n",
+            vec.len()
+        ));
+        out.push_str(&format!(
+            "  * AST Structure : depth = {}, total nodes = {}\n",
+            depth, nodes
+        ));
+        out.push_str(&format!("  * Vector Preview: [{preview}, ...]\n"));
+        out.push_str(&format!("  * Embedding Hash: 0x{hex_sample}"));
+        return Ok(out);
+    }
+
+    if let Some(args_str) = input
+        .strip_prefix("similarity ")
+        .or_else(|| input.strip_prefix("embed_sim "))
+    {
+        let parts: Vec<&str> = args_str.split(',').collect();
+        if parts.len() != 2 {
+            return Err("Usage: similarity <expr1>, <expr2>".to_string());
+        }
+        let parser = algebra_core::parser::ExprParser::new(graph);
+        let id1 = parser
+            .parse(parts[0].trim())
+            .map_err(|e| format!("Parse error in expr1: {}", e))?;
+        let id2 = parser
+            .parse(parts[1].trim())
+            .map_err(|e| format!("Parse error in expr2: {}", e))?;
+        let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
+        let v1 = embedder.embed_expression(graph, id1);
+        let v2 = embedder.embed_expression(graph, id2);
+        let sim = algebra_engine::heuristic::NeuralExpressionEmbedder::cosine_similarity(&v1, &v2);
+        let quality = if sim > 0.90 {
+            "Strong Semantic Equivalence"
+        } else if sim > 0.50 {
+            "Moderate Structural Similarity"
+        } else {
+            "Distinct Expression Geometry"
+        };
+        let mut out = String::new();
+        out.push_str("Neural Semantic Equivalence Score:\n");
+        out.push_str(&format!("  * Cosine Similarity: {:.6} ({})\n", sim, quality));
+        out.push_str(&format!(
+            "  * Expr 1 AST Depth : {}\n",
+            algebra_engine::heuristic::compute_ast_depth(graph, id1)
+        ));
+        out.push_str(&format!(
+            "  * Expr 2 AST Depth : {}",
+            algebra_engine::heuristic::compute_ast_depth(graph, id2)
+        ));
+        return Ok(out);
+    }
+
+    if let Some(expr_str) = input
+        .strip_prefix("proof_search ")
+        .or_else(|| input.strip_prefix("proof-depth "))
+        .or_else(|| input.strip_prefix("proof_depth "))
+    {
+        let parser = algebra_core::parser::ExprParser::new(graph);
+        let id = parser
+            .parse(expr_str.trim())
+            .map_err(|e| format!("Parse error: {}", e))?;
+        let search_engine =
+            algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
+                algebra_core::EngineConfig::default(),
+            );
+        let indicator = search_engine.analyze_ast_proof_depth(graph, id);
+        let emb_preview = indicator
+            .neural_embedding
+            .iter()
+            .take(4)
+            .map(|v| format!("{:+.3}", v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut out = String::new();
+        out.push_str(&format!(
+            "AST Proof-Search Depth Analysis for `{}`:\n",
+            expr_str.trim()
+        ));
+        out.push_str(&format!(
+            "  * AST Tree Depth        : {}\n",
+            indicator.ast_depth
+        ));
+        out.push_str(&format!(
+            "  * AST Node Count        : {}\n",
+            indicator.ast_node_count
+        ));
+        out.push_str(&format!(
+            "  * Proof Search Depth    : {} / {}\n",
+            indicator.proof_search_depth, indicator.max_depth_budget
+        ));
+        out.push_str(&format!(
+            "  * Heuristic Candidate Wt: {:.4}\n",
+            indicator.candidate_weight
+        ));
+        out.push_str(&format!(
+            "  * Verification Status   : {}\n",
+            indicator.certification_status
+        ));
+        out.push_str(&format!(
+            "  * Neural Embedding [{}d]: [{emb_preview}, ...]",
+            indicator.neural_embedding.len()
+        ));
+        return Ok(out);
+    }
+
+    // 3. Parse text into structured MathOperation
     let op = parse_operation(input);
 
-    // 3. Prepare execution context
+    // 4. Prepare execution context
     let mut exec_ctx = ExecutionContext::new();
     if let Some(b) = bindings {
         exec_ctx.bindings = b.clone();
@@ -286,7 +414,7 @@ pub fn process_input_with_context(
         exec_ctx.symbol_summary = s.to_vec();
     }
 
-    // 4. Central execution via OperationExecutor
+    // 5. Central execution via OperationExecutor
     let result = OperationExecutor::execute(graph, &op, &exec_ctx);
     if result.is_error {
         Err(result.error_msg.unwrap_or(result.output_text))
@@ -309,6 +437,9 @@ pub fn get_help_text() -> String {
     help.push_str(
         "  eval <expr>                Numerical reduction (uses notebook parameter values)\n",
     );
+    help.push_str("  embed <expr>               Compute neural AST vector embedding\n");
+    help.push_str("  similarity <e1>, <e2>      Compute cosine similarity of two expression embeddings\n");
+    help.push_str("  proof_search <expr>        AST proof-search depth indicators and certification\n");
     help.push_str("  tetration / knuth / slog   Knuth up-arrows & hyperoperations\n");
     help.push_str("  maxplus_add / minplus_mul  Tropical semirings\n");
     help.push_str("  cf / is_prime / gcd        Computational number theory\n");

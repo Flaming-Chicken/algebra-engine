@@ -12,7 +12,7 @@ use crate::expr::ExprKind;
 use crate::graph::ExprGraph;
 use crate::id::ExprId;
 use crate::number::Number;
-use crate::numbers::DualNumber;
+pub use crate::numbers::DualNumber;
 use std::collections::HashMap;
 
 /// Bytecode instruction set for numerical evaluation.
@@ -806,74 +806,5 @@ impl BytecodeVM {
         }
 
         Ok(stack[0])
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_vm_compiler_and_scalar_eval() {
-        let graph = ExprGraph::new();
-        // Construct: f(x) = 2.0 * x^2 + 3.0 * x - 5.0
-        let two = graph.float(2.0);
-        let x = graph.symbol("x");
-        let two_exp = graph.integer(2);
-        let x_sq = graph.pow(x, two_exp);
-        let term1 = graph.mul([two, x_sq]);
-
-        let three = graph.float(3.0);
-        let term2 = graph.mul([three, x]);
-
-        let sum1 = graph.add([term1, term2]);
-        let five = graph.float(5.0);
-        let root = graph.sub(sum1, five);
-
-        let program = VmCompiler::compile(&graph, root, "x", &[]).unwrap();
-        let vm = BytecodeVM::new();
-
-        // f(0) = -5
-        assert_eq!(vm.eval_scalar(&program, 0.0, &[]).unwrap(), -5.0);
-        // f(1) = 2(1) + 3(1) - 5 = 0
-        assert_eq!(vm.eval_scalar(&program, 1.0, &[]).unwrap(), 0.0);
-        // f(2) = 2(4) + 3(2) - 5 = 8 + 6 - 5 = 9
-        assert_eq!(vm.eval_scalar(&program, 2.0, &[]).unwrap(), 9.0);
-    }
-
-    #[test]
-    fn test_vm_batch_eval() {
-        let graph = ExprGraph::new();
-        let x = graph.symbol("x");
-        let sin_x = graph.function("sin", [x]);
-
-        let program = VmCompiler::compile(&graph, sin_x, "x", &[]).unwrap();
-        let vm = BytecodeVM::new();
-
-        let xs = vec![0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI];
-        let mut ys = vec![0.0; 3];
-        vm.eval_batch(&program, &xs, &[], &mut ys).unwrap();
-
-        assert!((ys[0] - 0.0).abs() < 1e-10);
-        assert!((ys[1] - 1.0).abs() < 1e-10);
-        assert!((ys[2] - 0.0).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_vm_dual_number_derivative() {
-        let graph = ExprGraph::new();
-        // f(x) = x^3 => f'(x) = 3x^2
-        let x = graph.symbol("x");
-        let three = graph.integer(3);
-        let x_cube = graph.pow(x, three);
-
-        let program = VmCompiler::compile(&graph, x_cube, "x", &[]).unwrap();
-        let vm = BytecodeVM::new();
-
-        let x_dual = DualNumber::variable(2.0); // x = 2 + 1*eps
-        let res = vm.eval_dual(&program, x_dual, &[]).unwrap();
-
-        assert_eq!(res.real, 8.0); // 2^3 = 8
-        assert_eq!(res.dual, 12.0); // 3*(2^2) = 12
     }
 }

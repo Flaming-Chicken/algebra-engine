@@ -312,11 +312,17 @@ fn test_symbol_info_card_structure() {
             magnitude: std::f64::consts::PI,
         }),
         computation_time_ms: Some(1.23),
+        ast_depth: Some(3),
+        proof_search_depth: Some(2),
+        neural_embedding: Some(vec![0.1, 0.2, -0.3]),
     };
     assert_eq!(card.name, "x");
     assert_eq!(card.compound_tags.len(), 2);
     assert_eq!(card.dependent_lines.len(), 3);
     assert_eq!(card.formula_references.len(), 1);
+    assert_eq!(card.ast_depth, Some(3));
+    assert_eq!(card.proof_search_depth, Some(2));
+    assert!(card.neural_embedding.is_some());
     assert!(card.unit_str.is_some());
     assert!(matches!(
         card.object_kind,

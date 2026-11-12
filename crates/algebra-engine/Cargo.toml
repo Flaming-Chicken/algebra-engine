@@ -30,6 +30,11 @@ egg.workspace = true
 dashu.workspace = true
 nom.workspace = true
 spodeian-parallel.workspace = true
+spodeian-ml-utils.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon.workspace = true
+spodeian-lake.workspace = true
 
 [features]
 default = ["serde"]

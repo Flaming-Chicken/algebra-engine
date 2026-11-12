@@ -182,12 +182,8 @@ pub fn run_gui() -> Result<(), eframe::Error> {
         LogLevel::current().label()
     ));
 
-    let default_filter = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "info"
-    };
-    spodeian_telemetry::init_telemetry(default_filter);
+    spodeian_telemetry::init_default();
+
 
     log_debug("Configuring eframe::NativeOptions (inner_size: 1100x750, min: 600x400)...");
     let options = eframe::NativeOptions {
@@ -239,7 +235,8 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub async fn start_web(canvas_id: &str) -> Result<(), JsValue> {
     use wasm_bindgen::JsCast;
-    console_error_panic_hook::set_once();
+    spodeian_telemetry::init_default();
+
     let web_options = eframe::WebOptions::default();
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("No window object"))?;
@@ -271,3 +268,17 @@ pub async fn start_web(canvas_id: &str) -> Result<(), JsValue> {
         .await
         .map_err(|e| JsValue::from_str(&format!("{:?}", e)))
 }
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+fn android_main(app: winit::platform::android::activity::AndroidApp) {
+    use eframe::NativeOptions;
+    let mut options = NativeOptions::default();
+    options.android_app = Some(app);
+    eframe::run_native(
+        "urae-notebook",
+        options,
+        Box::new(|cc| Ok(Box::new(app::UraeNotebookApp::new(cc)))),
+    ).unwrap();
+}
+

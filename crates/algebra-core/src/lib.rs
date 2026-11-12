@@ -17,6 +17,7 @@ pub mod interval;
 pub mod number;
 pub mod numbers;
 pub mod operation;
+pub mod lemma_miner;
 pub mod parallel;
 pub mod parser;
 pub mod probabilistic;
@@ -34,6 +35,10 @@ pub use format::{FormatError, FormatResult, Formatter, LatexFormatter, UnicodeFo
 pub use graph::ExprGraph;
 pub use id::{DomainId, ExprId, SymbolId};
 pub use interval::RealInterval;
+pub use lemma_miner::{
+    DomainKind, EquivalenceHypothesis, ExpressionGenerator, ExpressionGeneratorConfig,
+    FingerprintTriple, FormalEquivalenceProver, LearnedLemma, LemmaMiner, LemmaRegistry,
+};
 pub use number::{Constant, Number};
 pub use numbers::{DualNumber, HyperrealNumber, Octonion, PAdicNumber, Quaternion, SurrealNumber};
 pub use operation::{

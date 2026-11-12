@@ -310,6 +310,12 @@ pub struct SymbolInfoCard {
     pub computation_time_ms: Option<f64>,
     #[serde(default)]
     pub compound_tags: Vec<String>,
+    #[serde(default)]
+    pub ast_depth: Option<usize>,
+    #[serde(default)]
+    pub proof_search_depth: Option<usize>,
+    #[serde(default)]
+    pub neural_embedding: Option<Vec<f32>>,
 }
 
 impl Default for SymbolInfoCard {
@@ -325,6 +331,9 @@ impl Default for SymbolInfoCard {
             object_kind: None,
             computation_time_ms: None,
             compound_tags: Vec::new(),
+            ast_depth: None,
+            proof_search_depth: None,
+            neural_embedding: None,
         }
     }
 }

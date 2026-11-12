@@ -21,8 +21,8 @@ version = "0.3.1"
 authors = ["Liam <spodeian@proton.me>"]
 edition = "2024"
 license = "CC-BY-NC-SA-4.0"
-repository = "https://github.com/Flaming-Chicken/algebra-engine"
-homepage = "https://github.com/Flaming-Chicken/algebra-engine"
+repository = "https://github.com/Spodeian/algebra-engine"
+homepage = "https://github.com/Spodeian/algebra-engine"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -58,14 +58,14 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 egui_plot = "0.37"
 winit = { version = "0.30", default-features = false }
 android-activity = { version = "0.6", default-features = false, features = ["native-activity"] }
-spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens", version = "^1.0.0" }
-spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry", version = "^1.0.0" }
-spodeian-export = { path = "../spodeian-core/crates/spodeian-export", version = "^1.0.0" }
-spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils", version = "^1.0.0" }
-spodeian-ml-utils = { package = "sml-runtime", path = "../spodeian-core/crates/sml-runtime", version = "^0.1.0" }
-sml-runtime = { path = "../spodeian-core/crates/sml-runtime", version = "^0.1.0" }
-spodeian-lake = { package = "sml-lake", path = "../spodeian-core/crates/sml-lake", version = "^0.1.0" }
-sml-lake = { path = "../spodeian-core/crates/sml-lake", version = "^0.1.0" }
+spodeian-tokens = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
+spodeian-telemetry = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
+spodeian-export = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^2.0.0" }
+spodeian-web-utils = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
+spodeian-ml-utils = { package = "sml-runtime", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
+sml-runtime = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
+spodeian-lake = { package = "sml-lake", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
+sml-lake = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
 
 
 # Numerics & High-Precision CAS
@@ -84,7 +84,7 @@ parking_lot = "0.12"
 smallvec = { version = "1.13", features = ["serde"] }
 ahash = { version = "0.8", features = ["serde"] }
 mimalloc = "0.1"
-spodeian-parallel = { path = "../spodeian-core/crates/spodeian-parallel" }
+spodeian-parallel = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0" }
 
 # Serialization & formatters
 serde = { version = "1.0", features = ["derive"] }

@@ -174,11 +174,11 @@ dependencies = [
  "num-rational",
  "num-traits",
  "parking_lot",
- "rayon",
  "reqwest",
  "serde",
  "serde_json",
  "smallvec",
+ "spodeian-parallel",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -198,10 +198,10 @@ dependencies = [
  "num-rational",
  "num-traits",
  "parking_lot",
- "rayon",
  "serde",
  "serde_json",
  "smallvec",
+ "spodeian-parallel",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -229,6 +229,7 @@ dependencies = [
  "smallvec",
  "sml-lake",
  "sml-runtime",
+ "spodeian-parallel",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -4906,6 +4907,7 @@ dependencies = [
 [[package]]
 name = "sml-lake"
 version = "0.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -4923,9 +4925,14 @@ dependencies = [
 [[package]]
 name = "sml-runtime"
 version = "0.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
+ "ahash 0.8.12",
+ "byteorder",
  "candle-core",
  "candle-nn",
+ "getrandom 0.3.4",
+ "rand 0.9.5",
  "safetensors 0.5.3",
  "serde",
  "serde_json",
@@ -4976,7 +4983,8 @@ dependencies = [
 
 [[package]]
 name = "spodeian-cache"
-version = "1.0.0"
+version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "base64 0.22.1",
  "js-sys",
@@ -4992,7 +5000,8 @@ dependencies = [
 
 [[package]]
 name = "spodeian-export"
-version = "1.0.0"
+version = "2.0.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "bson",
  "miniz_oxide 0.8.9",
@@ -5002,10 +5011,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "spodeian-telemetry"
+name = "spodeian-parallel"
 version = "1.0.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "spodeian-telemetry"
+version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "console_error_panic_hook",
+ "js-sys",
  "serde",
  "serde_json",
  "tracing",
@@ -5015,7 +5034,8 @@ dependencies = [
 
 [[package]]
 name = "spodeian-tokens"
-version = "1.0.0"
+version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "serde",
  "serde_json",
@@ -5023,11 +5043,13 @@ dependencies = [
 
 [[package]]
 name = "spodeian-web-utils"
-version = "1.0.0"
+version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "js-sys",
  "tracing",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5722,10 +5744,10 @@ dependencies = [
  "js-sys",
  "mimalloc",
  "miniz_oxide 0.8.9",
- "rayon",
  "serde",
  "serde_json",
  "spodeian-export",
+ "spodeian-parallel",
  "spodeian-telemetry",
  "spodeian-tokens",
  "spodeian-web-utils",

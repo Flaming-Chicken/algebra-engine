@@ -1,7 +1,7 @@
 # Universal Rust Algebra Engine (URAE)
 
 [![Rust Workspace](https://img.shields.io/badge/Rust-1.85%2B%20%7C%202024%20Edition-orange?logo=rust)](https://www.rust-lang.org/)
-[![License: CC-BY-NC-SA 4.0](https://img.shields.io/badge/License-CC--BY--NC--SA--4.0-lightgrey.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE.md)
 [![Tests Passing](https://img.shields.io/badge/Tests-480%2B%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20Warnings-brightgreen.svg)](Cargo.toml)
 [![WASM Ready](https://img.shields.io/badge/WebAssembly-Cloudflare%20Pages%20%7C%20PWA-9cf?logo=webassembly)](crates/urae-wasm)
@@ -339,8 +339,8 @@ overflow-checks = false
 ---
 
 ## 📄 License & Commercial Rights
- 
- This project is licensed under [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC-BY-NC-SA 4.0)](LICENSE):
- 
- - **Non-Commercial & Academic Research**: You are free to share, copy, and adapt the material for non-commercial research, educational, and personal evaluation purposes, provided appropriate credit is given and downstream derivative works are distributed under the same license.
- - **Commercial Licensing**: Commercial use is strictly prohibited under CC-BY-NC-SA 4.0 without a separate commercial license agreement. For commercial licensing, enterprise integration, or proprietary licensing inquiries, please contact the author and maintainer directly at **spodeian@proton.me**.
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You may use,
+change and share this software for any noncommercial purpose. For a
+commercial license, contact [Spodeian](https://github.com/Spodeian). Earlier
+releases keep the license they were published under.

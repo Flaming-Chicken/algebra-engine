@@ -54,4 +54,3 @@ impl ExprGraph {
             .any(|child_id| self.contains_matching(child_id, predicate))
     }
 }
-

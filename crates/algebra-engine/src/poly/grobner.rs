@@ -198,13 +198,11 @@ impl GrobnerBasis {
         }
 
         // Sort polynomials by leading term order
-        reduced.sort_by(|a, b| {
-            match (a.leading_monomial(), b.leading_monomial()) {
-                (Some(lm_a), Some(lm_b)) => lm_a.cmp_with_order(lm_b, order),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
+        reduced.sort_by(|a, b| match (a.leading_monomial(), b.leading_monomial()) {
+            (Some(lm_a), Some(lm_b)) => lm_a.cmp_with_order(lm_b, order),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
         });
 
         Self {

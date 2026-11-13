@@ -337,7 +337,10 @@ pub fn process_input_with_context(
         };
         let mut out = String::new();
         out.push_str("Neural Semantic Equivalence Score:\n");
-        out.push_str(&format!("  * Cosine Similarity: {:.6} ({})\n", sim, quality));
+        out.push_str(&format!(
+            "  * Cosine Similarity: {:.6} ({})\n",
+            sim, quality
+        ));
         out.push_str(&format!(
             "  * Expr 1 AST Depth : {}\n",
             algebra_engine::heuristic::compute_ast_depth(graph, id1)
@@ -438,8 +441,12 @@ pub fn get_help_text() -> String {
         "  eval <expr>                Numerical reduction (uses notebook parameter values)\n",
     );
     help.push_str("  embed <expr>               Compute neural AST vector embedding\n");
-    help.push_str("  similarity <e1>, <e2>      Compute cosine similarity of two expression embeddings\n");
-    help.push_str("  proof_search <expr>        AST proof-search depth indicators and certification\n");
+    help.push_str(
+        "  similarity <e1>, <e2>      Compute cosine similarity of two expression embeddings\n",
+    );
+    help.push_str(
+        "  proof_search <expr>        AST proof-search depth indicators and certification\n",
+    );
     help.push_str("  tetration / knuth / slog   Knuth up-arrows & hyperoperations\n");
     help.push_str("  maxplus_add / minplus_mul  Tropical semirings\n");
     help.push_str("  cf / is_prime / gcd        Computational number theory\n");

@@ -205,9 +205,7 @@ fn test_transcendental_trig_identity_verification() {
 
 #[test]
 fn test_quantized_transformer_neural_embeddings_and_search_guidance() {
-    use algebra_engine::heuristic::{
-        NeuralExpressionEmbedder, QuantizedTransformerWeights,
-    };
+    use algebra_engine::heuristic::{NeuralExpressionEmbedder, QuantizedTransformerWeights};
 
     let graph = ExprGraph::new();
     let x = graph.symbol("x");
@@ -272,8 +270,7 @@ fn test_quantized_transformer_neural_embeddings_and_search_guidance() {
     let int8_data: Vec<u8> = (0..128).map(|i| (i as i8) as u8).collect();
     st_buffer.extend_from_slice(&int8_data);
 
-    let loaded_weights =
-        QuantizedTransformerWeights::from_safetensors_bytes(&st_buffer).unwrap();
+    let loaded_weights = QuantizedTransformerWeights::from_safetensors_bytes(&st_buffer).unwrap();
     assert_eq!(loaded_weights.vocab_size, 16);
     assert_eq!(loaded_weights.embed_dim, 8);
     assert_eq!(loaded_weights.scale, 0.05);
@@ -310,7 +307,10 @@ fn test_parallel_verification_and_weighting() {
 
     // Test parallel equivalence verification
     let solution = ProbabilisticVerifier::verify_equivalence_parallel(&graph, lhs, rhs, 1e-12);
-    assert!(solution.is_probabilistic(), "Expected probabilistic solution");
+    assert!(
+        solution.is_probabilistic(),
+        "Expected probabilistic solution"
+    );
     assert!(*solution.as_ref());
     assert!(solution.confidence() > 0.99999);
 

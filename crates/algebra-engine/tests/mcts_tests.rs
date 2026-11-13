@@ -65,7 +65,10 @@ fn test_fingerprint_triple_consistency() {
     let fp1 = FingerprintTriple::compute(&graph, e1, &env31, &env61, &env64).expect("fp1 valid");
     let fp2 = FingerprintTriple::compute(&graph, e2, &env31, &env61, &env64).expect("fp2 valid");
 
-    assert_eq!(fp1, fp2, "Schwartz-Zippel fingerprints must match for algebraically identical expressions");
+    assert_eq!(
+        fp1, fp2,
+        "Schwartz-Zippel fingerprints must match for algebraically identical expressions"
+    );
 }
 
 #[test]
@@ -88,7 +91,10 @@ fn test_grobner_prover_formal_verification() {
     let var_names = vec!["x".to_string(), "y".to_string()];
 
     let is_proven = prover.prove_equivalence(&graph, lhs, rhs, &var_names);
-    assert!(is_proven, "Grobner basis and expansion must formally prove (x+y)^2 == x^2 + 2xy + y^2");
+    assert!(
+        is_proven,
+        "Grobner basis and expansion must formally prove (x+y)^2 == x^2 + 2xy + y^2"
+    );
 
     // Non-equivalent expressions: (x + y) and (x - y)
     let non_equiv = graph.sub(x, y);

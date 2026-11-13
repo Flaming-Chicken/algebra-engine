@@ -63,7 +63,9 @@ impl FormalEquivalenceProver for GrobnerProver {
         // If no variables are specified, collect free symbols
         let vars: Vec<String> = if var_names.is_empty() {
             let mut v = Vec::new();
-            for s in algebra_core::probabilistic::ProbabilisticVerifier::extract_symbols(graph, diff) {
+            for s in
+                algebra_core::probabilistic::ProbabilisticVerifier::extract_symbols(graph, diff)
+            {
                 if let Some(name) = graph.symbols.resolve(s) {
                     if !v.contains(&name) {
                         v.push(name);

@@ -306,15 +306,20 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
     };
 
     // Neural Expression Embedding & AST Proof Search Depth
-    let (ast_search_depth, neural_embedding) = if req.export_proof || req.simplify || req.embed_neural {
-        let engine = algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
-            algebra_core::EngineConfig::default(),
-        );
-        let indicator = engine.analyze_ast_proof_depth(graph, expr_id);
-        (Some(indicator.proof_search_depth), Some(indicator.neural_embedding))
-    } else {
-        (None, None)
-    };
+    let (ast_search_depth, neural_embedding) =
+        if req.export_proof || req.simplify || req.embed_neural {
+            let engine =
+                algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
+                    algebra_core::EngineConfig::default(),
+                );
+            let indicator = engine.analyze_ast_proof_depth(graph, expr_id);
+            (
+                Some(indicator.proof_search_depth),
+                Some(indicator.neural_embedding),
+            )
+        } else {
+            (None, None)
+        };
 
     UraeJsonResponse {
         success: true,

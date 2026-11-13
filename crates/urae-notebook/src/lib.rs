@@ -184,7 +184,6 @@ pub fn run_gui() -> Result<(), eframe::Error> {
 
     spodeian_telemetry::init_default();
 
-
     log_debug("Configuring eframe::NativeOptions (inner_size: 1100x750, min: 600x400)...");
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -279,6 +278,6 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         "urae-notebook",
         options,
         Box::new(|cc| Ok(Box::new(app::UraeNotebookApp::new(cc)))),
-    ).unwrap();
+    )
+    .unwrap();
 }
-

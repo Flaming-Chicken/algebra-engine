@@ -29,7 +29,10 @@ fn test_expr_graph_hash_consing_deduplication() {
     // Intern compound operations
     let add1 = graph.add([x1, n1]);
     let add2 = graph.add([x2, n2]);
-    assert_eq!(add1, add2, "Compound Add expression must be hash-consed to the same ExprId");
+    assert_eq!(
+        add1, add2,
+        "Compound Add expression must be hash-consed to the same ExprId"
+    );
 
     // Intern power and multiplication
     let pow1 = graph.pow(x1, n1);
@@ -60,15 +63,21 @@ fn test_parser_and_latex_formatter_roundtrip() {
 
     // Parse simple polynomial
     let input = "2 * x^2 + 3 * x - 5";
-    let expr_id = parser.parse(input).expect("Failed to parse polynomial expression");
+    let expr_id = parser
+        .parse(input)
+        .expect("Failed to parse polynomial expression");
 
-    let latex = formatter.format(&graph, expr_id).expect("Formatting failed");
+    let latex = formatter
+        .format(&graph, expr_id)
+        .expect("Formatting failed");
     assert!(!latex.is_empty());
     assert!(latex.contains("x"));
 
     // Parse rational function with division
     let rational_input = "(x^2 - 1) / (x + 1)";
-    let rat_id = parser.parse(rational_input).expect("Failed to parse rational expression");
+    let rat_id = parser
+        .parse(rational_input)
+        .expect("Failed to parse rational expression");
     let rat_latex = formatter.format(&graph, rat_id).expect("Formatting failed");
     assert!(rat_latex.contains("frac") || rat_latex.contains("/"));
 }
@@ -91,13 +100,19 @@ fn test_schwartz_zippel_probabilistic_identity_verification() {
 
     // Run probabilistic verification with target epsilon = 1e-12
     let solution = ProbabilisticVerifier::verify_equivalence(&graph, lhs, rhs, 1e-12);
-    assert!(*solution.as_ref(), "Probabilistic verifier must confirm algebraic equivalence of (x-1)(x+1) and x^2-1");
+    assert!(
+        *solution.as_ref(),
+        "Probabilistic verifier must confirm algebraic equivalence of (x-1)(x+1) and x^2-1"
+    );
     assert!(solution.error_probability() <= 1e-12);
 
     // Negative check: x^2 - 1 != x^2 + 1
     let not_rhs = graph.add([x_sq, one]);
     let not_solution = ProbabilisticVerifier::verify_equivalence(&graph, lhs, not_rhs, 1e-6);
-    assert!(!*not_solution.as_ref(), "Probabilistic verifier must reject unequal expressions");
+    assert!(
+        !*not_solution.as_ref(),
+        "Probabilistic verifier must reject unequal expressions"
+    );
 }
 
 #[test]
@@ -108,8 +123,12 @@ fn test_candidate_heuristic_weight_calculation() {
     let zero = graph.integer(0);
     let simple_expr = graph.add([x, zero]);
 
-    let weight = ProbabilisticVerifier::compute_candidate_heuristic_weight(&graph, simple_expr, Some(x));
-    assert!(weight > 0.0, "Candidate heuristic weight must be strictly positive");
+    let weight =
+        ProbabilisticVerifier::compute_candidate_heuristic_weight(&graph, simple_expr, Some(x));
+    assert!(
+        weight > 0.0,
+        "Candidate heuristic weight must be strictly positive"
+    );
 }
 
 #[test]

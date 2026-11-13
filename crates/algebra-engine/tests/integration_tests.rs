@@ -55,7 +55,10 @@ fn test_grobner_basis_on_expr_graph() {
     let rem = gb.reduce_expr(&graph, g1_plus_1).unwrap();
     let rem_node = graph.get(rem);
     assert!(
-        matches!(rem_node.kind, algebra_core::ExprKind::Number(algebra_core::Number::Integer(1))),
+        matches!(
+            rem_node.kind,
+            algebra_core::ExprKind::Number(algebra_core::Number::Integer(1))
+        ),
         "Remainder of g1 + 1 modulo <g1, g2> must be 1"
     );
 }

@@ -181,14 +181,18 @@ impl SmtExpr {
         match &node.kind {
             algebra_core::ExprKind::Number(num) => match num {
                 algebra_core::Number::Integer(i) => Ok(Self::Int(*i)),
-                algebra_core::Number::Rational(n, d) => {
-                    Ok(Self::Div(Box::new(Self::Real(*n as f64)), Box::new(Self::Real(*d as f64))))
-                }
+                algebra_core::Number::Rational(n, d) => Ok(Self::Div(
+                    Box::new(Self::Real(*n as f64)),
+                    Box::new(Self::Real(*d as f64)),
+                )),
                 algebra_core::Number::Float(f) => Ok(Self::Real(f64::from_bits(*f))),
                 _ => Ok(Self::Real(0.0)),
             },
             algebra_core::ExprKind::Symbol(sym) => {
-                let name = graph.symbols.resolve(*sym).unwrap_or_else(|| "x".to_string());
+                let name = graph
+                    .symbols
+                    .resolve(*sym)
+                    .unwrap_or_else(|| "x".to_string());
                 Ok(Self::Var(name))
             }
             algebra_core::ExprKind::Add(terms) => {
@@ -233,14 +237,16 @@ impl SmtExpr {
                     algebra_core::RelOp::LessEqual => Ok(Self::Le(left, right)),
                     algebra_core::RelOp::GreaterThan => Ok(Self::Gt(left, right)),
                     algebra_core::RelOp::GreaterEqual => Ok(Self::Ge(left, right)),
-                    _ => Err(algebra_core::error::AlgebraError::EvaluationError(
-                        format!("Unsupported SMT relational operator: {:?}", op),
-                    )),
+                    _ => Err(algebra_core::error::AlgebraError::EvaluationError(format!(
+                        "Unsupported SMT relational operator: {:?}",
+                        op
+                    ))),
                 }
             }
-            _ => Err(algebra_core::error::AlgebraError::EvaluationError(
-                format!("Unsupported ExprKind for SMT translation: {:?}", node.kind),
-            )),
+            _ => Err(algebra_core::error::AlgebraError::EvaluationError(format!(
+                "Unsupported ExprKind for SMT translation: {:?}",
+                node.kind
+            ))),
         }
     }
 }

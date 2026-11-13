@@ -752,7 +752,6 @@ impl UraeNotebookApp {
         spodeian_web_utils::trigger_binary_download(filename, data, _mime_type);
     }
 
-
     /// Download active session as a compressed .bson binary file
     pub fn download_bson_backup(&self) {
         if let Ok(bytes) = self.export_current_session_compressed_bson() {

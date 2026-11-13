@@ -310,7 +310,10 @@ impl LemmaRegistry {
     /// Register a verified lemma. Returns `true` if newly registered, `false` if duplicate.
     pub fn register(&self, lemma: LearnedLemma) -> bool {
         let mut guard = self.lemmas.write();
-        if guard.iter().any(|l| l.id == lemma.id || (l.lhs == lemma.lhs && l.rhs == lemma.rhs)) {
+        if guard
+            .iter()
+            .any(|l| l.id == lemma.id || (l.lhs == lemma.lhs && l.rhs == lemma.rhs))
+        {
             false
         } else {
             guard.push(lemma);
@@ -499,10 +502,7 @@ impl LemmaMiner {
             };
 
             if is_proven {
-                let lemma_id = format!(
-                    "lemma_{:x}_{:x}",
-                    hyp.fingerprint.p31, hyp.fingerprint.p61
-                );
+                let lemma_id = format!("lemma_{:x}_{:x}", hyp.fingerprint.p31, hyp.fingerprint.p61);
                 let lemma_name = format!(
                     "Identity between @{} and @{}",
                     hyp.lhs.index(),

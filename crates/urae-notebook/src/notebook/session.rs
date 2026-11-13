@@ -1087,14 +1087,15 @@ pub struct SessionData {
 
 /// Export `SessionData` to zlib-compressed BSON binary blob
 pub fn export_session_to_compressed_bson(session: &SessionData) -> Result<Vec<u8>, String> {
-    spodeian_export::export_to_compressed_bson(session).map_err(|e| format!("BSON serialization error: {e}"))
+    spodeian_export::export_to_compressed_bson(session)
+        .map_err(|e| format!("BSON serialization error: {e}"))
 }
 
 /// Import `SessionData` from compressed or uncompressed BSON binary blob
 pub fn import_session_from_compressed_bson(bytes: &[u8]) -> Result<SessionData, String> {
-    spodeian_export::import_from_compressed_bson(bytes).map_err(|e| format!("BSON deserialization error: {e}"))
+    spodeian_export::import_from_compressed_bson(bytes)
+        .map_err(|e| format!("BSON deserialization error: {e}"))
 }
-
 
 impl Default for SessionData {
     fn default() -> Self {

@@ -221,8 +221,19 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
 
+      # tokenizers (via candle) builds oniguruma from C, so the Android check
+      # needs the NDK's clang; cargo-ndk points cc-rs at it.
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
       - name: Check Android Mobile Target
-        run: cargo check -p urae-ffi --target aarch64-linux-android
+        run: |
+          if [ -d "$ANDROID_HOME/ndk" ]; then
+            export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$(ls -1 "$ANDROID_HOME/ndk" | sort -V | tail -n 1)"
+          fi
+          cargo ndk -t arm64-v8a check -p urae-ffi
 
       - name: Check iOS Simulator Target
         run: cargo check -p urae-ffi --target aarch64-apple-ios-sim

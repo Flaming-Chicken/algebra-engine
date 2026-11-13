@@ -239,7 +239,10 @@ impl MctsPolicyHead {
                 continue;
             }
             let node = graph.get(curr);
-            if matches!(node.kind, ExprKind::Div(_, _) | ExprKind::Number(algebra_core::Number::Rational(_, _))) {
+            if matches!(
+                node.kind,
+                ExprKind::Div(_, _) | ExprKind::Number(algebra_core::Number::Rational(_, _))
+            ) {
                 has_div = true;
                 break;
             }
@@ -401,7 +404,9 @@ impl MctsSearchEngine {
                 // Check if all children evaluate to scalar number
                 let syms = ProbabilisticVerifier::extract_symbols(graph, expr_id);
                 if syms.is_empty() {
-                    if let Some(val) = ProbabilisticVerifier::eval_float(graph, expr_id, &HashMap::new()) {
+                    if let Some(val) =
+                        ProbabilisticVerifier::eval_float(graph, expr_id, &HashMap::new())
+                    {
                         let folded = graph.float(val);
                         if folded != expr_id {
                             return Some(folded);
@@ -417,16 +422,28 @@ impl MctsSearchEngine {
                     if terms.len() == 2 {
                         let t0 = graph.get(terms[0]);
                         let t1 = graph.get(terms[1]);
-                        if let (ExprKind::Pow(b0, e0), ExprKind::Pow(b1, e1)) = (&t0.kind, &t1.kind) {
+                        if let (ExprKind::Pow(b0, e0), ExprKind::Pow(b1, e1)) = (&t0.kind, &t1.kind)
+                        {
                             let n_e0 = graph.get(*e0);
                             let n_e1 = graph.get(*e1);
-                            if let (ExprKind::Number(algebra_core::Number::Integer(2)), ExprKind::Number(algebra_core::Number::Integer(2))) = (&n_e0.kind, &n_e1.kind) {
+                            if let (
+                                ExprKind::Number(algebra_core::Number::Integer(2)),
+                                ExprKind::Number(algebra_core::Number::Integer(2)),
+                            ) = (&n_e0.kind, &n_e1.kind)
+                            {
                                 let nb0 = graph.get(*b0);
                                 let nb1 = graph.get(*b1);
-                                if let (ExprKind::Function { name: f0, args: a0 }, ExprKind::Function { name: f1, args: a1 }) = (&nb0.kind, &nb1.kind) {
+                                if let (
+                                    ExprKind::Function { name: f0, args: a0 },
+                                    ExprKind::Function { name: f1, args: a1 },
+                                ) = (&nb0.kind, &nb1.kind)
+                                {
                                     let n0 = graph.symbols.resolve(*f0).unwrap_or_default();
                                     let n1 = graph.symbols.resolve(*f1).unwrap_or_default();
-                                    if ((n0 == "sin" && n1 == "cos") || (n0 == "cos" && n1 == "sin")) && a0 == a1 {
+                                    if ((n0 == "sin" && n1 == "cos")
+                                        || (n0 == "cos" && n1 == "sin"))
+                                        && a0 == a1
+                                    {
                                         return Some(graph.integer(1));
                                     }
                                 }
@@ -441,7 +458,9 @@ impl MctsSearchEngine {
                     .iter()
                     .filter_map(|&s| graph.symbols.resolve(s))
                     .collect();
-                if let Ok(basis) = GrobnerBasis::from_exprs(graph, &[], &vars, MonomialOrder::GrevLex) {
+                if let Ok(basis) =
+                    GrobnerBasis::from_exprs(graph, &[], &vars, MonomialOrder::GrevLex)
+                {
                     if let Ok(reduced) = basis.reduce_expr(graph, expr_id) {
                         if reduced != expr_id {
                             return Some(reduced);
@@ -482,7 +501,8 @@ impl MctsSearchEngine {
         for &(_, child_idx) in &parent.children {
             let child = &nodes[child_idx];
             let q = child.mean_value();
-            let u = self.config.c_puct * child.prior_prob * sqrt_total / (1.0 + child.visits as f64);
+            let u =
+                self.config.c_puct * child.prior_prob * sqrt_total / (1.0 + child.visits as f64);
             let score = q + u;
 
             if score > best_score {
@@ -558,7 +578,8 @@ impl MctsSearchEngine {
 
             // 1. Selection
             let mut curr_idx = 0;
-            while nodes[curr_idx].untried_actions.is_empty() && !nodes[curr_idx].children.is_empty() {
+            while nodes[curr_idx].untried_actions.is_empty() && !nodes[curr_idx].children.is_empty()
+            {
                 if let Some(next_idx) = self.select_puct_child(&nodes, curr_idx) {
                     curr_idx = next_idx;
                 } else {

@@ -63,7 +63,10 @@ impl QuantizedTransformerWeights {
     /// Ingest from a SafeTensors binary byte buffer using `spodeian-ml-utils`.
     pub fn from_safetensors_bytes(bytes: &[u8]) -> Result<Self, String> {
         // First try central spodeian_ml_utils loader backed by Candle
-        if let Ok(loaded) = spodeian_ml_utils::LoadedModelWeights::from_bytes(bytes, &spodeian_ml_utils::candle_core::Device::Cpu) {
+        if let Ok(loaded) = spodeian_ml_utils::LoadedModelWeights::from_bytes(
+            bytes,
+            &spodeian_ml_utils::candle_core::Device::Cpu,
+        ) {
             let emb_tensor = loaded
                 .get_tensor("embeddings")
                 .or_else(|_| loaded.get_tensor("token_embeddings"));
@@ -74,24 +77,28 @@ impl QuantizedTransformerWeights {
                 let embed_dim = *shape.get(1).unwrap_or(&8);
                 let scale = 0.05f32;
 
-                let token_embeddings = if tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
-                    spodeian_ml_utils::LoadedModelWeights::dequantize_int8(tensor, scale)
-                        .map_err(|e| e.to_string())?
-                        .flatten_all()
-                        .map_err(|e| e.to_string())?
-                        .to_vec1::<f32>()
-                        .map_err(|e| e.to_string())?
-                } else {
-                    tensor
-                        .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
-                        .map_err(|e| e.to_string())?
-                        .flatten_all()
-                        .map_err(|e| e.to_string())?
-                        .to_vec1::<f32>()
-                        .map_err(|e| e.to_string())?
-                };
+                let token_embeddings =
+                    if tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
+                        spodeian_ml_utils::LoadedModelWeights::dequantize_int8(tensor, scale)
+                            .map_err(|e| e.to_string())?
+                            .flatten_all()
+                            .map_err(|e| e.to_string())?
+                            .to_vec1::<f32>()
+                            .map_err(|e| e.to_string())?
+                    } else {
+                        tensor
+                            .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
+                            .map_err(|e| e.to_string())?
+                            .flatten_all()
+                            .map_err(|e| e.to_string())?
+                            .to_vec1::<f32>()
+                            .map_err(|e| e.to_string())?
+                    };
 
-                let projection_weights = if let Ok(p_tensor) = loaded.get_tensor("projection").or_else(|_| loaded.get_tensor("projection_weights")) {
+                let projection_weights = if let Ok(p_tensor) = loaded
+                    .get_tensor("projection")
+                    .or_else(|_| loaded.get_tensor("projection_weights"))
+                {
                     if p_tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
                         spodeian_ml_utils::LoadedModelWeights::dequantize_int8(p_tensor, scale)
                             .map_err(|e| e.to_string())?
@@ -115,7 +122,6 @@ impl QuantizedTransformerWeights {
                     }
                     id
                 };
-
 
                 return Ok(Self {
                     vocab_size,
@@ -145,8 +151,8 @@ impl QuantizedTransformerWeights {
         let header_json = std::str::from_utf8(&bytes[8..8 + header_len])
             .map_err(|e| format!("Invalid UTF-8 in SafeTensors header: {e}"))?;
 
-        let header: serde_json::Value = serde_json::from_str(header_json)
-            .map_err(|e| format!("Invalid JSON header: {e}"))?;
+        let header: serde_json::Value =
+            serde_json::from_str(header_json).map_err(|e| format!("Invalid JSON header: {e}"))?;
 
         let data_start = 8 + header_len;
 
@@ -178,10 +184,16 @@ impl QuantizedTransformerWeights {
         let e_off = offsets[1].as_u64().unwrap_or(0) as usize;
 
         let emb_bytes = &bytes[data_start + s_off..data_start + e_off];
-        let dtype_str = emb_info.get("dtype").and_then(|d| d.as_str()).unwrap_or("F32");
+        let dtype_str = emb_info
+            .get("dtype")
+            .and_then(|d| d.as_str())
+            .unwrap_or("F32");
 
         let token_embeddings = if dtype_str == "I8" || dtype_str == "U8" || dtype_str == "INT8" {
-            emb_bytes.iter().map(|&b| (b as i8) as f32 * scale).collect()
+            emb_bytes
+                .iter()
+                .map(|&b| (b as i8) as f32 * scale)
+                .collect()
         } else {
             emb_bytes
                 .as_chunks::<4>()
@@ -203,7 +215,10 @@ impl QuantizedTransformerWeights {
             let p_s = p_offsets[0].as_u64().unwrap_or(0) as usize;
             let p_e = p_offsets[1].as_u64().unwrap_or(0) as usize;
             let p_bytes = &bytes[data_start + p_s..data_start + p_e];
-            let p_dtype = p_info.get("dtype").and_then(|d| d.as_str()).unwrap_or("F32");
+            let p_dtype = p_info
+                .get("dtype")
+                .and_then(|d| d.as_str())
+                .unwrap_or("F32");
             if p_dtype == "I8" || p_dtype == "U8" || p_dtype == "INT8" {
                 p_bytes.iter().map(|&b| (b as i8) as f32 * scale).collect()
             } else {
@@ -230,7 +245,6 @@ impl QuantizedTransformerWeights {
             scale,
         })
     }
-
 
     /// Calibrated compact 8-dimensional quantized representation for core AST symbol tokens.
     pub fn default_quantized_weights() -> Self {
@@ -271,7 +285,8 @@ pub struct NeuralExpressionEmbedder {
 impl Default for NeuralExpressionEmbedder {
     fn default() -> Self {
         // Load production contrastive AST embeddings trained via spodeian-ml
-        const EMBEDDED_MODEL: &[u8] = include_bytes!("../data/algebra_expression_embedder.safetensors");
+        const EMBEDDED_MODEL: &[u8] =
+            include_bytes!("../data/algebra_expression_embedder.safetensors");
         if let Ok(weights) = QuantizedTransformerWeights::from_safetensors_bytes(EMBEDDED_MODEL) {
             Self::new(weights)
         } else {
@@ -279,7 +294,6 @@ impl Default for NeuralExpressionEmbedder {
         }
     }
 }
-
 
 impl NeuralExpressionEmbedder {
     pub fn new(weights: QuantizedTransformerWeights) -> Self {
@@ -369,15 +383,29 @@ impl NeuralExpressionEmbedder {
                     Number::Float(f) => *f as f32,
                     _ => 0.0,
                 };
-                let sign = if val < 0.0 { -1.0 } else if val > 0.0 { 1.0 } else { 0.0 };
+                let sign = if val < 0.0 {
+                    -1.0
+                } else if val > 0.0 {
+                    1.0
+                } else {
+                    0.0
+                };
                 let abs_v = val.abs();
-                let exp = if abs_v > 1e-12 { abs_v.log2().floor() } else { 0.0 };
-                let mant = if abs_v > 1e-12 { abs_v / 2.0f32.powf(exp) } else { 0.0 };
+                let exp = if abs_v > 1e-12 {
+                    abs_v.log2().floor()
+                } else {
+                    0.0
+                };
+                let mant = if abs_v > 1e-12 {
+                    abs_v / 2.0f32.powf(exp)
+                } else {
+                    0.0
+                };
                 c_node.num_features = [sign, mant, exp];
             } else if let ExprKind::Symbol(s) = &node.kind {
                 // Pre-order alpha-equivalence anonymization
                 let next_var = var_order.len();
-                let v_id = *var_order.entry(s.clone()).or_insert(next_var);
+                let v_id = *var_order.entry(*s).or_insert(next_var);
                 c_node.var_id = v_id;
             }
 
@@ -624,7 +652,12 @@ impl HeuristicSearchEngine {
         target_id: ExprId,
         target_epsilon: f64,
     ) -> Solution<bool> {
-        ProbabilisticVerifier::verify_equivalence_parallel(graph, candidate_id, target_id, target_epsilon)
+        ProbabilisticVerifier::verify_equivalence_parallel(
+            graph,
+            candidate_id,
+            target_id,
+            target_epsilon,
+        )
     }
 
     /// Simplify an expression with opportunistic deterministic proof and probabilistic fallback.
@@ -784,7 +817,11 @@ impl HeuristicSearchEngine {
     }
 
     /// Compute rich AST metrics, neural expression embedding, and proof-search depth indicators.
-    pub fn analyze_ast_proof_depth(&self, graph: &ExprGraph, root: ExprId) -> AstProofDepthIndicator {
+    pub fn analyze_ast_proof_depth(
+        &self,
+        graph: &ExprGraph,
+        root: ExprId,
+    ) -> AstProofDepthIndicator {
         let ast_depth = compute_ast_depth(graph, root);
         let ast_node_count = count_ast_nodes(graph, root);
         let embedder = self.neural_embedder.as_ref().cloned().unwrap_or_default();

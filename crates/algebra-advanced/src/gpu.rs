@@ -61,7 +61,6 @@ impl SimdPolyVector {
     }
 }
 
-
 /// Compute Shader / GPU Execution Kernel Abstraction.
 #[derive(Debug, Clone, Default)]
 pub struct GpuComputeKernel {

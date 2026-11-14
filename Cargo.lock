@@ -5008,8 +5008,7 @@ dependencies = [
 
 [[package]]
 name = "sml-lake"
-version = "0.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
+version = "0.2.0"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5026,8 +5025,7 @@ dependencies = [
 
 [[package]]
 name = "sml-runtime"
-version = "0.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
+version = "0.2.0"
 dependencies = [
  "ahash 0.8.12",
  "byteorder",
@@ -5086,7 +5084,6 @@ dependencies = [
 [[package]]
 name = "spodeian-cache"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "base64 0.22.1",
  "js-sys",
@@ -5103,7 +5100,6 @@ dependencies = [
 [[package]]
 name = "spodeian-export"
 version = "2.0.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "bson",
  "miniz_oxide 0.8.9",
@@ -5115,7 +5111,6 @@ dependencies = [
 [[package]]
 name = "spodeian-parallel"
 version = "1.0.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "rayon",
 ]
@@ -5123,7 +5118,6 @@ dependencies = [
 [[package]]
 name = "spodeian-telemetry"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -5137,7 +5131,6 @@ dependencies = [
 [[package]]
 name = "spodeian-tokens"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
  "serde",
  "serde_json",
@@ -5146,9 +5139,10 @@ dependencies = [
 [[package]]
 name = "spodeian-web-utils"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v2.0.0#4b325d308aabbe70498f27627f83ebcd742d2361"
 dependencies = [
+ "base64 0.22.1",
  "js-sys",
+ "sha2",
  "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",

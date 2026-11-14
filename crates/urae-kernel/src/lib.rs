@@ -306,4 +306,568 @@ impl UraeKernel {
     pub fn execute(&mut self, code: &str) -> ExecuteReply {
         self.controller.execute_cell(code)
     }
+
+    /// Dispatch a Jupyter Messaging Protocol v5.3 message and return the shell reply plus IOPub events.
+    pub fn dispatch_jupyter(&mut self, msg: &JupyterMessage) -> JupyterDispatchOutput {
+        self.controller.handle_jupyter_message(msg)
+    }
+}
+
+/// Jupyter Messaging Protocol v5.3 message header.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JupyterHeader {
+    pub msg_id: String,
+    pub session: String,
+    pub username: String,
+    pub date: String,
+    pub msg_type: String,
+    pub version: String,
+}
+
+impl JupyterHeader {
+    /// Construct a paired reply header for a parent request header.
+    pub fn reply_to(parent: &Self, msg_type: impl Into<String>, msg_id: impl Into<String>) -> Self {
+        Self {
+            msg_id: msg_id.into(),
+            session: parent.session.clone(),
+            username: parent.username.clone(),
+            date: parent.date.clone(),
+            msg_type: msg_type.into(),
+            version: "5.3".to_string(),
+        }
+    }
+}
+
+/// Jupyter Messaging Protocol v5.3 wire message envelope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JupyterMessage {
+    pub header: JupyterHeader,
+    pub parent_header: Option<JupyterHeader>,
+    pub metadata: serde_json::Value,
+    pub content: serde_json::Value,
+}
+
+impl JupyterMessage {
+    /// Create a message referencing `parent` as its `parent_header`.
+    pub fn with_parent(
+        parent: &JupyterHeader,
+        msg_type: impl Into<String>,
+        msg_id: impl Into<String>,
+        content: serde_json::Value,
+    ) -> Self {
+        Self {
+            header: JupyterHeader::reply_to(parent, msg_type, msg_id),
+            parent_header: Some(parent.clone()),
+            metadata: serde_json::json!({}),
+            content,
+        }
+    }
+}
+
+/// Combined shell-channel reply and ordered IOPub broadcasts produced for one wire request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JupyterDispatchOutput {
+    pub shell_reply: JupyterMessage,
+    pub iopub_messages: Vec<JupyterMessage>,
+}
+
+const BUILTIN_COMPLETIONS: &[&str] = &[
+    "diff",
+    "integrate",
+    "simplify",
+    "solve",
+    "limit",
+    "taylor",
+    "laplace",
+    "expand",
+    "factor",
+    "partial_fractions",
+    "gear!",
+    "quantum_bell",
+    "sin",
+    "cos",
+    "tan",
+    "exp",
+    "ln",
+    "sqrt",
+];
+
+fn delimiters_balanced(code: &str) -> bool {
+    let mut stack = Vec::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    for ch in code.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if (in_single || in_double) && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if in_single || in_double {
+            continue;
+        }
+        match ch {
+            '(' | '[' | '{' => stack.push(ch),
+            ')' | ']' | '}' => {
+                let expected = match ch {
+                    ')' => '(',
+                    ']' => '[',
+                    _ => '{',
+                };
+                if stack.pop() != Some(expected) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    !in_single && !in_double && stack.is_empty()
+}
+
+impl NotebookSessionController {
+    /// Handle an incoming Jupyter Messaging Protocol v5.3 request and emit
+    /// both the shell reply and ordered IOPub status/display broadcasts.
+    pub fn handle_jupyter_message(&mut self, msg: &JupyterMessage) -> JupyterDispatchOutput {
+        let parent = &msg.header;
+        let base_id = &parent.msg_id;
+        let busy = JupyterMessage::with_parent(
+            parent,
+            "status",
+            format!("{base_id}:busy"),
+            serde_json::json!({ "execution_state": "busy" }),
+        );
+        let idle = JupyterMessage::with_parent(
+            parent,
+            "status",
+            format!("{base_id}:idle"),
+            serde_json::json!({ "execution_state": "idle" }),
+        );
+
+        match parent.msg_type.as_str() {
+            "kernel_info_request" => {
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "kernel_info_reply",
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": "ok",
+                        "protocol_version": "5.3",
+                        "implementation": "urae-kernel",
+                        "implementation_version": env!("CARGO_PKG_VERSION"),
+                        "language_info": {
+                            "name": "urae",
+                            "version": env!("CARGO_PKG_VERSION"),
+                            "mimetype": "text/x-urae",
+                            "file_extension": ".urae"
+                        },
+                        "banner": "URAE Native Symbolic & Numerical Jupyter Kernel"
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+            "execute_request" => {
+                let code = msg
+                    .content
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let silent = msg
+                    .content
+                    .get("silent")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                let reply = self.execute_cell(code);
+                let mut iopub = vec![busy];
+
+                if !silent {
+                    iopub.push(JupyterMessage::with_parent(
+                        parent,
+                        "execute_input",
+                        format!("{base_id}:input"),
+                        serde_json::json!({
+                            "code": code,
+                            "execution_count": reply.execution_count,
+                        }),
+                    ));
+                    if reply.status == "error" {
+                        let evalue = reply
+                            .mime_bundle
+                            .data
+                            .get("text/plain")
+                            .cloned()
+                            .unwrap_or_else(|| "Execution error".to_string());
+                        iopub.push(JupyterMessage::with_parent(
+                            parent,
+                            "error",
+                            format!("{base_id}:error"),
+                            serde_json::json!({
+                                "ename": "UraeExecutionError",
+                                "evalue": evalue,
+                                "traceback": [evalue],
+                            }),
+                        ));
+                    } else {
+                        iopub.push(JupyterMessage::with_parent(
+                            parent,
+                            "execute_result",
+                            format!("{base_id}:result"),
+                            serde_json::json!({
+                                "execution_count": reply.execution_count,
+                                "data": reply.mime_bundle.data,
+                                "metadata": reply.mime_bundle.metadata,
+                            }),
+                        ));
+                    }
+                }
+                iopub.push(idle);
+
+                let shell_content = if reply.status == "error" {
+                    let evalue = reply
+                        .mime_bundle
+                        .data
+                        .get("text/plain")
+                        .cloned()
+                        .unwrap_or_else(|| "Execution error".to_string());
+                    serde_json::json!({
+                        "status": "error",
+                        "execution_count": reply.execution_count,
+                        "ename": "UraeExecutionError",
+                        "evalue": evalue,
+                        "traceback": [evalue],
+                    })
+                } else {
+                    serde_json::json!({
+                        "status": "ok",
+                        "execution_count": reply.execution_count,
+                        "user_expressions": reply.user_expressions,
+                    })
+                };
+
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "execute_reply",
+                    format!("{base_id}:reply"),
+                    shell_content,
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: iopub,
+                }
+            }
+            "is_complete_request" => {
+                let code = msg
+                    .content
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let status = if delimiters_balanced(code) {
+                    "complete"
+                } else {
+                    "incomplete"
+                };
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "is_complete_reply",
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": status,
+                        "indent": if status == "incomplete" { "    " } else { "" },
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+            "complete_request" => {
+                let code = msg
+                    .content
+                    .get("code")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let cursor_pos = msg
+                    .content
+                    .get("cursor_pos")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| (v as usize).min(code.len()))
+                    .unwrap_or(code.len());
+
+                let prefix_slice = code.get(..cursor_pos).unwrap_or("");
+                let token_start = prefix_slice
+                    .rfind(|c: char| !c.is_alphanumeric() && c != '_' && c != '!')
+                    .map_or(0, |idx| idx + 1);
+                let prefix = &prefix_slice[token_start..];
+
+                let mut matches: Vec<String> = self
+                    .session
+                    .bindings
+                    .keys()
+                    .filter(|name| name.starts_with(prefix))
+                    .cloned()
+                    .collect();
+                for builtin in BUILTIN_COMPLETIONS {
+                    if builtin.starts_with(prefix) && !matches.iter().any(|m| m == builtin) {
+                        matches.push((*builtin).to_string());
+                    }
+                }
+                matches.sort();
+
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "complete_reply",
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": "ok",
+                        "matches": matches,
+                        "cursor_start": token_start,
+                        "cursor_end": cursor_pos,
+                        "metadata": {},
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+            "history_request" => {
+                let n = msg
+                    .content
+                    .get("n")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize);
+                let slice: &[CellRecord] = match n {
+                    Some(limit) if limit < self.cell_history.len() => {
+                        &self.cell_history[self.cell_history.len() - limit..]
+                    }
+                    _ => &self.cell_history,
+                };
+                let history: Vec<(usize, usize, String)> = slice
+                    .iter()
+                    .map(|cell| (0, cell.id, cell.input_code.clone()))
+                    .collect();
+
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "history_reply",
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": "ok",
+                        "history": history,
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+            "shutdown_request" => {
+                let restart = msg
+                    .content
+                    .get("restart")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if restart {
+                    self.reset();
+                }
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    "shutdown_reply",
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": "ok",
+                        "restart": restart,
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+            other => {
+                let evalue = format!("Unsupported Jupyter message type: {other}");
+                let shell_reply = JupyterMessage::with_parent(
+                    parent,
+                    format!("{}_reply", other.trim_end_matches("_request")),
+                    format!("{base_id}:reply"),
+                    serde_json::json!({
+                        "status": "error",
+                        "ename": "UnsupportedMessageType",
+                        "evalue": evalue,
+                        "traceback": [evalue],
+                    }),
+                );
+                JupyterDispatchOutput {
+                    shell_reply,
+                    iopub_messages: vec![busy, idle],
+                }
+            }
+        }
+    }
+
+    /// Generate a standard Jupyter `kernel.json` kernelspec for `urae-kernel`.
+    pub fn kernelspec_json(binary_path: &str) -> String {
+        serde_json::json!({
+            "argv": [binary_path, "-f", "{connection_file}"],
+            "display_name": "URAE (Rust CAS & Multiphysics)",
+            "language": "urae",
+            "metadata": {
+                "debugger": false
+            }
+        })
+        .to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn req(msg_id: &str, msg_type: &str, content: serde_json::Value) -> JupyterMessage {
+        JupyterMessage {
+            header: JupyterHeader {
+                msg_id: msg_id.to_string(),
+                session: "test-session".to_string(),
+                username: "tester".to_string(),
+                date: "2026-11-14T00:00:00Z".to_string(),
+                msg_type: msg_type.to_string(),
+                version: "5.3".to_string(),
+            },
+            parent_header: None,
+            metadata: serde_json::json!({}),
+            content,
+        }
+    }
+
+    #[test]
+    fn test_jupyter_kernel_info_and_kernelspec() {
+        let mut controller = NotebookSessionController::new();
+        let out =
+            controller.handle_jupyter_message(&req("m1", "kernel_info_request", serde_json::json!({})));
+        assert_eq!(out.shell_reply.header.msg_type, "kernel_info_reply");
+        assert_eq!(out.shell_reply.content["status"], "ok");
+        assert_eq!(out.shell_reply.content["protocol_version"], "5.3");
+        assert_eq!(out.shell_reply.content["language_info"]["name"], "urae");
+        assert_eq!(out.iopub_messages.len(), 2);
+        assert_eq!(out.iopub_messages[0].content["execution_state"], "busy");
+        assert_eq!(out.iopub_messages[1].content["execution_state"], "idle");
+
+        let spec: serde_json::Value =
+            serde_json::from_str(&NotebookSessionController::kernelspec_json("/usr/bin/urae-kernel"))
+                .expect("valid kernelspec json");
+        assert_eq!(spec["language"], "urae");
+        assert_eq!(spec["argv"][0], "/usr/bin/urae-kernel");
+        assert_eq!(spec["argv"][2], "{connection_file}");
+    }
+
+    #[test]
+    fn test_jupyter_execute_math_cad_and_error() {
+        let mut controller = NotebookSessionController::new();
+
+        let math = controller.handle_jupyter_message(&req(
+            "e1",
+            "execute_request",
+            serde_json::json!({ "code": "2 + 3", "silent": false }),
+        ));
+        assert_eq!(math.shell_reply.header.msg_type, "execute_reply");
+        assert_eq!(math.shell_reply.content["status"], "ok");
+        assert_eq!(math.shell_reply.content["execution_count"], 1);
+        assert_eq!(math.iopub_messages[1].header.msg_type, "execute_input");
+        assert_eq!(math.iopub_messages[2].header.msg_type, "execute_result");
+        assert!(math.iopub_messages[2].content["data"]["text/plain"].is_string());
+
+        let cad = controller.handle_jupyter_message(&req(
+            "e2",
+            "execute_request",
+            serde_json::json!({ "code": "gear!", "silent": false }),
+        ));
+        assert_eq!(cad.shell_reply.content["status"], "ok");
+        let html = cad.iopub_messages[2].content["data"]["text/html"]
+            .as_str()
+            .expect("cad execute_result includes text/html");
+        assert!(html.contains("<html") || html.contains("Involute Gear"));
+
+        let err = controller.handle_jupyter_message(&req(
+            "e3",
+            "execute_request",
+            serde_json::json!({ "code": "1 + )", "silent": false }),
+        ));
+        assert_eq!(err.shell_reply.content["status"], "error");
+        assert_eq!(err.iopub_messages[2].header.msg_type, "error");
+    }
+
+    #[test]
+    fn test_jupyter_completion_history_and_shutdown() {
+        let mut controller = NotebookSessionController::new();
+        controller.set_parameter("alpha_gain", 2.5);
+        controller.execute_cell("1 + 1");
+
+        let complete_ok = controller.handle_jupyter_message(&req(
+            "c1",
+            "is_complete_request",
+            serde_json::json!({ "code": "sin(x)" }),
+        ));
+        assert_eq!(complete_ok.shell_reply.content["status"], "complete");
+
+        let incomplete = controller.handle_jupyter_message(&req(
+            "c2",
+            "is_complete_request",
+            serde_json::json!({ "code": "sin((x + 1)" }),
+        ));
+        assert_eq!(incomplete.shell_reply.content["status"], "incomplete");
+
+        let comp = controller.handle_jupyter_message(&req(
+            "c3",
+            "complete_request",
+            serde_json::json!({ "code": "al", "cursor_pos": 2 }),
+        ));
+        let matches = comp.shell_reply.content["matches"]
+            .as_array()
+            .expect("matches array");
+        assert!(matches.iter().any(|m| m == "alpha_gain"));
+
+        let diff_comp = controller.handle_jupyter_message(&req(
+            "c4",
+            "complete_request",
+            serde_json::json!({ "code": "dif", "cursor_pos": 3 }),
+        ));
+        assert!(
+            diff_comp.shell_reply.content["matches"]
+                .as_array()
+                .expect("matches")
+                .iter()
+                .any(|m| m == "diff")
+        );
+
+        let hist = controller.handle_jupyter_message(&req(
+            "h1",
+            "history_request",
+            serde_json::json!({ "n": 10 }),
+        ));
+        assert_eq!(hist.shell_reply.content["history"][0][2], "1 + 1");
+
+        let shut = controller.handle_jupyter_message(&req(
+            "s1",
+            "shutdown_request",
+            serde_json::json!({ "restart": true }),
+        ));
+        assert_eq!(shut.shell_reply.content["restart"], true);
+        assert_eq!(controller.execution_count, 0);
+    }
 }

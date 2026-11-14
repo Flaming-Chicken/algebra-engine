@@ -199,36 +199,34 @@ impl SpecialFunctions for ExprGraph {
                             return Ok(self.integer(fact));
                         }
                     }
-                    ExprKind::Number(Number::Rational(num, den)) => {
-                        if *den == 2 {
-                            // Half-integers Gamma(num / 2)
-                            match *num {
-                                1 => return Ok(sqrt_pi), // Gamma(1/2) = sqrt(pi)
-                                3 => {
-                                    // Gamma(3/2) = sqrt(pi) / 2
-                                    return Ok(self.div(sqrt_pi, self.integer(2)));
-                                }
-                                5 => {
-                                    // Gamma(5/2) = 3*sqrt(pi) / 4
-                                    let num_part = self.mul([self.integer(3), sqrt_pi]);
-                                    return Ok(self.div(num_part, self.integer(4)));
-                                }
-                                7 => {
-                                    // Gamma(7/2) = 15*sqrt(pi) / 8
-                                    let num_part = self.mul([self.integer(15), sqrt_pi]);
-                                    return Ok(self.div(num_part, self.integer(8)));
-                                }
-                                -1 => {
-                                    // Gamma(-1/2) = -2*sqrt(pi)
-                                    return Ok(self.mul([self.integer(-2), sqrt_pi]));
-                                }
-                                -3 => {
-                                    // Gamma(-3/2) = 4*sqrt(pi) / 3
-                                    let num_part = self.mul([self.integer(4), sqrt_pi]);
-                                    return Ok(self.div(num_part, self.integer(3)));
-                                }
-                                _ => {}
+                    ExprKind::Number(Number::Rational(num, den)) if *den == 2 => {
+                        // Half-integers Gamma(num / 2)
+                        match *num {
+                            1 => return Ok(sqrt_pi), // Gamma(1/2) = sqrt(pi)
+                            3 => {
+                                // Gamma(3/2) = sqrt(pi) / 2
+                                return Ok(self.div(sqrt_pi, self.integer(2)));
                             }
+                            5 => {
+                                // Gamma(5/2) = 3*sqrt(pi) / 4
+                                let num_part = self.mul([self.integer(3), sqrt_pi]);
+                                return Ok(self.div(num_part, self.integer(4)));
+                            }
+                            7 => {
+                                // Gamma(7/2) = 15*sqrt(pi) / 8
+                                let num_part = self.mul([self.integer(15), sqrt_pi]);
+                                return Ok(self.div(num_part, self.integer(8)));
+                            }
+                            -1 => {
+                                // Gamma(-1/2) = -2*sqrt(pi)
+                                return Ok(self.mul([self.integer(-2), sqrt_pi]));
+                            }
+                            -3 => {
+                                // Gamma(-3/2) = 4*sqrt(pi) / 3
+                                let num_part = self.mul([self.integer(4), sqrt_pi]);
+                                return Ok(self.div(num_part, self.integer(3)));
+                            }
+                            _ => {}
                         }
                     }
                     _ => {}
@@ -360,10 +358,8 @@ impl SpecialFunctions for ExprGraph {
                     ExprKind::Number(Number::Constant(algebra_core::Constant::E)) => {
                         return Ok(self.integer(1)); // W(e) = 1
                     }
-                    ExprKind::Symbol(s) => {
-                        if self.symbols.resolve(*s).as_deref() == Some("e") {
-                            return Ok(self.integer(1));
-                        }
+                    ExprKind::Symbol(s) if self.symbols.resolve(*s).as_deref() == Some("e") => {
+                        return Ok(self.integer(1));
                     }
                     _ => {}
                 }

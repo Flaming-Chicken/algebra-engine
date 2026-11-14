@@ -387,14 +387,14 @@ pub fn eval_gamma(x: f64) -> f64 {
     }
     // Lanczos coefficients for g=7, N=9
     let p = [
-        0.99999999999980993,
+        0.999_999_999_999_809_9,
         676.5203681218851,
         -1259.1392167224028,
-        771.32342877765313,
-        -176.61502916214059,
+        771.323_428_777_653_1,
+        -176.615_029_162_140_6,
         12.507343278686905,
         -0.138571095856205,
-        9.9843695780195716e-6,
+        9.984_369_578_019_572e-6,
         1.5056327351493116e-7,
     ];
     let z = x - 1.0;
@@ -528,7 +528,7 @@ pub fn eval_zeta(s: f64) -> f64 {
 
 /// Numerical evaluation of Lambert W function $W_0(x)$ via Halley's cubic iteration.
 pub fn eval_lambert_w(x: f64) -> f64 {
-    let inv_e = -0.3678794411714423215955;
+    let inv_e = -0.367_879_441_171_442_33;
     if x < inv_e {
         return f64::NAN;
     }
@@ -542,7 +542,7 @@ pub fn eval_lambert_w(x: f64) -> f64 {
         let p = (2.0 * (std::f64::consts::E * x + 1.0)).sqrt();
         -1.0 + p - p * p / 3.0
     } else if x <= 1.0 {
-        0.56714329040978387 * x
+        0.567_143_290_409_783_8 * x
     } else {
         let lx = x.ln();
         let llx = lx.ln().max(-10.0);
@@ -587,7 +587,7 @@ pub fn eval_ci(x: f64) -> f64 {
     if x <= 0.0 {
         return f64::NAN;
     }
-    let euler_mascheroni = 0.57721566490153286;
+    let euler_mascheroni = 0.577_215_664_901_532_9;
     let mut sum = euler_mascheroni + x.ln();
     let x2 = x * x;
     let mut term = 1.0;

@@ -532,15 +532,13 @@ impl RischIntegrator {
                                 return Ok(graph.add([term1, term2]));
                             }
                         }
-                        "ln" | "log" => {
-                            if is_degree_1 {
-                                // int x * ln(x) dx = (1/2)*x^2*ln(x) - (1/4)*x^2
-                                let x_sq = graph.pow(x, graph.integer(2));
-                                let ln_x = graph.function("ln", [x]);
-                                let half_xsq_ln = graph.mul([graph.rational(1, 2), x_sq, ln_x]);
-                                let quarter_xsq = graph.mul([graph.rational(1, 4), x_sq]);
-                                return Ok(graph.sub(half_xsq_ln, quarter_xsq));
-                            }
+                        "ln" | "log" if is_degree_1 => {
+                            // int x * ln(x) dx = (1/2)*x^2*ln(x) - (1/4)*x^2
+                            let x_sq = graph.pow(x, graph.integer(2));
+                            let ln_x = graph.function("ln", [x]);
+                            let half_xsq_ln = graph.mul([graph.rational(1, 2), x_sq, ln_x]);
+                            let quarter_xsq = graph.mul([graph.rational(1, 4), x_sq]);
+                            return Ok(graph.sub(half_xsq_ln, quarter_xsq));
                         }
                         _ => {}
                     }

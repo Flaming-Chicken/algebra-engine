@@ -211,6 +211,7 @@ where
 {
     type Output = Self;
 
+    #[allow(clippy::suspicious_arithmetic_impl)] // SE(3) relative pose quotient A * B^-1
     fn div(self, rhs: Self) -> Self::Output {
         self * rhs.inverse()
     }

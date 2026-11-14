@@ -6,8 +6,10 @@
 use algebra_core::ExprGraph;
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::parser::ExprParser;
+use algebra_core::vm::{BytecodeVM, VmCompiler};
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::executor::ExecutionContext;
+use algebra_engine::ode::{NumericalOdeConfig, NumericalOdeMethod, NumericalOdeSolver};
 use algebra_engine::simplify::Simplifier;
 use algebra_engine::solver::SymbolicSolver;
 use algebra_engine::wolfram::WolframAlphaEngine;
@@ -219,9 +221,167 @@ pub fn wasm_format_unicode(input_str: &str) -> String {
     }
 }
 
+/// Sample a 1D expression `y = f(var)` across `[x_min, x_max]` using BytecodeVM,
+/// returning a JSON array of finite `[x, y]` coordinate pairs for inline web notebook plotting.
+#[wasm_bindgen]
+pub fn wasm_plot_sample_1d(
+    expr_str: &str,
+    var: &str,
+    x_min: f64,
+    x_max: f64,
+    samples: usize,
+) -> String {
+    if !x_min.is_finite() || !x_max.is_finite() {
+        return serde_json::json!({ "error": "x_min and x_max must be finite" }).to_string();
+    }
+    if samples == 0 {
+        return "[]".to_string();
+    }
+
+    let graph = ExprGraph::new();
+    let parser = ExprParser::new(&graph);
+    let expr_id = match parser.parse(expr_str) {
+        Ok(id) => id,
+        Err(err) => return serde_json::json!({ "error": err.to_string() }).to_string(),
+    };
+    let program = match VmCompiler::compile(&graph, expr_id, var, &[]) {
+        Ok(prog) => prog,
+        Err(err) => return serde_json::json!({ "error": err.to_string() }).to_string(),
+    };
+
+    let vm = BytecodeVM::new();
+    let mut points: Vec<[f64; 2]> = Vec::with_capacity(samples);
+    let denom = if samples > 1 {
+        (samples - 1) as f64
+    } else {
+        1.0
+    };
+    for i in 0..samples {
+        let x = x_min + (x_max - x_min) * (i as f64) / denom;
+        if let Ok(y) = vm.eval_scalar(&program, x, &[])
+            && y.is_finite()
+        {
+            points.push([x, y]);
+        }
+    }
+
+    serde_json::to_string(&points).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
+}
+
+/// Numerically solve a scalar 1st-order ODE `dy/dt = rhs(t, y)` on WebAssembly edge,
+/// returning JSON with method metadata and `[t, y]` trajectory samples.
+#[wasm_bindgen]
+pub fn wasm_ode_solve_json(
+    rhs_str: &str,
+    t_var: &str,
+    y_var: &str,
+    t0: f64,
+    t1: f64,
+    y0: f64,
+    method: &str,
+) -> String {
+    if !t0.is_finite() || !t1.is_finite() || !y0.is_finite() {
+        return serde_json::json!({ "error": "t0, t1, and y0 must be finite" }).to_string();
+    }
+
+    let graph = ExprGraph::new();
+    let parser = ExprParser::new(&graph);
+    let rhs_id = match parser.parse(rhs_str) {
+        Ok(id) => id,
+        Err(err) => return serde_json::json!({ "error": err.to_string() }).to_string(),
+    };
+
+    let t_param = t_var.trim().to_string();
+    let program = match VmCompiler::compile(&graph, rhs_id, y_var.trim(), &[t_param]) {
+        Ok(prog) => prog,
+        Err(err) => return serde_json::json!({ "error": err.to_string() }).to_string(),
+    };
+
+    let selected = match method.trim().to_ascii_lowercase().as_str() {
+        "rk4" => NumericalOdeMethod::Rk4,
+        "dopri5" | "dormand_prince" | "dormandprince54" => NumericalOdeMethod::DormandPrince54,
+        "tsit5" | "tsitouras54" => NumericalOdeMethod::Tsitouras54,
+        "radau" | "radau5" | "radauiia5" => NumericalOdeMethod::RadauIIA5,
+        "meta" | "self_optimizing_meta" => NumericalOdeMethod::SelfOptimizingMeta,
+        _ => NumericalOdeMethod::Auto,
+    };
+
+    let cfg = NumericalOdeConfig {
+        method: selected,
+        rtol: 1e-5,
+        atol: 1e-7,
+        ..Default::default()
+    };
+
+    let vm = BytecodeVM::new();
+    let traj = match NumericalOdeSolver::solve(
+        move |t, state| {
+            let dy = vm.eval_scalar(&program, state[0], &[t]).unwrap_or(f64::NAN);
+            vec![dy]
+        },
+        (t0, t1),
+        &[y0],
+        &cfg,
+    ) {
+        Ok(res) => res,
+        Err(err) => return serde_json::json!({ "error": err.to_string() }).to_string(),
+    };
+
+    let points: Vec<[f64; 2]> = traj
+        .t
+        .iter()
+        .zip(traj.y.iter())
+        .map(|(&ti, yi)| [ti, yi[0]])
+        .collect();
+    let t_final = traj.t.last().copied().unwrap_or(t0);
+    let y_final = traj.y.last().and_then(|v| v.first().copied()).unwrap_or(y0);
+
+    serde_json::json!({
+        "method": traj.method_used,
+        "steps": traj.steps_accepted,
+        "rejected": traj.steps_rejected,
+        "t_final": t_final,
+        "y_final": y_final,
+        "points": points,
+    })
+    .to_string()
+}
+
 /// Web entry point for running URAE Notebook on a WebAssembly canvas (Cloudflare Pages / Workers).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub async fn start_notebook_web(canvas_id: &str) -> Result<(), JsValue> {
     urae_notebook::start_web(canvas_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wasm_plot_sample_1d() {
+        let json_str = wasm_plot_sample_1d("x^2 - 1", "x", -1.0, 1.0, 5);
+        let pts: Vec<[f64; 2]> = serde_json::from_str(&json_str).expect("valid JSON points");
+        assert_eq!(pts.len(), 5);
+        assert!((pts[0][0] - (-1.0)).abs() < 1e-12);
+        assert!(pts[0][1].abs() < 1e-12);
+        assert!((pts[2][1] - (-1.0)).abs() < 1e-12);
+        assert!(pts[4][1].abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_wasm_ode_solve_json_tsit5_and_meta() {
+        for method in ["tsit5", "meta"] {
+            let out = wasm_ode_solve_json("-y", "t", "y", 0.0, 1.0, 1.0, method);
+            let parsed: serde_json::Value = serde_json::from_str(&out).expect("valid JSON");
+            assert!(parsed.get("error").is_none(), "unexpected error: {parsed}");
+            let y_final = parsed["y_final"].as_f64().expect("y_final");
+            let expected = (-1.0_f64).exp();
+            assert!(
+                (y_final - expected).abs() < 1e-2,
+                "method {method}: got {y_final}, expected {expected}"
+            );
+            assert!(parsed["steps"].as_u64().unwrap_or(0) > 0);
+        }
+    }
 }

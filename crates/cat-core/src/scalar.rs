@@ -341,9 +341,10 @@ fn clifford_basis_product(u: u8, v: u8, p: u8, q: u8, r: u8) -> (f64, u8) {
 
 /// Lossless scalar atom representation handling exact integers, Gaussian rationals,
 /// floating approximations, and Clifford/hypercomplex multivectors.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum ScalarAtom {
     /// Exact 0.
+    #[default]
     Zero,
     /// Exact 1.
     One,
@@ -375,9 +376,10 @@ pub enum ScalarAtom {
 }
 
 /// Surreal Number atom supporting infinitesimals, infinities, and Conway normal form.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub enum SurrealAtom {
     /// Zero { | } (birthday 0).
+    #[default]
     Zero,
     /// Exact integer born on day |n|.
     Integer(i64),
@@ -394,12 +396,6 @@ pub enum SurrealAtom {
         omega_coeff: f64,
         epsilon_coeff: f64,
     },
-}
-
-impl Default for SurrealAtom {
-    fn default() -> Self {
-        Self::Zero
-    }
 }
 
 /// Adele Number atom representing a restricted direct product element (x_\infty, (x_p)_p) \in \mathbb{A}_\mathbb{Q}.
@@ -441,12 +437,12 @@ impl AdeleAtom {
         for &p in &[2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] {
             let mut v = 0i32;
             let mut n = num.unsigned_abs();
-            while n > 0 && n % p == 0 {
+            while n > 0 && n.is_multiple_of(p) {
                 v += 1;
                 n /= p;
             }
             let mut d = den.unsigned_abs();
-            while d > 0 && d % p == 0 {
+            while d > 0 && d.is_multiple_of(p) {
                 v -= 1;
                 d /= p;
             }
@@ -474,12 +470,6 @@ impl AdeleAtom {
             prod *= (p as f64).powi(-v);
         }
         prod
-    }
-}
-
-impl Default for ScalarAtom {
-    fn default() -> Self {
-        Self::Zero
     }
 }
 

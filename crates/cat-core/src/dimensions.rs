@@ -258,6 +258,7 @@ impl Sub for DimVector {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl Mul for DimVector {
     type Output = Self;
     #[inline]
@@ -266,6 +267,7 @@ impl Mul for DimVector {
     }
 }
 
+#[allow(clippy::suspicious_arithmetic_impl)]
 impl Div for DimVector {
     type Output = Self;
     #[inline]

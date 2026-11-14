@@ -28,6 +28,13 @@ pub trait SymbolicCalculus {
     /// Compute elementary symbolic integral $\int f(x) dx$ using Risch integration heuristics.
     fn integrate(&self, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId>;
 
+    /// Compute elementary symbolic integral $\int f(x) dx$ alongside step-by-step derivation steps.
+    fn integrate_with_steps(
+        &self,
+        expr: ExprId,
+        wrt: SymbolId,
+    ) -> AlgebraResult<StepByStepResult<ExprId>>;
+
     /// Compute definite integral $\int_a^b f(x) dx$ via the Fundamental Theorem of Calculus ($F(b) - F(a)$).
     fn integrate_definite(
         &self,
@@ -398,6 +405,166 @@ impl SymbolicCalculus for ExprGraph {
         crate::risch::RischIntegrator::integrate(self, expr, wrt)
     }
 
+    fn integrate_with_steps(
+        &self,
+        expr: ExprId,
+        wrt: SymbolId,
+    ) -> AlgebraResult<StepByStepResult<ExprId>> {
+        let wrt_name = self.symbols.resolve(wrt).unwrap_or_else(|| "x".to_string());
+        let mut steps = Vec::new();
+        let node = self.get(expr);
+
+        let res = match &node.kind {
+            ExprKind::Number(_) => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Constant Rule",
+                    format!("Integrate constant with respect to {wrt_name}: ∫ c d{wrt_name} = c · {wrt_name}"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            ExprKind::Symbol(s) if *s == wrt => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Power Rule",
+                    format!("Applied Power Rule with n = 1: ∫ {wrt_name} d{wrt_name} = {wrt_name}^2 / 2"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            ExprKind::Symbol(_) => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Constant Symbol Rule",
+                    format!("Treat symbol independent of {wrt_name} as constant: ∫ k d{wrt_name} = k · {wrt_name}"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            ExprKind::Add(terms) => {
+                let mut int_terms = Vec::with_capacity(terms.len());
+                for (idx, &term) in terms.iter().enumerate() {
+                    let sub_int = self.integrate(term, wrt)?;
+                    int_terms.push(sub_int);
+                    steps.push(MathStep::new(
+                        idx + 1,
+                        "Sum Linearity Term",
+                        format!("Integrated additive term {} of {} with respect to {wrt_name}", idx + 1, terms.len()),
+                        term,
+                        sub_int,
+                    ));
+                }
+                let combined = self.add(int_terms);
+                steps.push(MathStep::new(
+                    terms.len() + 1,
+                    "Linear Combination",
+                    format!("Summed integrated terms with respect to {wrt_name}"),
+                    expr,
+                    combined,
+                ));
+                combined
+            }
+            ExprKind::Sub(lhs, rhs) => {
+                let il = self.integrate(*lhs, wrt)?;
+                let ir = self.integrate(*rhs, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Difference Linearity (Left)",
+                    format!("Integrated minuend with respect to {wrt_name}"),
+                    *lhs,
+                    il,
+                ));
+                steps.push(MathStep::new(
+                    2,
+                    "Difference Linearity (Right)",
+                    format!("Integrated subtrahend with respect to {wrt_name}"),
+                    *rhs,
+                    ir,
+                ));
+                let combined = self.sub(il, ir);
+                steps.push(MathStep::new(
+                    3,
+                    "Linear Combination",
+                    "Combined minuend and subtrahend antiderivatives",
+                    expr,
+                    combined,
+                ));
+                combined
+            }
+            ExprKind::Mul(factors) => {
+                let has_const = factors.iter().any(|&f| !self.has_symbol(f, wrt));
+                let res = self.integrate(expr, wrt)?;
+                let (title, desc) = if has_const {
+                    (
+                        "Constant Multiple / Risch Product Rule",
+                        format!("Factored constants independent of {wrt_name} and integrated remaining factor"),
+                    )
+                } else {
+                    (
+                        "Integration by Parts / Risch Heuristic",
+                        format!("Integrated product expression with respect to {wrt_name}"),
+                    )
+                };
+                steps.push(MathStep::new(1, title, desc, expr, res));
+                res
+            }
+            ExprKind::Pow(_, _) => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Power Rule",
+                    format!("Applied Power Rule ∫ {wrt_name}^n d{wrt_name} = {wrt_name}^(n+1) / (n+1)"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            ExprKind::Div(_, _) => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Hermite / Rothstein-Trager Reduction",
+                    format!("Integrated rational function in {wrt_name} via Hermite / logarithmic reduction"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            ExprKind::Function { name, .. } => {
+                let fn_name = self.symbols.resolve(*name).unwrap_or_default();
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Elementary Function Table",
+                    format!("Applied elementary antiderivative table rule for '{fn_name}' with respect to {wrt_name}"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+            _ => {
+                let res = self.integrate(expr, wrt)?;
+                steps.push(MathStep::new(
+                    1,
+                    "Risch Differential Field Heuristic",
+                    format!("Computed antiderivative with respect to {wrt_name}"),
+                    expr,
+                    res,
+                ));
+                res
+            }
+        };
+
+        Ok(StepByStepResult::new(res, steps))
+    }
+
     fn integrate_definite(
         &self,
         expr: ExprId,
@@ -511,5 +678,27 @@ impl VariationalCalculus {
         let d_dt_dl_dqdot = graph.diff(dl_dqdot, t);
 
         graph.sub(d_dt_dl_dqdot, dl_dq)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use algebra_core::ExprParser;
+
+    #[test]
+    fn test_integrate_with_steps_polynomial_and_elementary() {
+        let graph = ExprGraph::new();
+        let x = graph.symbols.get_or_intern("x");
+        let parser = ExprParser::new(&graph);
+
+        let poly = parser.parse("3*x^2 + cos(x)").expect("parse integrand");
+        let stepped = graph.integrate_with_steps(poly, x).expect("integrate_with_steps");
+        assert_eq!(stepped.steps.len(), 3);
+        assert_eq!(stepped.steps[0].rule_name, "Sum Linearity Term");
+        assert_eq!(stepped.steps[2].rule_name, "Linear Combination");
+
+        let direct = graph.integrate(poly, x).expect("direct integrate");
+        assert_eq!(stepped.result, direct);
     }
 }

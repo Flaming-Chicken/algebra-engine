@@ -86,10 +86,58 @@ impl DiophantineSolver {
     }
 }
 
+/// Structured outcome of a symbolic solve attempt (Symbolica-style explicit coverage tracking).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SolveOutcome<T> {
+    /// Complete closed-form solution set obtained.
+    Solved {
+        solution: T,
+        method: &'static str,
+    },
+    /// Partial solution set obtained (e.g., `RootOf` implicit placeholders or principal branch only).
+    IncompleteCoverage {
+        partial: T,
+        reason: String,
+    },
+    /// Equation class is unsupported or no closed-form isolation exists.
+    Unsupported {
+        reason: String,
+        failing_subexpr: Option<ExprId>,
+    },
+}
+
+impl<T> SolveOutcome<T> {
+    /// Returns `true` if a complete closed-form solution was found.
+    pub fn is_solved(&self) -> bool {
+        matches!(self, Self::Solved { .. })
+    }
+
+    /// Consumes the outcome, returning `Some(solution)` for `Solved` and `None` otherwise.
+    pub fn into_solution(self) -> Option<T> {
+        match self {
+            Self::Solved { solution, .. } => Some(solution),
+            Self::IncompleteCoverage { .. } | Self::Unsupported { .. } => None,
+        }
+    }
+
+    /// Returns any human-readable diagnostic explaining incomplete coverage or unsupported forms.
+    pub fn diagnostic(&self) -> Option<&str> {
+        match self {
+            Self::Solved { .. } => None,
+            Self::IncompleteCoverage { reason, .. } | Self::Unsupported { reason, .. } => {
+                Some(reason.as_str())
+            }
+        }
+    }
+}
+
 /// Equation solver trait for algebraic equations, ODEs, and PDEs.
 pub trait SymbolicSolver {
     /// Solve algebraic equation $f(x) = 0$ for target variable `target` (Exact symbolic pathway).
     fn solveset(&self, eq: ExprId, target: SymbolId) -> AlgebraResult<Vec<ExprId>>;
+
+    /// Solve algebraic equation $f(x) = 0$ with typed completeness/diagnostic classification.
+    fn solveset_outcome(&self, eq: ExprId, target: SymbolId) -> SolveOutcome<Vec<ExprId>>;
 
     /// Solve algebraic equation $f(x) = 0$ for target variable `target` with verification certificate.
     fn solveset_certified(
@@ -167,6 +215,91 @@ pub trait SymbolicSolver {
 }
 
 impl SymbolicSolver for ExprGraph {
+    fn solveset_outcome(&self, eq: ExprId, target: SymbolId) -> SolveOutcome<Vec<ExprId>> {
+        let node = self.get(eq);
+        match &node.kind {
+            ExprKind::Relational { lhs, rhs, .. } => {
+                let diff = self.sub(*lhs, *rhs);
+                return self.solveset_outcome(diff, target);
+            }
+            ExprKind::Mul(factors) => {
+                let mut combined = Vec::new();
+                for &f in factors {
+                    if !self.has_symbol(f, target) {
+                        continue;
+                    }
+                    match self.solveset_outcome(f, target) {
+                        SolveOutcome::Solved { solution, .. } => {
+                            for s in solution {
+                                if !combined.contains(&s) {
+                                    combined.push(s);
+                                }
+                            }
+                        }
+                        other => return other,
+                    }
+                }
+                return SolveOutcome::Solved {
+                    solution: combined,
+                    method: "Factored Symbolic Solver",
+                };
+            }
+            ExprKind::Pow(base, exp) if !self.has_symbol(*exp, target) => {
+                return self.solveset_outcome(*base, target);
+            }
+            _ => {}
+        }
+
+        let eq_has_target = self.has_symbol(eq, target);
+        if let Some(sub_expr) = find_non_polynomial_subexpr(self, eq, target) {
+            if let Some(trans_roots) = solve_transcendental(self, eq, target)
+                && !trans_roots.is_empty()
+            {
+                return SolveOutcome::Solved {
+                    solution: trans_roots,
+                    method: "Transcendental Inversion",
+                };
+            }
+            return SolveOutcome::Unsupported {
+                reason: "Closed-form isolation unsupported for mixed or non-algebraic subexpression"
+                    .to_string(),
+                failing_subexpr: Some(sub_expr),
+            };
+        }
+
+        match self.solveset(eq, target) {
+            Ok(sols) => {
+                let has_root_of = sols.iter().any(|&id| {
+                    if let ExprKind::Function { name, .. } = &self.get(id).kind {
+                        self.symbols.resolve(*name).as_deref() == Some("RootOf")
+                    } else {
+                        false
+                    }
+                });
+                if has_root_of {
+                    SolveOutcome::IncompleteCoverage {
+                        partial: sols,
+                        reason: "Polynomial exceeds closed-form radical formulas; implicit RootOf placeholders returned".to_string(),
+                    }
+                } else if sols.is_empty() && eq_has_target {
+                    SolveOutcome::Unsupported {
+                        reason: "No closed-form isolation found for equation".to_string(),
+                        failing_subexpr: Some(eq),
+                    }
+                } else {
+                    SolveOutcome::Solved {
+                        solution: sols,
+                        method: "Exact Symbolic Solver",
+                    }
+                }
+            }
+            Err(err) => SolveOutcome::Unsupported {
+                reason: err.to_string(),
+                failing_subexpr: Some(eq),
+            },
+        }
+    }
+
     fn solveset_certified(
         &self,
         eq: ExprId,
@@ -1231,5 +1364,92 @@ fn replace_exact(
             graph.function(&fn_name, new_args)
         }
         _ => expr,
+    }
+}
+
+fn find_non_polynomial_subexpr(
+    graph: &ExprGraph,
+    expr: ExprId,
+    target: SymbolId,
+) -> Option<ExprId> {
+    if !graph.has_symbol(expr, target) {
+        return None;
+    }
+    match &graph.get(expr).kind {
+        ExprKind::Number(_) | ExprKind::Symbol(_) => None,
+        ExprKind::Neg(inner) => find_non_polynomial_subexpr(graph, *inner, target),
+        ExprKind::Add(items) | ExprKind::Mul(items) => {
+            items.iter().find_map(|&item| find_non_polynomial_subexpr(graph, item, target))
+        }
+        ExprKind::Sub(a, b) => find_non_polynomial_subexpr(graph, *a, target)
+            .or_else(|| find_non_polynomial_subexpr(graph, *b, target)),
+        ExprKind::Div(num, den) => {
+            if graph.has_symbol(*den, target) {
+                Some(expr)
+            } else {
+                find_non_polynomial_subexpr(graph, *num, target)
+            }
+        }
+        ExprKind::Pow(base, exp) => {
+            if graph.has_symbol(*exp, target) {
+                return Some(expr);
+            }
+            let is_nonneg_int = match &graph.get(*exp).kind {
+                ExprKind::Number(n) => n
+                    .as_f64()
+                    .is_some_and(|v| v >= 0.0 && (v - v.round()).abs() < 1e-12),
+                _ => false,
+            };
+            if !is_nonneg_int {
+                Some(expr)
+            } else {
+                find_non_polynomial_subexpr(graph, *base, target)
+            }
+        }
+        _ => Some(expr),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use algebra_core::ExprParser;
+
+    #[test]
+    fn test_solveset_outcome_classification() {
+        let graph = ExprGraph::new();
+        let x = graph.symbols.get_or_intern("x");
+        let parser = ExprParser::new(&graph);
+
+        // Quadratic with closed-form integer/radical roots -> Solved
+        let quad = parser.parse("x^2 - 5*x + 6").expect("parse quad");
+        let out_quad = graph.solveset_outcome(quad, x);
+        assert!(out_quad.is_solved(), "expected Solved, got {out_quad:?}");
+        assert!(out_quad.diagnostic().is_none());
+        let sols = out_quad.into_solution().expect("solutions");
+        assert_eq!(sols.len(), 2);
+
+        // High-degree polynomial with no rational roots -> IncompleteCoverage (RootOf)
+        let poly6 = parser.parse("x^6 + 2*x + 3").expect("parse poly6");
+        let out_poly6 = graph.solveset_outcome(poly6, x);
+        assert!(
+            matches!(out_poly6, SolveOutcome::IncompleteCoverage { .. }),
+            "expected IncompleteCoverage, got {out_poly6:?}"
+        );
+        assert!(out_poly6.diagnostic().is_some());
+
+        // Non-algebraic mixed equation -> Unsupported with failing_subexpr
+        let mixed = parser.parse("sin(x) + x").expect("parse mixed");
+        let out_mixed = graph.solveset_outcome(mixed, x);
+        assert!(
+            matches!(
+                out_mixed,
+                SolveOutcome::Unsupported {
+                    failing_subexpr: Some(_),
+                    ..
+                }
+            ),
+            "expected Unsupported, got {out_mixed:?}"
+        );
     }
 }

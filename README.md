@@ -121,6 +121,21 @@ graph TD
 
 ---
 
+## 📊 Feature Matrix (URAE vs. SymPy vs. Symbolica)
+
+| Capability Area | URAE (`algebra-engine`) | SymPy (Python) | Symbolica (Rust/Python) |
+| :--- | :--- | :--- | :--- |
+| **Core Expression Representation** | Arena-allocated hash-consed DAG (`ExprGraph`) + `egg` E-Graph equality saturation | Python immutable tree objects | Term-rewriting arena DAG in Rust |
+| **Symbolic Calculus & Steps** | `diff`, `diff_with_steps`, `integrate`, `integrate_with_steps`, Risch-Bronstein heuristics, Gruntz limits, Taylor/Laurent/Puiseux | Full Risch / Meijer-G / manual steps via third-party tools | Differentiation, series, rational integration |
+| **Equation & Outcome Classification** | `solveset`, `solveset_certified` (Schwartz-Zippel), typed `SolveOutcome::{Solved, IncompleteCoverage, Unsupported}` | `solve` / `solveset` (implicit sets) | Explicit coverage-checked solvers |
+| **Polynomials & Ideals** | Univariate/multivariate polynomials, Gröbner bases (`Buchberger` / `F4`), resultants, Sturm chains | Extensive (`Poly`, `groebner`, factorization) | Fast multivariate GCD & rational polynomials |
+| **Linear Algebra** | Symbolic `SymbolicMatrix` (`N <= 8` cofactor det, adjugate inverse, charpoly), Lie Cartan matrices, `MatrixBuffer` (`rref`, `rank`, `nullspace`, Bareiss det) | Full symbolic matrices (`Matrix`, `rref`, `nullspace`, `charpoly`) | Matrix operations over rational polynomials |
+| **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines (`solve_diffusion_reaction_mol`, `solve_burgers_1d_mol`), FDM wave, 1D FEM Poisson | Numerical helpers via `lambdify` + `SciPy` | Fast evaluation / bytecode export |
+| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), overflow-safe `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean4/Coq proofs | Geometry module; physics submodules | Physics/QFT-oriented tensor & gamma algebra |
+| **Frontends & Targets** | Native `egui` Notebook (`urae-notebook`, 32 gallery examples), CLI REPL (`urae-cli`), Python bindings (`urae-py`), Jupyter v5.3 kernel (`urae-kernel`), WebAssembly (`urae-wasm`), LSP (`urae-lsp`), C ABI (`urae-ffi`) | Python REPL, Jupyter via IPython, `mpmath` | Rust API + Python wheel (`symbolica`) |
+
+---
+
 ## 🖥️ URAE Continuous Reactive Notepad
 
 The **URAE Notebook** (`urae-notebook`) is an interactive desktop and browser GUI environment built on `egui` and `eframe`:
@@ -173,7 +188,7 @@ The **URAE Notebook** (`urae-notebook`) is an interactive desktop and browser GU
   - **Physical Units & Dimensions Palette**: SI unit selection and automatic dimensional consistency verification.
   - **Branch Cut & Interval Pickers**: Complex branch cut topology and domain bounds.
 - **In-App Example Gallery & Interactive Tutorials**:
-  - **29 production-grade mathematical example notebooks** across 10 STEM domains with one-click editor loading:
+  - **32 production-grade mathematical example notebooks** across 10 STEM domains with one-click editor loading:
     1. *Advanced Calculus, Special Functions & ODEs*
     2. *Relativistic Kinematics & 4-Vector Dynamics*
     3. *Quantum Field Theory & Spinor Scattering*
@@ -203,6 +218,9 @@ The **URAE Notebook** (`urae-notebook`) is an interactive desktop and browser GU
     27. *Silicon Photonics & Graphene Mode Distribution*
     28. *Automatic Differential Equation Solving (Linear & Nonlinear ODEs, PDEs & Solitons)*
     29. *Modern & Classical Control Systems (SISO, MIMO, Continuous, Discrete, ZOH & Ackermann)*
+    30. *1D Viscous Burgers PDE & Shock Dissipation*
+    31. *Lorenz Strange Attractor & Meta-Integrator Regimes*
+    32. *Hexagonal Grids (Hecs) & URScript SE(3) Robotics*
 - **Fuzzy Command Palette (`Ctrl+K` / `Cmd+K`)**: Search and execute commands, templates, and example notebooks instantaneously.
 
 ---

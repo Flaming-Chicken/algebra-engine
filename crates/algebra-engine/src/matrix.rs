@@ -16,6 +16,19 @@ pub struct MatrixBuffer {
 }
 
 impl MatrixBuffer {
+    pub fn new(rows: usize, cols: usize, data: Vec<f64>) -> AlgebraResult<Self> {
+        if data.len() != rows * cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Expected {} elements for {}x{} matrix buffer, got {}",
+                rows * cols,
+                rows,
+                cols,
+                data.len()
+            )));
+        }
+        Ok(Self { rows, cols, data })
+    }
+
     pub fn zeros(rows: usize, cols: usize) -> Self {
         Self {
             rows,
@@ -44,6 +57,153 @@ impl MatrixBuffer {
         for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
             *a += *b;
         }
+    }
+
+    /// Compute Reduced Row Echelon Form (RREF) via Gauss-Jordan elimination with partial pivoting,
+    /// returning `(rref_matrix, pivot_columns)`.
+    pub fn rref(&self, tol: f64) -> (Self, Vec<usize>) {
+        let eps = tol.abs().max(1e-12);
+        let mut mat = self.clone();
+        let mut pivots = Vec::new();
+        let mut pivot_row = 0;
+
+        for col in 0..mat.cols {
+            if pivot_row >= mat.rows {
+                break;
+            }
+
+            let mut best_row = pivot_row;
+            let mut best_val = mat.get(pivot_row, col).abs();
+            for r in (pivot_row + 1)..mat.rows {
+                let candidate = mat.get(r, col).abs();
+                if candidate > best_val {
+                    best_val = candidate;
+                    best_row = r;
+                }
+            }
+
+            if best_val <= eps {
+                continue;
+            }
+
+            if best_row != pivot_row {
+                for c in 0..mat.cols {
+                    let tmp = mat.get(pivot_row, c);
+                    mat.set(pivot_row, c, mat.get(best_row, c));
+                    mat.set(best_row, c, tmp);
+                }
+            }
+
+            let pivot = mat.get(pivot_row, col);
+            for c in 0..mat.cols {
+                let scaled = if c == col {
+                    1.0
+                } else {
+                    mat.get(pivot_row, c) / pivot
+                };
+                mat.set(pivot_row, c, scaled);
+            }
+
+            for r in 0..mat.rows {
+                if r == pivot_row {
+                    continue;
+                }
+                let factor = mat.get(r, col);
+                if factor.abs() <= eps {
+                    mat.set(r, col, 0.0);
+                    continue;
+                }
+                mat.set(r, col, 0.0);
+                for c in (col + 1)..mat.cols {
+                    let updated = mat.get(r, c) - factor * mat.get(pivot_row, c);
+                    mat.set(r, c, if updated.abs() <= eps { 0.0 } else { updated });
+                }
+            }
+
+            pivots.push(col);
+            pivot_row += 1;
+        }
+
+        (mat, pivots)
+    }
+
+    /// Numerical matrix rank via RREF pivot count.
+    pub fn rank(&self, tol: f64) -> usize {
+        self.rref(tol).1.len()
+    }
+
+    /// Basis vectors for the right nullspace $\ker(A) = \{v : Av = 0\}$.
+    pub fn nullspace(&self, tol: f64) -> Vec<Vec<f64>> {
+        let (rref, pivots) = self.rref(tol);
+        let mut basis = Vec::new();
+        for free_col in 0..self.cols {
+            if pivots.contains(&free_col) {
+                continue;
+            }
+            let mut vec = vec![0.0; self.cols];
+            vec[free_col] = 1.0;
+            for (row_idx, &piv_col) in pivots.iter().enumerate() {
+                vec[piv_col] = -rref.get(row_idx, free_col);
+            }
+            basis.push(vec);
+        }
+        basis
+    }
+
+    /// Exact-integer-preserving Bareiss fraction-free determinant for arbitrary $N \times N$ matrices.
+    pub fn determinant_bareiss(&self) -> AlgebraResult<f64> {
+        if self.rows != self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Square matrix required for determinant, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+        let n = self.rows;
+        if n == 0 {
+            return Ok(1.0);
+        }
+        if n == 1 {
+            return Ok(self.get(0, 0));
+        }
+
+        let mut a = self.clone();
+        let mut prev_pivot = 1.0_f64;
+        let mut sign = 1.0_f64;
+
+        for k in 0..n {
+            let mut best_row = k;
+            let mut best_val = a.get(k, k).abs();
+            for r in (k + 1)..n {
+                let v = a.get(r, k).abs();
+                if v > best_val {
+                    best_val = v;
+                    best_row = r;
+                }
+            }
+            if best_val <= 1e-14 {
+                return Ok(0.0);
+            }
+            if best_row != k {
+                for c in 0..n {
+                    let tmp = a.get(k, c);
+                    a.set(k, c, a.get(best_row, c));
+                    a.set(best_row, c, tmp);
+                }
+                sign = -sign;
+            }
+
+            let pivot = a.get(k, k);
+            for i in (k + 1)..n {
+                let a_ik = a.get(i, k);
+                for j in (k + 1)..n {
+                    let val = (a.get(i, j) * pivot - a_ik * a.get(k, j)) / prev_pivot;
+                    a.set(i, j, val);
+                }
+            }
+            prev_pivot = pivot;
+        }
+
+        Ok(sign * a.get(n - 1, n - 1))
     }
 
     /// Intern buffer as symbolic matrix in ExprGraph.
@@ -211,13 +371,41 @@ impl SymbolicMatrix {
         Self::new(self.rows, other.cols, result_elements)
     }
 
-    /// Compute symbolic 2x2 or 3x3 determinant.
+    /// Extract the $(N-1) \times (M-1)$ submatrix obtained by removing `skip_row` and `skip_col`.
+    pub fn minor(&self, skip_row: usize, skip_col: usize) -> AlgebraResult<Self> {
+        if self.rows <= 1 || self.cols <= 1 || skip_row >= self.rows || skip_col >= self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Cannot form minor ({skip_row}, {skip_col}) of {}x{} matrix",
+                self.rows, self.cols
+            )));
+        }
+        let mut elems = Vec::with_capacity((self.rows - 1) * (self.cols - 1));
+        for r in 0..self.rows {
+            if r == skip_row {
+                continue;
+            }
+            for c in 0..self.cols {
+                if c == skip_col {
+                    continue;
+                }
+                elems.push(self.get(r, c));
+            }
+        }
+        Self::new(self.rows - 1, self.cols - 1, elems)
+    }
+
+    /// Compute symbolic determinant for $1 \times 1$, $2 \times 2$, $3 \times 3$, and general $N \times N$ matrices
+    /// via Laplace cofactor expansion.
     pub fn determinant(&self, graph: &ExprGraph) -> AlgebraResult<ExprId> {
         if self.rows != self.cols {
             return Err(AlgebraError::DimensionMismatch(format!(
                 "Square matrix required for determinant, got {}x{}",
                 self.rows, self.cols
             )));
+        }
+
+        if self.rows == 0 {
+            return Ok(graph.integer(1));
         }
 
         if self.rows == 1 {
@@ -235,9 +423,31 @@ impl SymbolicMatrix {
             return Ok(graph.sub(ad, bc));
         }
 
-        Err(AlgebraError::EvaluationError(
-            "Determinants > 2x2 use Laplace expansion in simplifier".into(),
-        ))
+        if self.rows > 8 {
+            return Err(AlgebraError::EvaluationError(format!(
+                "Symbolic Laplace cofactor determinant capped at 8x8 (got {}x{}); use MatrixBuffer::determinant_bareiss for large numeric matrices",
+                self.rows, self.cols
+            )));
+        }
+
+        let zero = graph.integer(0);
+        let mut terms = Vec::new();
+        for c in 0..self.cols {
+            let entry = self.get(0, c);
+            if entry == zero {
+                continue;
+            }
+            let sub = self.minor(0, c)?;
+            let sub_det = sub.determinant(graph)?;
+            let term = graph.mul([entry, sub_det]);
+            terms.push(if c % 2 == 0 { term } else { graph.neg(term) });
+        }
+
+        if terms.is_empty() {
+            Ok(zero)
+        } else {
+            Ok(graph.add(terms))
+        }
     }
 
     /// Compute matrix trace $\text{tr}(A) = \sum_{i=1}^n A_{ii}$.
@@ -297,8 +507,27 @@ impl SymbolicMatrix {
             return Self::new(2, 2, vec![i11, i12, i21, i22]);
         }
 
+        if self.rows <= 5 {
+            let det = self.determinant(graph)?;
+            let mut inv_elems = Vec::with_capacity(self.rows * self.cols);
+            // (i, j) entry of A^{-1} = (-1)^(i+j) * det(M_{j, i}) / det(A)
+            for i in 0..self.rows {
+                for j in 0..self.cols {
+                    let sub = self.minor(j, i)?;
+                    let cofactor_mag = sub.determinant(graph)?;
+                    let cofactor = if (i + j).is_multiple_of(2) {
+                        cofactor_mag
+                    } else {
+                        graph.neg(cofactor_mag)
+                    };
+                    inv_elems.push(graph.div(cofactor, det));
+                }
+            }
+            return Self::new(self.rows, self.cols, inv_elems);
+        }
+
         Err(AlgebraError::EvaluationError(
-            "Matrix inverse currently implemented for <= 2x2 matrices".into(),
+            "Symbolic adjugate inverse capped at 5x5 matrices".into(),
         ))
     }
 
@@ -313,6 +542,10 @@ impl SymbolicMatrix {
 
         let lambda = graph.symbol(lambda_var);
 
+        if self.rows == 1 {
+            return Ok(graph.sub(lambda, self.get(0, 0)));
+        }
+
         if self.rows == 2 {
             // lambda^2 - tr(A)*lambda + det(A)
             let tr = self.trace(graph)?;
@@ -324,8 +557,24 @@ impl SymbolicMatrix {
             return Ok(graph.add([diff, det]));
         }
 
+        if self.rows <= 6 {
+            let mut shift_elems = Vec::with_capacity(self.rows * self.cols);
+            for r in 0..self.rows {
+                for c in 0..self.cols {
+                    let entry = self.get(r, c);
+                    shift_elems.push(if r == c {
+                        graph.sub(lambda, entry)
+                    } else {
+                        graph.neg(entry)
+                    });
+                }
+            }
+            let shifted = Self::new(self.rows, self.cols, shift_elems)?;
+            return shifted.determinant(graph);
+        }
+
         Err(AlgebraError::EvaluationError(
-            "Characteristic polynomial currently implemented for 2x2 matrices".into(),
+            "Symbolic characteristic polynomial capped at 6x6 matrices".into(),
         ))
     }
 
@@ -600,6 +849,82 @@ impl LieAlgebraFamily {
                 let elems = vec![two, neg_one, neg_one, two];
                 SymbolicMatrix::new(2, 2, elems)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_matrix_buffer_rref_rank_nullspace_and_bareiss_det() {
+        // Singular 3x3 matrix of rank 2: rows [1, 2, 3], [2, 4, 6], [1, 1, 1]
+        let singular =
+            MatrixBuffer::new(3, 3, vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 1.0, 1.0, 1.0]).unwrap();
+        assert_eq!(singular.rank(1e-9), 2);
+        let ns = singular.nullspace(1e-9);
+        assert_eq!(ns.len(), 1);
+        // Verify A * v == 0
+        for r in 0..3 {
+            let av: f64 = (0..3).map(|c| singular.get(r, c) * ns[0][c]).sum();
+            assert!(av.abs() < 1e-9, "row {r} dot nullspace = {av}");
+        }
+        assert!(singular.determinant_bareiss().unwrap().abs() < 1e-9);
+
+        // Non-singular 3x3 matrix requiring pivot swap: det = -5
+        let swap_mat =
+            MatrixBuffer::new(3, 3, vec![1.0, 2.0, 3.0, 1.0, 2.0, 4.0, 0.0, 5.0, 6.0]).unwrap();
+        assert_eq!(swap_mat.rank(1e-9), 3);
+        assert!(swap_mat.nullspace(1e-9).is_empty());
+        assert!((swap_mat.determinant_bareiss().unwrap() - (-5.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_symbolic_matrix_3x3_det_inverse_and_charpoly() {
+        let graph = ExprGraph::new();
+        // Diagonal + upper-triangular 3x3 matrix [[2, 1, 0], [0, 3, 1], [0, 0, 5]] -> det = 30
+        let elems = vec![
+            graph.integer(2),
+            graph.integer(1),
+            graph.integer(0),
+            graph.integer(0),
+            graph.integer(3),
+            graph.integer(1),
+            graph.integer(0),
+            graph.integer(0),
+            graph.integer(5),
+        ];
+        let mat = SymbolicMatrix::new(3, 3, elems).unwrap();
+        let ctx = EvalContext::default();
+
+        let det = mat.determinant(&graph).unwrap();
+        let det_val = graph.evalf(det, &ctx).unwrap().to_f64();
+        assert!((det_val - 30.0).abs() < 1e-9, "got det={det_val}");
+
+        let inv = mat.inverse(&graph).unwrap();
+        let prod = mat.multiply(&graph, &inv).unwrap();
+        for r in 0..3 {
+            for c in 0..3 {
+                let entry_val = graph.evalf(prod.get(r, c), &ctx).unwrap().to_f64();
+                let expected = if r == c { 1.0 } else { 0.0 };
+                assert!(
+                    (entry_val - expected).abs() < 1e-9,
+                    "A*A^-1[{r},{c}] = {entry_val}, expected {expected}"
+                );
+            }
+        }
+
+        let cp = mat.charpoly(&graph, "lam").unwrap();
+        // At eigenvalues lam in {2, 3, 5}, charpoly(lam) == 0
+        for ev in [2.0, 3.0, 5.0] {
+            let mut bindings = HashMap::new();
+            bindings.insert("lam".to_string(), ev);
+            let ev_ctx = EvalContext::with_bindings(50, bindings);
+            let cp_val = graph.evalf(cp, &ev_ctx).unwrap().to_f64();
+            assert!(cp_val.abs() < 1e-9, "charpoly({ev}) = {cp_val}");
         }
     }
 }

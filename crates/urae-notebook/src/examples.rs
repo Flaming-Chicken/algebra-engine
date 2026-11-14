@@ -117,7 +117,7 @@ impl ExampleRegistry {
     }
 }
 
-const EXAMPLES: [ExampleNotebook; 29] = [
+const EXAMPLES: [ExampleNotebook; 32] = [
     // 01: Calculus & ODEs
     ExampleNotebook {
         id: "01_calculus_and_differential_equations",
@@ -644,6 +644,60 @@ const EXAMPLES: [ExampleNotebook; 29] = [
             "controllability",
             "ackermann",
             "pole-placement",
+        ],
+    },
+    // 30: 1D Viscous Burgers PDE & Cole-Hopf Reduction
+    ExampleNotebook {
+        id: "30_burgers_viscous_shock_pde",
+        title: "1D Viscous Burgers PDE & Shock Dissipation",
+        category: ExampleCategory::MultiphysicsAndAi,
+        description: "Salvaged multiphysics PDE benchmark: 1D viscous Burgers equation u_t + u u_x = nu u_xx, Cole-Hopf linearization, travelling shock profile u(x,t) = c - a*tanh((a/(2*nu))*(x - c*t)), and Method-of-Lines energy decay.",
+        latex_formula: r#"\frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} = \nu \frac{\partial^2 u}{\partial x^2}, \quad u = -2\nu \frac{\phi_x}{\phi}, \quad \phi_t = \nu \phi_{xx}"#,
+        content: "# URAE Mathematics Notepad: 1D Viscous Burgers PDE & Cole-Hopf Shock\n# Nonlinear advection steepens smooth fronts while viscosity nu smooths shocks.\n\n# 1. Physical Viscosity & Wave Speed Parameters\nnu: Parameter = 0.05 [m^2/s]\nnu in Reals [0.005, 0.25]\n\nc_shock: Parameter = 1.0 [m/s]\na_amp: Parameter = 0.8 [m/s]\nt_eval: Parameter = 0.25 [s]\nt_eval in Reals [0.0, 2.0]\n\n# 2. Travelling Viscous Shock Profile (Exact Cole-Hopf Solution)\nx: Variable\n{ x in Reals | -2.0 <= x <= 3.0 }\n\nu_shock(x) = c_shock - a_amp * tanh((a_amp / (2.0 * nu)) * (x - c_shock * t_eval))\n\n# 3. Cole-Hopf Linearization Residual Check (phi_t - nu * phi_xx = 0)\n# Verify Burgers PINN residual zero-order identity:\npinn_burgers_residual\n\n# 4. Characteristic Reynolds Number & Shock Thickness delta ~ 2*nu / a_amp\nshock_thickness = 2.0 * nu / a_amp\n",
+        tags: &[
+            "burgers",
+            "pde",
+            "shock",
+            "cole-hopf",
+            "method-of-lines",
+            "viscosity",
+            "fluid-dynamics",
+        ],
+    },
+    // 31: Lorenz Strange Attractor & Self-Optimizing Meta-Integrator
+    ExampleNotebook {
+        id: "31_lorenz_strange_attractor_meta",
+        title: "Lorenz Strange Attractor & Meta-Integrator Regimes",
+        category: ExampleCategory::CalculusAndOde,
+        description: "Autonomous chaotic Lorenz-63 dynamical system (sigma=10, rho=28, beta=8/3): fixed-point equilibria, linearized Jacobian eigenvalues, divergence rate, and Tsit5 / SelfOptimizingMeta adaptive ODE stepping.",
+        latex_formula: r#"\dot{x} = \sigma(y - x), \quad \dot{y} = x(\rho - z) - y, \quad \dot{z} = xy - \beta z, \quad \nabla \cdot \mathbf{F} = -(\sigma + 1 + \beta)"#,
+        content: "# URAE Mathematics Notepad: Lorenz-63 Attractor & Meta-Integrator Dynamics\n# Models atmospheric convection chaos & non-stiff/oscillatory ODE stepping regimes.\n\n# 1. Classic Chaotic Parameters\nsigma: Parameter = 10.0\nrho: Parameter = 28.0\nrho in Reals [0.5, 40.0]\nbeta: Parameter = 2.6667\n\n# 2. Convective Butterfly Equilibria C+, C- = (+/- sqrt(beta*(rho - 1)), +/- sqrt(beta*(rho - 1)), rho - 1)\nz_eq = rho - 1.0\nx_eq = sqrt(beta * z_eq)\n\n# 3. Phase-Space Volume Contraction (Dissipation Divergence)\ndiv_flow = -(sigma + 1.0 + beta)\n\n# 4. Pitchfork Bifurcation Threshold\nsolve r_bif - 1.0 = 0, r_bif\n",
+        tags: &[
+            "lorenz",
+            "chaos",
+            "attractor",
+            "ode",
+            "meta-integrator",
+            "tsit5",
+            "dynamical-systems",
+        ],
+    },
+    // 32: Hexagonal Lattices (`Hecs`) & Robotics SE(3) Pose Kinematics (`URScript`)
+    ExampleNotebook {
+        id: "32_hecs_and_urscript_robotics_se3",
+        title: "Hexagonal Grids (Hecs) & URScript SE(3) Robotics",
+        category: ExampleCategory::GeometryAndTopology,
+        description: "Salvaged spatial geometry modules integrated into URAE: axial/cube hexagonal grid Manhattan metrics (Hecs<T>) paired with SE(3) Lie group rigid transforms and URScript axis-angle kinematics.",
+        latex_formula: r#"d_{\text{hex}}(a, b) = \frac{|q_a - q_b| + |r_a - r_b| + |s_a - s_b|}{2}, \quad T = \begin{pmatrix} R & \mathbf{p} \\ \mathbf{0}^T & 1 \end{pmatrix} \in \mathrm{SE}(3)"#,
+        content: "# URAE Mathematics Notepad: Hexagonal Lattices & SE(3) Robotics Kinematics\n# Combines discrete axial hex distance metrics with continuous rigid-body pose transforms.\n\n# 1. Axial Hexagonal Cube Constraint: q + r + s = 0\nq_coord: Parameter = 3\nr_coord: Parameter = -1\ns_coord = -(q_coord + r_coord)\n\n# Hex Manhattan norm from origin\nd_hex = (abs(q_coord) + abs(r_coord) + abs(s_coord)) / 2\n\n# 2. SE(3) Screw & URScript Pose Composition\n# Translation p = [x_tcp, y_tcp, z_tcp] and wrist axis-angle rotation rx\nx_tcp: Parameter = 0.45 [m]\ny_tcp: Parameter = -0.18 [m]\nz_tcp: Parameter = 0.32 [m]\ntcp_norm = sqrt(x_tcp^2 + y_tcp^2 + z_tcp^2)\n",
+        tags: &[
+            "hecs",
+            "hex-grid",
+            "urscript",
+            "se3",
+            "robotics",
+            "kinematics",
+            "rigid-transform",
         ],
     },
 ];

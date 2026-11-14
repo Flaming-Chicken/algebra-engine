@@ -264,4 +264,182 @@ where {
 
         Ok((x_nodes, u_sol))
     }
+
+    /// Solve the 1D Viscous Burgers PDE via Method of Lines (MOL):
+    ///
+    /// $$\frac{\partial u}{\partial t} + u \frac{\partial u}{\partial x} = \nu \frac{\partial^2 u}{\partial x^2}$$
+    ///
+    /// Uses an entropy-satisfying Engquist-Osher conservative convective flux paired with
+    /// central 2nd-order diffusion and delegates temporal integration to `NumericalOdeSolver`
+    /// (`Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, or `SelfOptimizingMeta`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_burgers_1d_mol(
+        nu: f64,
+        x_span: (f64, f64),
+        t_span: (f64, f64),
+        n_spatial_points: usize,
+        u0_func: impl Fn(f64) -> f64,
+        bc_left: BoundaryCondition,
+        bc_right: BoundaryCondition,
+        ode_config: &NumericalOdeConfig,
+    ) -> AlgebraResult<PdeGridSolution> {
+        if n_spatial_points < 3 {
+            return Err(AlgebraError::EvaluationError(
+                "Spatial grid points must be at least 3".into(),
+            ));
+        }
+        if nu < 0.0 || !nu.is_finite() {
+            return Err(AlgebraError::EvaluationError(
+                "Kinematic viscosity nu must be finite and non-negative".into(),
+            ));
+        }
+
+        let (x0, xend) = x_span;
+        let dx = (xend - x0) / ((n_spatial_points - 1) as f64);
+        let dx_sq = dx * dx;
+
+        let mut x_grid = Vec::with_capacity(n_spatial_points);
+        let mut u0 = Vec::with_capacity(n_spatial_points);
+        for i in 0..n_spatial_points {
+            let xi = x0 + (i as f64) * dx;
+            x_grid.push(xi);
+            u0.push(u0_func(xi));
+        }
+
+        if let BoundaryCondition::Dirichlet(val) = bc_left {
+            u0[0] = val;
+        }
+        if let BoundaryCondition::Dirichlet(val) = bc_right {
+            u0[n_spatial_points - 1] = val;
+        }
+
+        let f_plus = |v: f64| if v > 0.0 { 0.5 * v * v } else { 0.0 };
+        let f_minus = |v: f64| if v < 0.0 { 0.5 * v * v } else { 0.0 };
+
+        let ode_rhs = move |_t: f64, u_state: &[f64]| -> Vec<f64> {
+            let n = u_state.len();
+            let mut du_dt = vec![0.0; n];
+
+            for i in 1..(n - 1) {
+                let flux_r = f_plus(u_state[i]) + f_minus(u_state[i + 1]);
+                let flux_l = f_plus(u_state[i - 1]) + f_minus(u_state[i]);
+                let conv = (flux_r - flux_l) / dx;
+                let diff = nu * (u_state[i + 1] - 2.0 * u_state[i] + u_state[i - 1]) / dx_sq;
+                du_dt[i] = diff - conv;
+            }
+
+            match bc_left {
+                BoundaryCondition::Dirichlet(_) => du_dt[0] = 0.0,
+                BoundaryCondition::Neumann(flux) => {
+                    let diff = nu * 2.0 * (u_state[1] - u_state[0] - dx * flux) / dx_sq;
+                    let conv = u_state[0] * flux;
+                    du_dt[0] = diff - conv;
+                }
+            }
+
+            match bc_right {
+                BoundaryCondition::Dirichlet(_) => du_dt[n - 1] = 0.0,
+                BoundaryCondition::Neumann(flux) => {
+                    let diff = nu * 2.0 * (u_state[n - 2] - u_state[n - 1] + dx * flux) / dx_sq;
+                    let conv = u_state[n - 1] * flux;
+                    du_dt[n - 1] = diff - conv;
+                }
+            }
+
+            du_dt
+        };
+
+        let traj = NumericalOdeSolver::solve(ode_rhs, t_span, &u0, ode_config)?;
+
+        Ok(PdeGridSolution {
+            x: x_grid,
+            t: traj.t,
+            u: traj.y,
+            scheme_name: format!("Burgers 1D Method of Lines ({})", traj.method_used),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ode::numerical::NumericalOdeMethod;
+
+    #[test]
+    fn test_diffusion_mol_with_self_optimizing_meta_and_tsit5() {
+        let alpha = 0.05;
+        let t_end = 0.25;
+        let n_pts = 15;
+        let pi = std::f64::consts::PI;
+
+        for method in [
+            NumericalOdeMethod::Tsitouras54,
+            NumericalOdeMethod::SelfOptimizingMeta,
+        ] {
+            let cfg = NumericalOdeConfig {
+                method,
+                rtol: 1e-4,
+                atol: 1e-6,
+                max_step: 0.002,
+                ..Default::default()
+            };
+            let sol = NumericalPdeSolver::solve_diffusion_reaction_mol(
+                alpha,
+                |_u, _x, _t| 0.0,
+                (0.0, 1.0),
+                (0.0, t_end),
+                n_pts,
+                |x| (pi * x).sin(),
+                BoundaryCondition::Dirichlet(0.0),
+                BoundaryCondition::Dirichlet(0.0),
+                &cfg,
+            )
+            .expect("MOL heat solve");
+
+            let final_u = sol.u.last().expect("final slice");
+            let mid_idx = n_pts / 2;
+            let expected_mid = (-alpha * pi * pi * t_end).exp() * (pi * sol.x[mid_idx]).sin();
+            assert!(
+                (final_u[mid_idx] - expected_mid).abs() < 1e-2,
+                "{}: mid u={} expected={}",
+                sol.scheme_name,
+                final_u[mid_idx],
+                expected_mid
+            );
+            assert!(final_u[0].abs() < 1e-12);
+            assert!(final_u[n_pts - 1].abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn test_burgers_1d_mol_viscous_smoothing() {
+        let pi = std::f64::consts::PI;
+        let cfg = NumericalOdeConfig {
+            method: NumericalOdeMethod::SelfOptimizingMeta,
+            rtol: 1e-4,
+            atol: 1e-6,
+            max_step: 0.002,
+            ..Default::default()
+        };
+        let sol = NumericalPdeSolver::solve_burgers_1d_mol(
+            0.05,
+            (0.0, 1.0),
+            (0.0, 0.2),
+            21,
+            |x| (pi * x).sin(),
+            BoundaryCondition::Dirichlet(0.0),
+            BoundaryCondition::Dirichlet(0.0),
+            &cfg,
+        )
+        .expect("Burgers MOL solve");
+
+        assert!(sol.scheme_name.starts_with("Burgers 1D Method of Lines"));
+        let u0 = sol.u.first().expect("initial slice");
+        let u_end = sol.u.last().expect("final slice");
+        let energy0: f64 = u0.iter().map(|v| v * v).sum();
+        let energy_end: f64 = u_end.iter().map(|v| v * v).sum();
+        assert!(energy_end < energy0, "expected viscous energy decay");
+        assert!(u_end.iter().all(|v| v.is_finite() && *v >= -1e-9));
+        assert!(u_end[0].abs() < 1e-12 && u_end[20].abs() < 1e-12);
+    }
 }

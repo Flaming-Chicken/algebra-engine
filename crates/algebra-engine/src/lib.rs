@@ -161,7 +161,7 @@ pub use session::{SymbolSessionMeta, UraeSession};
 pub use sets::MathSetRepresentation;
 pub use simplify::{SchwartzZippel, Simplifier};
 pub use smt::{ProofCertificate, SmtExpr, SmtLogic, SmtProblem, SmtSort};
-pub use solver::SymbolicSolver;
+pub use solver::{SolveOutcome, SymbolicSolver};
 pub use sparse::CsrMatrix;
 pub use special::SpecialFunctions;
 pub use symplectic::{

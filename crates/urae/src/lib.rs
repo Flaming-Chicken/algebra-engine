@@ -36,6 +36,7 @@ pub mod prelude;
 pub use algebra_core as core;
 pub use algebra_engine as engine;
 pub use auto_promoters;
+pub use cat_numbers::Magnitude;
 
 // Re-export all CAS DSL macros from algebra_engine
 pub use algebra_engine::{
@@ -80,6 +81,7 @@ pub use algebra_engine::exceptional_lie;
 pub use algebra_engine::executor;
 pub use algebra_engine::geometric_dl;
 pub use algebra_engine::geometry;
+pub use algebra_engine::hecs;
 pub use algebra_engine::heuristic;
 pub use algebra_engine::html_export;
 pub use algebra_engine::hyperop;
@@ -113,6 +115,7 @@ pub use algebra_engine::tensor;
 pub use algebra_engine::topology;
 pub use algebra_engine::transforms;
 pub use algebra_engine::tropical;
+pub use algebra_engine::urscript_pose;
 pub use algebra_engine::visualizer;
 pub use algebra_engine::weyl_dmodules;
 

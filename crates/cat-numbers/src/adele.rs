@@ -126,11 +126,11 @@ impl AdeleNumber {
         if rem_n > 0 || rem_d > 0 {
             // Factor out 2
             let mut div2 = false;
-            while rem_n > 0 && rem_n % 2 == 0 {
+            while rem_n > 0 && rem_n.is_multiple_of(2) {
                 rem_n /= 2;
                 div2 = true;
             }
-            while rem_d > 0 && rem_d % 2 == 0 {
+            while rem_d > 0 && rem_d.is_multiple_of(2) {
                 rem_d /= 2;
                 div2 = true;
             }
@@ -142,11 +142,11 @@ impl AdeleNumber {
             let mut p = 3u64;
             while (p.saturating_mul(p) <= rem_n && rem_n > 0) || (p.saturating_mul(p) <= rem_d && rem_d > 0) {
                 let mut div_p = false;
-                while rem_n > 0 && rem_n % p == 0 {
+                while rem_n > 0 && rem_n.is_multiple_of(p) {
                     rem_n /= p;
                     div_p = true;
                 }
-                while rem_d > 0 && rem_d % p == 0 {
+                while rem_d > 0 && rem_d.is_multiple_of(p) {
                     rem_d /= p;
                     div_p = true;
                 }

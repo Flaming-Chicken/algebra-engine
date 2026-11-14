@@ -40,8 +40,8 @@ graph TD
         CLI["crates/urae-cli<br/>Interactive REPL & JSON Streaming CLI"]
         WASM["crates/urae-wasm<br/>Cloudflare Pages / Edge WASM Engine"]
         LSP["crates/urae-lsp<br/>Language Server Protocol Engine"]
-        Kernel["crates/urae-kernel<br/>Jupyter Protocol Backend"]
-        Py["crates/urae-py<br/>PyO3 Python Bindings"]
+        Kernel["crates/urae-kernel<br/>In-Memory Jupyter MIME & Session Controller"]
+        Py["crates/urae-py<br/>Rust-Side Python Wrapper (PyO3 Wave 2)"]
         FFI["crates/urae-ffi<br/>C ABI Foreign Function Interface"]
     end
 
@@ -86,8 +86,8 @@ graph TD
 | **`urae-cli`** | [`crates/urae-cli`](crates/urae-cli) | High-speed command-line REPL and JSON stream processing interface. |
 | **`urae-wasm`** | [`crates/urae-wasm`](crates/urae-wasm) | WebAssembly edge runtime for Cloudflare Workers & Pages, enabling web notebook execution and sub-millisecond edge API endpoints. |
 | **`urae-lsp`** | [`crates/urae-lsp`](crates/urae-lsp) | Language Server Protocol (LSP) backend for mathematical script editing, diagnostics, completions, and hover documentation in VS Code, Helix, and Neovim. |
-| **`urae-kernel`** | [`crates/urae-kernel`](crates/urae-kernel) | Native Jupyter kernel implementation supporting `.ipynb` execution and MIME-type mathematical rendering. |
-| **`urae-py`** | [`crates/urae-py`](crates/urae-py) | High-performance Python extension module powered by PyO3. |
+| **`urae-kernel`** | [`crates/urae-kernel`](crates/urae-kernel) | In-memory Jupyter notebook cell/session & MIME-bundle execution controller (ZeroMQ wire-protocol kernel scheduled for Wave 2). |
+| **`urae-py`** | [`crates/urae-py`](crates/urae-py) | Rust-side Python session & expression wrapper (PyO3 `#[pymodule]` C-extension bindings scheduled for Wave 2). |
 | **`urae-ffi`** | [`crates/urae-ffi`](crates/urae-ffi) | Standard C ABI foreign function interface for cross-language integration (C, C++, Julia, Fortran). |
 
 ---

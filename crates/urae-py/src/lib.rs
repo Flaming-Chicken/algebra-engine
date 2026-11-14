@@ -1,10 +1,11 @@
-//! # `urae-py` (URAE Python Ecosystem & NumPy/SymPy Interoperability)
+//! # `urae-py` (URAE Python Session & Expression Wrapper)
 //!
-//! High-speed Python CPython binding layer for the Universal Rust Algebra Engine (URAE).
+//! Rust-side Python session & expression wrapper for the Universal Rust Algebra Engine (URAE)
+//! (PyO3 `#[pymodule]` C-extension bindings scheduled for Wave 2).
 //!
-//! Exposes symbolic differentiation, E-Graph simplification, equation solving,
+//! Prepares symbolic differentiation, E-Graph simplification, equation solving,
 //! parametric CAD machinery generation, multiphysics FEA simulation pipelines,
-//! and quantum circuit state vectors directly to Python runtimes (`import urae`).
+//! and quantum circuit state vectors for Python interop (`import urae`).
 
 use serde::{Deserialize, Serialize};
 use urae::prelude::*;

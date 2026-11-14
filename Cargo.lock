@@ -901,6 +901,108 @@ dependencies = [
 ]
 
 [[package]]
+name = "cat-anytime"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "cat-core",
+ "parking_lot",
+ "rayon",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-bridge"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "algebra-core",
+ "cat-core",
+ "num-traits",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-core"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "dashmap",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-egraph"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "cat-core",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-lang"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "cat-core",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-numbers"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "cat-core",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
+name = "cat-tangent"
+version = "0.3.1"
+dependencies = [
+ "ahash 0.8.12",
+ "cat-core",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.20",
+ "tracing",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"

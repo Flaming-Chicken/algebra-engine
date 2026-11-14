@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cat-core",
+    "crates/cat-bridge",
+    "crates/cat-numbers",
+    "crates/cat-anytime",
+    "crates/cat-tangent",
+    "crates/cat-egraph",
+    "crates/cat-lang",
     "crates/auto-promoters",
     "crates/algebra-core",
     "crates/algebra-engine",
@@ -40,6 +47,13 @@ match_like_matches_macro = "allow"
 
 [workspace.dependencies]
 # Internal workspace crates
+cat-core = { path = "crates/cat-core" }
+cat-bridge = { path = "crates/cat-bridge" }
+cat-numbers = { path = "crates/cat-numbers" }
+cat-anytime = { path = "crates/cat-anytime" }
+cat-tangent = { path = "crates/cat-tangent" }
+cat-egraph = { path = "crates/cat-egraph" }
+cat-lang = { path = "crates/cat-lang" }
 auto-promoters = { path = "crates/auto-promoters" }
 algebra-core = { path = "crates/algebra-core" }
 algebra-engine = { path = "crates/algebra-engine" }

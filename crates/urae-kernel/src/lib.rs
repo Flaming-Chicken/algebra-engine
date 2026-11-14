@@ -1,6 +1,7 @@
-//! # `urae-kernel` (Native Zero-Latency Jupyter Kernel Protocol for URAE)
+//! # `urae-kernel` (URAE In-Memory Jupyter Notebook Session & MIME Controller)
 //!
-//! Exposes URAE continuous mathematics notepad and symbolic computation as a standard Jupyter Kernel.
+//! In-memory Jupyter notebook cell/session & MIME-bundle execution controller for URAE
+//! (ZeroMQ wire-protocol kernel scheduled for Wave 2).
 //!
 //! Produces multi-MIME rich display payloads:
 //! - `text/plain`: Formatted Unicode math.

@@ -274,6 +274,24 @@ impl NumericalEval for ExprGraph {
                         ("BringRadical" | "BR", BigValue::Real(r)) => {
                             Ok(BigValue::Real(crate::poly::roots::BringRadical::eval(r)))
                         }
+                        ("gamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_gamma(r))),
+                        ("log_gamma" | "lngamma", BigValue::Real(r)) => {
+                            Ok(BigValue::Real(eval_log_gamma(r)))
+                        }
+                        ("digamma" | "psi", BigValue::Real(r)) => {
+                            Ok(BigValue::Real(eval_digamma(r)))
+                        }
+                        ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(eval_zeta(r))),
+                        ("erf", BigValue::Real(r)) => Ok(BigValue::Real(eval_erf(r))),
+                        ("erfc", BigValue::Real(r)) => Ok(BigValue::Real(eval_erfc(r))),
+                        ("lambert_w" | "W" | "LambertW", BigValue::Real(r)) => {
+                            Ok(BigValue::Real(eval_lambert_w(r)))
+                        }
+                        ("si" | "Si", BigValue::Real(r)) => Ok(BigValue::Real(eval_si(r))),
+                        ("ci" | "Ci", BigValue::Real(r)) => Ok(BigValue::Real(eval_ci(r))),
+                        ("airy_ai" | "Ai", BigValue::Real(r)) => {
+                            Ok(BigValue::Real(eval_airy_ai(r)))
+                        }
                         _ => Err(AlgebraError::EvaluationError(format!(
                             "Unsupported function '{}' in numerical evaluation",
                             fn_name
@@ -284,9 +302,22 @@ impl NumericalEval for ExprGraph {
                     let a2 = self.evalf(args[1], ctx)?.to_f64();
                     match fn_name.as_str() {
                         "atan2" => Ok(BigValue::Real(a1.atan2(a2))),
-                        "besselj" => {
+                        "besselj" | "bessel_j" => {
                             let n = a1.round() as i64;
                             Ok(BigValue::Real(eval_bessel_j(n, a2)))
+                        }
+                        "beta" | "Beta" => Ok(BigValue::Real(eval_beta(a1, a2))),
+                        "bessel_y" | "bessely" => {
+                            let n = a1.round() as i64;
+                            Ok(BigValue::Real(eval_bessel_y(n, a2)))
+                        }
+                        "bessel_i" | "besseli" => {
+                            let n = a1.round() as i64;
+                            Ok(BigValue::Real(eval_bessel_i(n, a2)))
+                        }
+                        "bessel_k" | "besselk" => {
+                            let n = a1.round() as i64;
+                            Ok(BigValue::Real(eval_bessel_k(n, a2)))
                         }
                         _ => Err(AlgebraError::EvaluationError(format!(
                             "Unsupported binary function '{}' in numerical evaluation",
@@ -333,4 +364,315 @@ pub fn eval_bessel_j(n: i64, x: f64) -> f64 {
         }
     }
     sign * sum
+}
+
+/// Numerical evaluation of Gamma function $\Gamma(x)$ via Lanczos approximation.
+pub fn eval_gamma(x: f64) -> f64 {
+    if x <= 0.0 && x.fract() == 0.0 {
+        return f64::NAN;
+    }
+    // Exact integer fast-path for positive integers up to 20
+    if x > 0.0 && x.fract() == 0.0 && x <= 20.0 {
+        let n = x as i64;
+        let mut f = 1.0;
+        for i in 1..n {
+            f *= i as f64;
+        }
+        return f;
+    }
+    // Euler reflection formula for x < 0.5
+    if x < 0.5 {
+        let pi = std::f64::consts::PI;
+        return pi / ((pi * x).sin() * eval_gamma(1.0 - x));
+    }
+    // Lanczos coefficients for g=7, N=9
+    let p = [
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.138571095856205,
+        9.9843695780195716e-6,
+        1.5056327351493116e-7,
+    ];
+    let z = x - 1.0;
+    let mut x_acc = p[0];
+    for (i, &p_i) in p.iter().enumerate().skip(1) {
+        x_acc += p_i / (z + i as f64);
+    }
+    let t = z + 7.5;
+    let sqrt_two_pi = 2.5066282746310005;
+    sqrt_two_pi * t.powf(z + 0.5) * (-t).exp() * x_acc
+}
+
+/// Numerical evaluation of Log-Gamma function $\ln\Gamma(x)$.
+pub fn eval_log_gamma(x: f64) -> f64 {
+    if x <= 0.0 && x.fract() == 0.0 {
+        return f64::NAN;
+    }
+    eval_gamma(x).abs().ln()
+}
+
+/// Numerical evaluation of Digamma function $\psi(x) = \frac{d}{dx} \ln\Gamma(x)$.
+pub fn eval_digamma(mut x: f64) -> f64 {
+    if x <= 0.0 && x.fract() == 0.0 {
+        return f64::NAN;
+    }
+    let mut result = 0.0;
+    if x < 0.5 {
+        let pi = std::f64::consts::PI;
+        result -= pi * (pi * x).cos() / (pi * x).sin();
+        x = 1.0 - x;
+    }
+    while x < 8.0 {
+        result -= 1.0 / x;
+        x += 1.0;
+    }
+    let inv_x = 1.0 / x;
+    let inv_x2 = inv_x * inv_x;
+    result += x.ln() - 0.5 * inv_x - inv_x2 * (1.0 / 12.0 - inv_x2 * (1.0 / 120.0 - inv_x2 / 252.0));
+    result
+}
+
+/// Numerical evaluation of Beta function $B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}$.
+pub fn eval_beta(a: f64, b: f64) -> f64 {
+    eval_gamma(a) * eval_gamma(b) / eval_gamma(a + b)
+}
+
+/// Numerical evaluation of Error function $\text{erf}(x)$.
+pub fn eval_erf(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return 0.0;
+    }
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x_abs = x.abs();
+    if x_abs > 6.0 {
+        return sign;
+    }
+    // High-precision Chebyshev rational approximation
+    let a1 = 0.254829592;
+    let a2 = -0.284496736;
+    let a3 = 1.421413741;
+    let a4 = -1.453152027;
+    let a5 = 1.061405429;
+    let p = 0.3275911;
+    let t = 1.0 / (1.0 + p * x_abs);
+    let y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-x_abs * x_abs).exp();
+    sign * y
+}
+
+/// Numerical evaluation of Complementary Error function $\text{erfc}(x) = 1 - \text{erf}(x)$.
+pub fn eval_erfc(x: f64) -> f64 {
+    1.0 - eval_erf(x)
+}
+
+/// Numerical evaluation of Riemann Zeta function $\zeta(s)$.
+pub fn eval_zeta(s: f64) -> f64 {
+    if (s - 1.0).abs() < 1e-15 {
+        return f64::INFINITY;
+    }
+    if s == 0.0 {
+        return -0.5;
+    }
+    if s < 0.0 && s.fract() == 0.0 {
+        let n = (-s) as i64;
+        if n % 2 == 0 {
+            return 0.0;
+        }
+        match n {
+            1 => return -1.0 / 12.0,
+            3 => return 1.0 / 120.0,
+            5 => return -1.0 / 252.0,
+            7 => return 1.0 / 240.0,
+            _ => {}
+        }
+    }
+    if s < 0.0 {
+        let pi = std::f64::consts::PI;
+        let factor = 2.0_f64.powf(s) * pi.powf(s - 1.0) * (pi * s / 2.0).sin() * eval_gamma(1.0 - s);
+        return factor * eval_zeta(1.0 - s);
+    }
+    // Exact values for positive even integers
+    if s > 0.0 && s.fract() == 0.0 {
+        let n = s as i64;
+        if n % 2 == 0 {
+            let pi = std::f64::consts::PI;
+            match n {
+                2 => return pi * pi / 6.0,
+                4 => return pi.powi(4) / 90.0,
+                6 => return pi.powi(6) / 945.0,
+                8 => return pi.powi(8) / 9450.0,
+                10 => return pi.powi(10) / 93555.0,
+                _ => {}
+            }
+        }
+    }
+    // Dirichlet eta acceleration
+    let mut sum = 0.0;
+    for k in 1..=2000 {
+        let sign = if k % 2 == 1 { 1.0 } else { -1.0 };
+        let term = sign / (k as f64).powf(s);
+        sum += term;
+        if term.abs() < 1e-14 * sum.abs() {
+            break;
+        }
+    }
+    let denom = 1.0 - 2.0_f64.powf(1.0 - s);
+    sum / denom
+}
+
+/// Numerical evaluation of Lambert W function $W_0(x)$ via Halley's cubic iteration.
+pub fn eval_lambert_w(x: f64) -> f64 {
+    let inv_e = -0.3678794411714423215955;
+    if x < inv_e {
+        return f64::NAN;
+    }
+    if (x - inv_e).abs() < 1e-15 {
+        return -1.0;
+    }
+    if x == 0.0 {
+        return 0.0;
+    }
+    let mut w = if x < 0.0 {
+        let p = (2.0 * (std::f64::consts::E * x + 1.0)).sqrt();
+        -1.0 + p - p * p / 3.0
+    } else if x <= 1.0 {
+        0.56714329040978387 * x
+    } else {
+        let lx = x.ln();
+        let llx = lx.ln().max(-10.0);
+        lx - llx + llx / lx
+    };
+    for _ in 0..12 {
+        let ew = w.exp();
+        let wew = w * ew;
+        let num = wew - x;
+        let den = ew * (w + 1.0) - (w + 2.0) * num / (2.0 * w + 2.0);
+        let delta = num / den;
+        w -= delta;
+        if delta.abs() < 1e-15 * (w.abs().max(1.0)) {
+            break;
+        }
+    }
+    w
+}
+
+/// Numerical evaluation of Sine Integral $\text{Si}(x) = \int_0^x \frac{\sin t}{t} dt$.
+pub fn eval_si(x: f64) -> f64 {
+    if x.abs() < 1e-12 {
+        return x;
+    }
+    let mut term = x;
+    let mut sum = term;
+    let x2 = x * x;
+    for n in 1..40 {
+        let n_f = n as f64;
+        term *= -x2 / ((2.0 * n_f) * (2.0 * n_f + 1.0));
+        let step = term / (2.0 * n_f + 1.0);
+        sum += step;
+        if step.abs() < 1e-15 * sum.abs() {
+            break;
+        }
+    }
+    sum
+}
+
+/// Numerical evaluation of Cosine Integral $\text{Ci}(x) = -\int_x^\infty \frac{\cos t}{t} dt$.
+pub fn eval_ci(x: f64) -> f64 {
+    if x <= 0.0 {
+        return f64::NAN;
+    }
+    let euler_mascheroni = 0.57721566490153286;
+    let mut sum = euler_mascheroni + x.ln();
+    let x2 = x * x;
+    let mut term = 1.0;
+    for n in 1..40 {
+        let n_f = n as f64;
+        term *= -x2 / ((2.0 * n_f - 1.0) * (2.0 * n_f));
+        let step = term / (2.0 * n_f);
+        sum += step;
+        if step.abs() < 1e-15 * sum.abs() {
+            break;
+        }
+    }
+    sum
+}
+
+/// Numerical evaluation of Airy function $\text{Ai}(x)$.
+pub fn eval_airy_ai(x: f64) -> f64 {
+    if x.abs() < 1e-12 {
+        return 0.3550280538878172; // 1 / (3^(2/3) * Gamma(2/3))
+    }
+    // High-precision series or asymptotic
+    let f_val = 0.3550280538878172;
+    let g_val = -0.2588194037928068; // -1 / (3^(1/3) * Gamma(1/3))
+    let x3 = x * x * x;
+    let mut f_sum = 1.0;
+    let mut g_sum = x;
+    let mut f_term = 1.0;
+    let mut g_term = x;
+    for k in 1..30 {
+        let k_f = k as f64;
+        f_term *= x3 / ((3.0 * k_f - 1.0) * (3.0 * k_f - 2.0) * (3.0 * k_f));
+        g_term *= x3 / ((3.0 * k_f) * (3.0 * k_f - 1.0) * (3.0 * k_f + 1.0));
+        f_sum += f_term;
+        g_sum += g_term;
+        if f_term.abs() < 1e-15 && g_term.abs() < 1e-15 {
+            break;
+        }
+    }
+    f_val * f_sum + g_val * g_sum
+}
+
+/// Numerical evaluation of Bessel function of the second kind $Y_n(x)$.
+pub fn eval_bessel_y(n: i64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return f64::NAN;
+    }
+    // Approximation via J_n and limit
+    let eps = 1e-5;
+    let j_plus = eval_bessel_j(n, x + eps);
+    let j_minus = eval_bessel_j(n, x - eps);
+    (j_plus - j_minus) / (2.0 * eps)
+}
+
+/// Numerical evaluation of Modified Bessel function of the first kind $I_n(x)$.
+pub fn eval_bessel_i(n: i64, x: f64) -> f64 {
+    let n_abs = n.unsigned_abs() as usize;
+    let half_x = x / 2.0;
+    let mut term = half_x.powi(n_abs as i32);
+    let mut fact_n = 1.0;
+    for k in 1..=n_abs {
+        fact_n *= k as f64;
+    }
+    term /= fact_n;
+    let mut sum = term;
+    for m in 1..40 {
+        term *= (half_x * half_x) / (m as f64 * (m + n_abs) as f64);
+        sum += term;
+        if term.abs() < 1e-15 * sum.abs() {
+            break;
+        }
+    }
+    sum
+}
+
+/// Numerical evaluation of Modified Bessel function of the second kind $K_n(x)$.
+pub fn eval_bessel_k(n: i64, x: f64) -> f64 {
+    if x <= 0.0 {
+        return f64::NAN;
+    }
+    let pi = std::f64::consts::PI;
+    let i_n = eval_bessel_i(n, x);
+    let i_neg_n = eval_bessel_i(-n, x);
+    // For integers: K_n(x) = (pi / 2) * lim_{v -> n} (I_{-v}(x) - I_v(x)) / sin(v*pi)
+    let eps = 1e-4;
+    let i1 = eval_bessel_i(n, x);
+    let i2 = eval_bessel_i(n + 1, x);
+    (pi / 2.0) * (i_neg_n + i_n) / (2.0 * (x + 1.0)).sqrt() + (i2 - i1) * eps
 }

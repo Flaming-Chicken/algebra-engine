@@ -269,6 +269,14 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_factor<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
+        let (input, _) = multispace0(input)?;
+        if let Some(rest) = input.strip_prefix('-') {
+            let (next_input, inner) = self.parse_factor(rest)?;
+            return Ok((next_input, self.graph.neg(inner)));
+        }
+        if let Some(rest) = input.strip_prefix('+') {
+            return self.parse_factor(rest);
+        }
         let (input, base) = self.parse_primary(input)?;
         let (input, exp_opt) = opt(tuple((
             delimited(multispace0, char('^'), multispace0),

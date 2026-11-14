@@ -7,9 +7,109 @@ use algebra_core::ExprGraph;
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::parser::ExprParser;
 use algebra_engine::calculus::SymbolicCalculus;
+use algebra_engine::executor::ExecutionContext;
 use algebra_engine::simplify::Simplifier;
 use algebra_engine::solver::SymbolicSolver;
+use algebra_engine::wolfram::WolframAlphaEngine;
 use wasm_bindgen::prelude::*;
+
+/// Natural Language Wolfram Alpha multi-pod query engine on WebAssembly edge.
+/// Returns JSON-encoded `WolframAlphaResponse` containing all structured pods (Input, Result,
+/// Steps, Numerical, Alternate forms, Derivatives, Integrals, Roots).
+#[wasm_bindgen]
+pub fn wasm_wolfram_query(query_str: &str) -> String {
+    let graph = ExprGraph::new();
+    let ctx = ExecutionContext::new();
+    let resp = WolframAlphaEngine::query(&graph, query_str, &ctx);
+    serde_json::to_string(&resp).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+}
+
+/// Evaluates a line in the Rust-extended Pad, returning rich formatted JSON with
+/// exact LaTeX, 2D Unicode, plain text, and any generated Wolfram pods.
+#[wasm_bindgen]
+pub fn wasm_pad_eval_line(line_str: &str) -> String {
+    let graph = ExprGraph::new();
+    let ctx = ExecutionContext::new();
+    let trimmed = line_str.trim();
+    if trimmed.is_empty() {
+        return "{}".to_string();
+    }
+    let resp = WolframAlphaEngine::query(&graph, trimmed, &ctx);
+    serde_json::to_string(&resp).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+}
+
+/// Evaluates a multi-line Rust-extended mathematical pad session.
+/// Takes raw pad text, processes each line, maintaining variable definitions and returning an array of evaluated lines.
+#[wasm_bindgen]
+pub fn wasm_pad_eval_session(session_text: &str) -> String {
+    let graph = ExprGraph::new();
+    let mut ctx = ExecutionContext::new();
+    let mut results = Vec::new();
+
+    for line in session_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
+            results.push(serde_json::json!({
+                "raw": line,
+                "is_comment_or_empty": true,
+                "text": "",
+                "latex": "",
+                "unicode": "",
+            }));
+            continue;
+        }
+
+        // Check if line is a variable or parameter assignment, e.g., a = 5.0 or x = 2
+        if let Some((lhs, rhs)) = trimmed.split_once('=') {
+            let var_name = lhs.trim();
+            let val_str = rhs.trim().trim_end_matches(';');
+            if !var_name.contains('(') && var_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                if let Ok(val) = val_str.parse::<f64>() {
+                    ctx.bindings.insert(var_name.to_string(), val);
+                }
+            }
+        }
+
+        let resp = WolframAlphaEngine::query(&graph, trimmed, &ctx);
+        let result_pod = resp.pods.iter().find(|p| p.title == "Result");
+        let error_pod = resp.pods.iter().find(|p| p.title == "Error");
+
+        if let Some(res) = result_pod {
+            results.push(serde_json::json!({
+                "raw": line,
+                "is_error": false,
+                "text": res.text,
+                "latex": res.latex,
+                "unicode": res.unicode,
+                "pods": resp.pods,
+                "execution_time_us": resp.execution_time_us,
+            }));
+        } else if let Some(err) = error_pod {
+            results.push(serde_json::json!({
+                "raw": line,
+                "is_error": true,
+                "text": err.text,
+                "latex": err.latex,
+                "unicode": err.unicode,
+                "pods": resp.pods,
+                "execution_time_us": resp.execution_time_us,
+            }));
+        } else {
+            let first = resp.pods.first();
+            results.push(serde_json::json!({
+                "raw": line,
+                "is_error": false,
+                "text": first.map(|p| p.text.as_str()).unwrap_or_default(),
+                "latex": first.map(|p| p.latex.as_str()).unwrap_or_default(),
+                "unicode": first.map(|p| p.unicode.as_str()).unwrap_or_default(),
+                "pods": resp.pods,
+                "execution_time_us": resp.execution_time_us,
+            }));
+        }
+    }
+
+    serde_json::to_string(&results).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+}
 
 /// Process a JSON request string on Cloudflare Workers / Pages edge and return structured JSON response.
 #[wasm_bindgen]

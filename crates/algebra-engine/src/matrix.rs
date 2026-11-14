@@ -240,6 +240,179 @@ impl SymbolicMatrix {
         ))
     }
 
+    /// Compute matrix trace $\text{tr}(A) = \sum_{i=1}^n A_{ii}$.
+    pub fn trace(&self, graph: &ExprGraph) -> AlgebraResult<ExprId> {
+        if self.rows != self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Square matrix required for trace, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+        let diag: Vec<ExprId> = (0..self.rows).map(|i| self.get(i, i)).collect();
+        Ok(graph.add(diag))
+    }
+
+    /// Matrix Transpose $A^T$.
+    pub fn transpose(&self, _graph: &ExprGraph) -> AlgebraResult<Self> {
+        let mut t_elems = Vec::with_capacity(self.rows * self.cols);
+        for c in 0..self.cols {
+            for r in 0..self.rows {
+                t_elems.push(self.get(r, c));
+            }
+        }
+        Self::new(self.cols, self.rows, t_elems)
+    }
+
+    /// Matrix Inverse $A^{-1}$.
+    pub fn inverse(&self, graph: &ExprGraph) -> AlgebraResult<Self> {
+        if self.rows != self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Square matrix required for inverse, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+
+        if self.rows == 1 {
+            let inv = graph.div(graph.integer(1), self.elements[0]);
+            return Self::new(1, 1, vec![inv]);
+        }
+
+        if self.rows == 2 {
+            let a = self.get(0, 0);
+            let b = self.get(0, 1);
+            let c = self.get(1, 0);
+            let d = self.get(1, 1);
+
+            let det = self.determinant(graph)?;
+            let inv_det = graph.div(graph.integer(1), det);
+
+            let neg_b = graph.neg(b);
+            let neg_c = graph.neg(c);
+
+            let i11 = graph.mul([inv_det, d]);
+            let i12 = graph.mul([inv_det, neg_b]);
+            let i21 = graph.mul([inv_det, neg_c]);
+            let i22 = graph.mul([inv_det, a]);
+
+            return Self::new(2, 2, vec![i11, i12, i21, i22]);
+        }
+
+        Err(AlgebraError::EvaluationError(
+            "Matrix inverse currently implemented for <= 2x2 matrices".into(),
+        ))
+    }
+
+    /// Characteristic Polynomial $p(\lambda) = \det(\lambda I - A)$.
+    pub fn charpoly(&self, graph: &ExprGraph, lambda_var: &str) -> AlgebraResult<ExprId> {
+        if self.rows != self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Square matrix required for characteristic polynomial, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+
+        let lambda = graph.symbol(lambda_var);
+
+        if self.rows == 2 {
+            // lambda^2 - tr(A)*lambda + det(A)
+            let tr = self.trace(graph)?;
+            let det = self.determinant(graph)?;
+
+            let lambda_sq = graph.pow(lambda, graph.integer(2));
+            let tr_lambda = graph.mul([tr, lambda]);
+            let diff = graph.sub(lambda_sq, tr_lambda);
+            return Ok(graph.add([diff, det]));
+        }
+
+        Err(AlgebraError::EvaluationError(
+            "Characteristic polynomial currently implemented for 2x2 matrices".into(),
+        ))
+    }
+
+    /// Compute exact symbolic eigenvalues of a 2x2 matrix.
+    pub fn eigenvalues(&self, graph: &ExprGraph) -> AlgebraResult<Vec<ExprId>> {
+        if self.rows != 2 || self.cols != 2 {
+            return Err(AlgebraError::EvaluationError(
+                "Eigenvalue solver currently implemented for 2x2 matrices".into(),
+            ));
+        }
+
+        let tr = self.trace(graph)?;
+        let det = self.determinant(graph)?;
+
+        let half = graph.rational(1, 2);
+        let tr_over_2 = graph.mul([half, tr]);
+
+        // Discriminant: tr^2 - 4*det
+        let tr_sq = graph.pow(tr, graph.integer(2));
+        let four_det = graph.mul([graph.integer(4), det]);
+        let disc = graph.sub(tr_sq, four_det);
+        let sqrt_disc = graph.pow(disc, half);
+        let half_sqrt_disc = graph.mul([half, sqrt_disc]);
+
+        let lambda1 = graph.add([tr_over_2, half_sqrt_disc]);
+        let lambda2 = graph.sub(tr_over_2, half_sqrt_disc);
+
+        Ok(vec![lambda1, lambda2])
+    }
+
+    /// Compute exact symbolic eigenvectors of a 2x2 matrix.
+    pub fn eigenvectors(&self, graph: &ExprGraph) -> AlgebraResult<Vec<(ExprId, Vec<ExprId>)>> {
+        let e_vals = self.eigenvalues(graph)?;
+        let mut result = Vec::new();
+
+        let b = self.get(0, 1);
+        let a = self.get(0, 0);
+
+        for lambda in e_vals {
+            // (A - lambda*I) v = 0 => (a - lambda)*v1 + b*v2 = 0
+            // If b != 0: v = [-b, a - lambda]
+            let neg_b = graph.neg(b);
+            let a_minus_lambda = graph.sub(a, lambda);
+            result.push((lambda, vec![neg_b, a_minus_lambda]));
+        }
+
+        Ok(result)
+    }
+
+    /// Compute closed-form Matrix Exponential $e^{A t}$ via Putzer's spectral algorithm.
+    pub fn matrix_exp(&self, graph: &ExprGraph, t_var: &str) -> AlgebraResult<Self> {
+        if self.rows != 2 || self.cols != 2 {
+            return Err(AlgebraError::EvaluationError(
+                "Matrix exponential currently implemented for 2x2 matrices".into(),
+            ));
+        }
+
+        let t = graph.symbol(t_var);
+        let e_vals = self.eigenvalues(graph)?;
+        let (l1, l2) = (e_vals[0], e_vals[1]);
+
+        let l1_t = graph.mul([l1, t]);
+        let l2_t = graph.mul([l2, t]);
+        let exp_l1 = graph.function("exp", [l1_t]);
+        let exp_l2 = graph.function("exp", [l2_t]);
+
+        // Putzer formula: e^(At) = exp(l1*t)*I + ((exp(l1*t) - exp(l2*t)) / (l1 - l2)) * (A - l1*I)
+        let l1_minus_l2 = graph.sub(l1, l2);
+        let exp_diff = graph.sub(exp_l1, exp_l2);
+        let coeff = graph.div(exp_diff, l1_minus_l2);
+
+        let a11 = self.get(0, 0);
+        let a12 = self.get(0, 1);
+        let a21 = self.get(1, 0);
+        let a22 = self.get(1, 1);
+
+        let a11_minus_l1 = graph.sub(a11, l1);
+        let a22_minus_l1 = graph.sub(a22, l1);
+
+        let m11 = graph.add([exp_l1, graph.mul([coeff, a11_minus_l1])]);
+        let m12 = graph.mul([coeff, a12]);
+        let m21 = graph.mul([coeff, a21]);
+        let m22 = graph.add([exp_l1, graph.mul([coeff, a22_minus_l1])]);
+
+        Self::new(2, 2, vec![m11, m12, m21, m22])
+    }
+
     /// Convert matrix into interned `ExprGraph` matrix node.
     pub fn intern(&self, graph: &ExprGraph) -> ExprId {
         graph.matrix(self.rows, self.cols, self.elements.clone())

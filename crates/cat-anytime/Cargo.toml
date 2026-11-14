@@ -1,0 +1,23 @@
+[package]
+name = "cat-anytime"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Sub-frame progressive anytime engine, wavefront evaluator, and Amitsur-Levitzki zero-testing"
+
+[lints]
+workspace = true
+
+[dependencies]
+cat-core = { workspace = true }
+smallvec = { workspace = true }
+ahash = { workspace = true }
+rayon = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

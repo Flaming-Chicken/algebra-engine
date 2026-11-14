@@ -320,8 +320,53 @@ impl RischIntegrator {
                     let neg_log = graph.neg(log_cos);
                     Ok(graph.mul([inv_a, neg_log]))
                 }
+                "asin" => {
+                    // int asin(x) dx = x * asin(x) + sqrt(1 - x^2)
+                    let x_asin = graph.mul([arg, graph.function("asin", [arg])]);
+                    let one = graph.integer(1);
+                    let arg_sq = graph.pow(arg, graph.integer(2));
+                    let sqrt_term = graph.function("sqrt", [graph.sub(one, arg_sq)]);
+                    let sum = graph.add([x_asin, sqrt_term]);
+                    Ok(graph.mul([inv_a, sum]))
+                }
+                "acos" => {
+                    // int acos(x) dx = x * acos(x) - sqrt(1 - x^2)
+                    let x_acos = graph.mul([arg, graph.function("acos", [arg])]);
+                    let one = graph.integer(1);
+                    let arg_sq = graph.pow(arg, graph.integer(2));
+                    let sqrt_term = graph.function("sqrt", [graph.sub(one, arg_sq)]);
+                    let diff = graph.sub(x_acos, sqrt_term);
+                    Ok(graph.mul([inv_a, diff]))
+                }
+                "atan" => {
+                    // int atan(x) dx = x * atan(x) - (1/2) * ln(1 + x^2)
+                    let x_atan = graph.mul([arg, graph.function("atan", [arg])]);
+                    let one = graph.integer(1);
+                    let arg_sq = graph.pow(arg, graph.integer(2));
+                    let ln_term = graph.function("ln", [graph.add([one, arg_sq])]);
+                    let half_ln = graph.mul([graph.rational(1, 2), ln_term]);
+                    let diff = graph.sub(x_atan, half_ln);
+                    Ok(graph.mul([inv_a, diff]))
+                }
+                "erf" => {
+                    // int erf(x) dx = x * erf(x) + (1/sqrt(pi)) * exp(-x^2)
+                    let x_erf = graph.mul([arg, graph.function("erf", [arg])]);
+                    let pi = graph.constant(algebra_core::Constant::Pi);
+                    let sqrt_pi = graph.function("sqrt", [pi]);
+                    let inv_sqrt_pi = graph.div(graph.integer(1), sqrt_pi);
+                    let neg_x_sq = graph.neg(graph.pow(arg, graph.integer(2)));
+                    let exp_term = graph.function("exp", [neg_x_sq]);
+                    let add_term = graph.mul([inv_sqrt_pi, exp_term]);
+                    let sum = graph.add([x_erf, add_term]);
+                    Ok(graph.mul([inv_a, sum]))
+                }
                 "sinh" => Ok(graph.mul([inv_a, graph.function("cosh", [arg])])),
                 "cosh" => Ok(graph.mul([inv_a, graph.function("sinh", [arg])])),
+                "tanh" => {
+                    let cosh_term = graph.function("cosh", [arg]);
+                    let ln_cosh = graph.function("ln", [cosh_term]);
+                    Ok(graph.mul([inv_a, ln_cosh]))
+                }
                 "ln" => {
                     // int ln(x) dx = x * ln(x) - x
                     let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
@@ -362,7 +407,7 @@ impl RischIntegrator {
         }
     }
 
-    /// Integrate products via symbolic integration by parts ($x^k e^{ax}$, $x^k \sin(ax)$, $x^k \cos(ax)$).
+    /// Integrate products via symbolic integration by parts ($x^k e^{ax}$, $x^k \sin(ax)$, $x^k \cos(ax)$, $x^k \ln(x)$, $e^x \sin(x)$).
     fn integrate_products(
         graph: &ExprGraph,
         factors: &[ExprId],
@@ -371,40 +416,131 @@ impl RischIntegrator {
         let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
         let x = graph.symbol(&wrt_name);
 
+        // Constant multiple extraction: if factor does not contain wrt
         if factors.len() == 2 {
-            let (_u, v) = if factors[0] == x {
-                (factors[0], factors[1])
-            } else if factors[1] == x {
-                (factors[1], factors[0])
+            let has0 = graph.has_symbol(factors[0], wrt);
+            let has1 = graph.has_symbol(factors[1], wrt);
+            if !has0 && has1 {
+                let int1 = Self::integrate(graph, factors[1], wrt)?;
+                return Ok(graph.mul([factors[0], int1]));
+            } else if has0 && !has1 {
+                let int0 = Self::integrate(graph, factors[0], wrt)?;
+                return Ok(graph.mul([factors[1], int0]));
+            }
+        }
+
+        if factors.len() == 2 {
+            let (u, v) = (factors[0], factors[1]);
+
+            // Case A: x * f(x)
+            let (poly_part, fn_part) = if u == x {
+                (u, v)
+            } else if v == x {
+                (v, u)
+            } else if let ExprKind::Pow(b, p) = graph.get(u).kind
+                && b == x
+                && p == graph.integer(2)
+            {
+                (u, v)
+            } else if let ExprKind::Pow(b, p) = graph.get(v).kind
+                && b == x
+                && p == graph.integer(2)
+            {
+                (v, u)
             } else {
+                // Check e^x * sin(x) or e^x * cos(x)
+                if let (ExprKind::Function { name: n1, args: a1 }, ExprKind::Function { name: n2, args: a2 }) =
+                    (&graph.get(u).kind, &graph.get(v).kind)
+                {
+                    let fn1 = graph.symbols.resolve(*n1).unwrap_or_default();
+                    let fn2 = graph.symbols.resolve(*n2).unwrap_or_default();
+                    if a1.len() == 1 && a2.len() == 1 && a1[0] == x && a2[0] == x {
+                        if (fn1 == "exp" && fn2 == "sin") || (fn1 == "sin" && fn2 == "exp") {
+                            // int exp(x) * sin(x) dx = (1/2) * exp(x) * (sin(x) - cos(x))
+                            let exp_x = graph.function("exp", [x]);
+                            let sin_x = graph.function("sin", [x]);
+                            let cos_x = graph.function("cos", [x]);
+                            let half = graph.rational(1, 2);
+                            let diff = graph.sub(sin_x, cos_x);
+                            return Ok(graph.mul([half, exp_x, diff]));
+                        } else if (fn1 == "exp" && fn2 == "cos") || (fn1 == "cos" && fn2 == "exp") {
+                            // int exp(x) * cos(x) dx = (1/2) * exp(x) * (sin(x) + cos(x))
+                            let exp_x = graph.function("exp", [x]);
+                            let sin_x = graph.function("sin", [x]);
+                            let cos_x = graph.function("cos", [x]);
+                            let half = graph.rational(1, 2);
+                            let sum = graph.add([sin_x, cos_x]);
+                            return Ok(graph.mul([half, exp_x, sum]));
+                        }
+                    }
+                }
                 return Err(AlgebraError::EvaluationError(
                     "Multi-factor product integration not matched".into(),
                 ));
             };
 
-            if let ExprKind::Function { name, args } = graph.get(v).kind {
+            let is_degree_1 = poly_part == x;
+            let is_degree_2 = !is_degree_1;
+
+            if let ExprKind::Function { name, args } = graph.get(fn_part).kind {
                 let fn_name = graph.symbols.resolve(name).unwrap_or_default();
                 if args.len() == 1 && args[0] == x {
                     match fn_name.as_str() {
                         "exp" => {
-                            // int x * exp(x) dx = (x - 1) * exp(x)
-                            let x_minus_1 = graph.sub(x, graph.integer(1));
                             let exp_x = graph.function("exp", [x]);
-                            return Ok(graph.mul([exp_x, x_minus_1]));
+                            if is_degree_1 {
+                                // int x * exp(x) dx = (x - 1) * exp(x)
+                                let x_minus_1 = graph.sub(x, graph.integer(1));
+                                return Ok(graph.mul([exp_x, x_minus_1]));
+                            } else if is_degree_2 {
+                                // int x^2 * exp(x) dx = (x^2 - 2x + 2) * exp(x)
+                                let x_sq = graph.pow(x, graph.integer(2));
+                                let two_x = graph.mul([graph.integer(2), x]);
+                                let quad = graph.add([graph.sub(x_sq, two_x), graph.integer(2)]);
+                                return Ok(graph.mul([exp_x, quad]));
+                            }
                         }
                         "sin" => {
-                            // int x * sin(x) dx = sin(x) - x * cos(x)
                             let sin_x = graph.function("sin", [x]);
                             let cos_x = graph.function("cos", [x]);
-                            let x_cos_x = graph.mul([x, cos_x]);
-                            return Ok(graph.sub(sin_x, x_cos_x));
+                            if is_degree_1 {
+                                // int x * sin(x) dx = sin(x) - x * cos(x)
+                                let x_cos_x = graph.mul([x, cos_x]);
+                                return Ok(graph.sub(sin_x, x_cos_x));
+                            } else if is_degree_2 {
+                                // int x^2 * sin(x) dx = (2 - x^2)*cos(x) + 2x*sin(x)
+                                let x_sq = graph.pow(x, graph.integer(2));
+                                let two_minus_xsq = graph.sub(graph.integer(2), x_sq);
+                                let term1 = graph.mul([two_minus_xsq, cos_x]);
+                                let term2 = graph.mul([graph.integer(2), x, sin_x]);
+                                return Ok(graph.add([term1, term2]));
+                            }
                         }
                         "cos" => {
-                            // int x * cos(x) dx = cos(x) + x * sin(x)
                             let cos_x = graph.function("cos", [x]);
                             let sin_x = graph.function("sin", [x]);
-                            let x_sin_x = graph.mul([x, sin_x]);
-                            return Ok(graph.add([cos_x, x_sin_x]));
+                            if is_degree_1 {
+                                // int x * cos(x) dx = cos(x) + x * sin(x)
+                                let x_sin_x = graph.mul([x, sin_x]);
+                                return Ok(graph.add([cos_x, x_sin_x]));
+                            } else if is_degree_2 {
+                                // int x^2 * cos(x) dx = (x^2 - 2)*sin(x) + 2x*cos(x)
+                                let x_sq = graph.pow(x, graph.integer(2));
+                                let xsq_minus_two = graph.sub(x_sq, graph.integer(2));
+                                let term1 = graph.mul([xsq_minus_two, sin_x]);
+                                let term2 = graph.mul([graph.integer(2), x, cos_x]);
+                                return Ok(graph.add([term1, term2]));
+                            }
+                        }
+                        "ln" | "log" => {
+                            if is_degree_1 {
+                                // int x * ln(x) dx = (1/2)*x^2*ln(x) - (1/4)*x^2
+                                let x_sq = graph.pow(x, graph.integer(2));
+                                let ln_x = graph.function("ln", [x]);
+                                let half_xsq_ln = graph.mul([graph.rational(1, 2), x_sq, ln_x]);
+                                let quarter_xsq = graph.mul([graph.rational(1, 4), x_sq]);
+                                return Ok(graph.sub(half_xsq_ln, quarter_xsq));
+                            }
                         }
                         _ => {}
                     }

@@ -69,8 +69,11 @@ pub mod tensor;
 pub mod topology;
 pub mod transforms;
 pub mod tropical;
+pub mod urscript_pose;
 pub mod visualizer;
 pub mod weyl_dmodules;
+pub mod wolfram;
+pub mod hecs;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,
@@ -182,3 +185,6 @@ pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
 };
+pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};
+pub use hecs::Hecs;
+pub use urscript_pose::Pose;

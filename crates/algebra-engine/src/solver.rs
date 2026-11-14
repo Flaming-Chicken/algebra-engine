@@ -244,7 +244,14 @@ impl SymbolicSolver for ExprGraph {
                 Ok(all_roots)
             }
             ExprKind::Pow(base, _exp) => self.solveset(*base, target),
-            _ => self.solve_polynomial_radicals(eq, target),
+            _ => {
+                if let Some(trans_roots) = solve_transcendental(self, eq, target) {
+                    if !trans_roots.is_empty() {
+                        return Ok(trans_roots);
+                    }
+                }
+                self.solve_polynomial_radicals(eq, target)
+            }
         }
     }
 
@@ -935,5 +942,294 @@ impl SymbolicSolver for ExprGraph {
             root_of_nodes.push(root_of);
         }
         Ok(root_of_nodes)
+    }
+}
+
+/// Exact transcendental equation solver ($e^x = c$, $\ln(x) = c$, $\sin(x) = c$, $x e^x = c$ via Lambert W).
+fn solve_transcendental(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Option<Vec<ExprId>> {
+    // Check for quadratic in e^x first: A*e^(2x) + B*e^x + C = 0
+    if let Some(roots) = solve_transcendental_quadratic(graph, eq, target) {
+        return Some(roots);
+    }
+
+    let node = graph.get(eq);
+    let wrt_name = graph.symbols.resolve(target)?;
+    let x_sym = graph.symbol(&wrt_name);
+
+    // Decompose eq = 0 into T(x) = C (where C is independent of target)
+    let (t_x, c_val) = match &node.kind {
+        ExprKind::Sub(a, b) => {
+            let a_has = graph.has_symbol(*a, target);
+            let b_has = graph.has_symbol(*b, target);
+            if a_has && !b_has {
+                (*a, *b)
+            } else if !a_has && b_has {
+                (*b, *a)
+            } else {
+                return solve_transcendental_quadratic(graph, eq, target);
+            }
+        }
+        ExprKind::Add(terms) => {
+            let mut with_x = Vec::new();
+            let mut without_x = Vec::new();
+            for &t in terms {
+                if graph.has_symbol(t, target) {
+                    with_x.push(t);
+                } else {
+                    without_x.push(t);
+                }
+            }
+            if with_x.len() == 1 {
+                let c_neg = if without_x.is_empty() {
+                    graph.integer(0)
+                } else if without_x.len() == 1 {
+                    graph.neg(without_x[0])
+                } else {
+                    graph.neg(graph.add(without_x))
+                };
+                (with_x[0], c_neg)
+            } else {
+                return solve_transcendental_quadratic(graph, eq, target);
+            }
+        }
+        ExprKind::Function { .. } => {
+            if graph.has_symbol(eq, target) {
+                (eq, graph.integer(0))
+            } else {
+                return None;
+            }
+        }
+        ExprKind::Mul(factors) => {
+            return solve_transcendental_product(graph, factors, target);
+        }
+        _ => return None,
+    };
+
+    // Check if t_x is a single transcendental function: F(arg) = C
+    let t_node = graph.get(t_x);
+    if let ExprKind::Function { name, args } = &t_node.kind {
+        let fn_name = graph.symbols.resolve(*name)?;
+        if args.len() == 1 {
+            let arg = args[0];
+            match fn_name.as_str() {
+                "exp" => {
+                    let ln_c = graph.function("ln", [c_val]);
+                    if arg == x_sym {
+                        return Some(vec![ln_c]);
+                    }
+                    let new_eq = graph.sub(arg, ln_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "ln" | "log" => {
+                    let exp_c = graph.function("exp", [c_val]);
+                    if arg == x_sym {
+                        return Some(vec![exp_c]);
+                    }
+                    let new_eq = graph.sub(arg, exp_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "sin" => {
+                    let asin_c = graph.function("asin", [c_val]);
+                    if arg == x_sym {
+                        return Some(vec![asin_c]);
+                    }
+                    let new_eq = graph.sub(arg, asin_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "cos" => {
+                    let acos_c = graph.function("acos", [c_val]);
+                    if arg == x_sym {
+                        return Some(vec![acos_c]);
+                    }
+                    let new_eq = graph.sub(arg, acos_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "tan" => {
+                    let atan_c = graph.function("atan", [c_val]);
+                    if arg == x_sym {
+                        return Some(vec![atan_c]);
+                    }
+                    let new_eq = graph.sub(arg, atan_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "sqrt" => {
+                    let c_sq = match graph.get(c_val).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n)) => graph.integer(n * n),
+                        _ => {
+                            let pow_node = graph.pow(c_val, graph.integer(2));
+                            Simplifier::simplify(graph, pow_node).unwrap_or(pow_node)
+                        }
+                    };
+                    if arg == x_sym {
+                        return Some(vec![c_sq]);
+                    }
+                    let new_eq = graph.sub(arg, c_sq);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                "lambert_w" | "LambertW" | "W" => {
+                    let exp_c = graph.function("exp", [c_val]);
+                    let c_exp_c = graph.mul([c_val, exp_c]);
+                    if arg == x_sym {
+                        return Some(vec![c_exp_c]);
+                    }
+                    let new_eq = graph.sub(arg, c_exp_c);
+                    return graph.solveset(new_eq, target).ok();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Check for Lambert W forms: x * exp(x) = C or x * ln(x) = C
+    if let ExprKind::Mul(factors) = &t_node.kind {
+        if factors.len() == 2 {
+            let (f1, f2) = (factors[0], factors[1]);
+            let is_x1 = f1 == x_sym;
+            let is_x2 = f2 == x_sym;
+            if is_x1 || is_x2 {
+                let other = if is_x1 { f2 } else { f1 };
+                let other_node = graph.get(other);
+                if let ExprKind::Function { name, args } = &other_node.kind {
+                    let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+                    if fn_name == "exp" && args.len() == 1 && args[0] == x_sym {
+                        let w_c = graph.function("lambert_w", [c_val]);
+                        return Some(vec![w_c]);
+                    } else if (fn_name == "ln" || fn_name == "log")
+                        && args.len() == 1
+                        && args[0] == x_sym
+                    {
+                        let w_c = graph.function("lambert_w", [c_val]);
+                        let exp_w_c = graph.function("exp", [w_c]);
+                        return Some(vec![exp_w_c]);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn solve_transcendental_product(
+    graph: &ExprGraph,
+    factors: &[ExprId],
+    target: SymbolId,
+) -> Option<Vec<ExprId>> {
+    let mut roots = Vec::new();
+    for &f in factors {
+        if graph.has_symbol(f, target) {
+            if let Ok(r) = graph.solveset(f, target) {
+                for root in r {
+                    if !roots.contains(&root) {
+                        roots.push(root);
+                    }
+                }
+            }
+        }
+    }
+    if !roots.is_empty() {
+        Some(roots)
+    } else {
+        None
+    }
+}
+
+fn solve_transcendental_quadratic(
+    graph: &ExprGraph,
+    eq: ExprId,
+    target: SymbolId,
+) -> Option<Vec<ExprId>> {
+    let wrt_name = graph.symbols.resolve(target)?;
+    let x_sym = graph.symbol(&wrt_name);
+    let exp_x = graph.function("exp", [x_sym]);
+    let two_x = graph.mul([graph.integer(2), x_sym]);
+    let exp_2x = graph.function("exp", [two_x]);
+
+    let u_sym = graph.symbol("__u_sub");
+    let u_target = match graph.get(u_sym).kind {
+        ExprKind::Symbol(s) => s,
+        _ => return None,
+    };
+    let u_sq = graph.pow(u_sym, graph.integer(2));
+
+    let sub1 = replace_exact(graph, eq, exp_2x, u_sq);
+    let sub2 = replace_exact(graph, sub1, exp_x, u_sym);
+
+    if graph.has_symbol(sub2, target) {
+        return None;
+    }
+
+    let u_roots = graph.solve_polynomial_radicals(sub2, u_target).ok()?;
+    if u_roots.is_empty() {
+        return None;
+    }
+
+    let mut x_roots = Vec::new();
+    for u_r in u_roots {
+        let simp = if u_r == graph.integer(1) {
+            graph.integer(0)
+        } else {
+            let ln_u = graph.function("ln", [u_r]);
+            Simplifier::simplify(graph, ln_u).unwrap_or(ln_u)
+        };
+        x_roots.push(simp);
+    }
+
+    Some(x_roots)
+}
+
+fn replace_exact(
+    graph: &ExprGraph,
+    expr: ExprId,
+    pattern: ExprId,
+    replacement: ExprId,
+) -> ExprId {
+    if expr == pattern {
+        return replacement;
+    }
+    let node = graph.get(expr);
+    match &node.kind {
+        ExprKind::Add(terms) => {
+            let new_terms: Vec<ExprId> = terms
+                .iter()
+                .map(|&t| replace_exact(graph, t, pattern, replacement))
+                .collect();
+            graph.add(new_terms)
+        }
+        ExprKind::Mul(factors) => {
+            let new_factors: Vec<ExprId> = factors
+                .iter()
+                .map(|&f| replace_exact(graph, f, pattern, replacement))
+                .collect();
+            graph.mul(new_factors)
+        }
+        ExprKind::Sub(a, b) => {
+            let na = replace_exact(graph, *a, pattern, replacement);
+            let nb = replace_exact(graph, *b, pattern, replacement);
+            graph.sub(na, nb)
+        }
+        ExprKind::Div(n, d) => {
+            let nn = replace_exact(graph, *n, pattern, replacement);
+            let nd = replace_exact(graph, *d, pattern, replacement);
+            graph.div(nn, nd)
+        }
+        ExprKind::Neg(inner) => {
+            let ni = replace_exact(graph, *inner, pattern, replacement);
+            graph.neg(ni)
+        }
+        ExprKind::Pow(b, e) => {
+            let nb = replace_exact(graph, *b, pattern, replacement);
+            let ne = replace_exact(graph, *e, pattern, replacement);
+            graph.pow(nb, ne)
+        }
+        ExprKind::Function { name, args } => {
+            let new_args: Vec<ExprId> = args
+                .iter()
+                .map(|&a| replace_exact(graph, a, pattern, replacement))
+                .collect();
+            let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+            graph.function(&fn_name, new_args)
+        }
+        _ => expr,
     }
 }

@@ -28,6 +28,15 @@ pub trait SymbolicCalculus {
     /// Compute elementary symbolic integral $\int f(x) dx$ using Risch integration heuristics.
     fn integrate(&self, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId>;
 
+    /// Compute definite integral $\int_a^b f(x) dx$ via the Fundamental Theorem of Calculus ($F(b) - F(a)$).
+    fn integrate_definite(
+        &self,
+        expr: ExprId,
+        wrt: SymbolId,
+        lower: ExprId,
+        upper: ExprId,
+    ) -> AlgebraResult<ExprId>;
+
     /// Compute symbolic summation $\sum_{k=lower}^{upper} f(k)$ using Gosper summation heuristics.
     fn summation(
         &self,
@@ -126,6 +135,53 @@ impl SymbolicCalculus for ExprGraph {
                             let neg_sin = self.neg(sin_arg);
                             self.mul([neg_sin, darg])
                         }
+                        "tan" => {
+                            let sec_sq = self.pow(self.function("cos", [arg]), self.integer(-2));
+                            self.mul([sec_sq, darg])
+                        }
+                        "sinh" => {
+                            let cosh_arg = self.function("cosh", [arg]);
+                            self.mul([cosh_arg, darg])
+                        }
+                        "cosh" => {
+                            let sinh_arg = self.function("sinh", [arg]);
+                            self.mul([sinh_arg, darg])
+                        }
+                        "tanh" => {
+                            let cosh_sq = self.pow(self.function("cosh", [arg]), self.integer(-2));
+                            self.mul([cosh_sq, darg])
+                        }
+                        "asin" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let one_minus_sq = self.sub(one, arg_sq);
+                            let half = self.rational(1, 2);
+                            let denom = self.pow(one_minus_sq, half);
+                            let deriv = self.div(self.integer(1), denom);
+                            self.mul([deriv, darg])
+                        }
+                        "acos" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let one_minus_sq = self.sub(one, arg_sq);
+                            let half = self.rational(1, 2);
+                            let denom = self.pow(one_minus_sq, half);
+                            let deriv = self.div(self.integer(-1), denom);
+                            self.mul([deriv, darg])
+                        }
+                        "atan" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let one_plus_sq = self.add([one, arg_sq]);
+                            let deriv = self.div(self.integer(1), one_plus_sq);
+                            self.mul([deriv, darg])
+                        }
+                        "sqrt" => {
+                            let sqrt_arg = self.function("sqrt", [arg]);
+                            let two_sqrt = self.mul([self.integer(2), sqrt_arg]);
+                            let deriv = self.div(self.integer(1), two_sqrt);
+                            self.mul([deriv, darg])
+                        }
                         "exp" => {
                             let exp_arg = self.function("exp", [arg]);
                             self.mul([exp_arg, darg])
@@ -133,6 +189,58 @@ impl SymbolicCalculus for ExprGraph {
                         "ln" | "log" => {
                             let reciprocal = self.div(self.integer(1), arg);
                             self.mul([reciprocal, darg])
+                        }
+                        "gamma" => {
+                            let psi_arg = self.function("digamma", [arg]);
+                            let gamma_arg = self.function("gamma", [arg]);
+                            let prod = self.mul([gamma_arg, psi_arg]);
+                            self.mul([prod, darg])
+                        }
+                        "erf" => {
+                            let pi = self.constant(algebra_core::Constant::Pi);
+                            let sqrt_pi = self.function("sqrt", [pi]);
+                            let two_over_sqrt_pi = self.div(self.integer(2), sqrt_pi);
+                            let neg_arg_sq = self.neg(self.pow(arg, self.integer(2)));
+                            let exp_term = self.function("exp", [neg_arg_sq]);
+                            let deriv = self.mul([two_over_sqrt_pi, exp_term]);
+                            self.mul([deriv, darg])
+                        }
+                        "erfc" => {
+                            let pi = self.constant(algebra_core::Constant::Pi);
+                            let sqrt_pi = self.function("sqrt", [pi]);
+                            let neg_two_over_sqrt_pi = self.div(self.integer(-2), sqrt_pi);
+                            let neg_arg_sq = self.neg(self.pow(arg, self.integer(2)));
+                            let exp_term = self.function("exp", [neg_arg_sq]);
+                            let deriv = self.mul([neg_two_over_sqrt_pi, exp_term]);
+                            self.mul([deriv, darg])
+                        }
+                        "lambert_w" | "LambertW" | "W" => {
+                            let w_node = self.function("lambert_w", [arg]);
+                            let one = self.integer(1);
+                            let one_plus_w = self.add([one, w_node]);
+                            let denom = self.mul([arg, one_plus_w]);
+                            let deriv = self.div(w_node, denom);
+                            self.mul([deriv, darg])
+                        }
+                        "si" | "Si" => {
+                            let sin_arg = self.function("sin", [arg]);
+                            let deriv = self.div(sin_arg, arg);
+                            self.mul([deriv, darg])
+                        }
+                        "ci" | "Ci" => {
+                            let cos_arg = self.function("cos", [arg]);
+                            let deriv = self.div(cos_arg, arg);
+                            self.mul([deriv, darg])
+                        }
+                        "ei" | "Ei" => {
+                            let exp_arg = self.function("exp", [arg]);
+                            let deriv = self.div(exp_arg, arg);
+                            self.mul([deriv, darg])
+                        }
+                        "li" => {
+                            let ln_arg = self.function("ln", [arg]);
+                            let deriv = self.div(self.integer(1), ln_arg);
+                            self.mul([deriv, darg])
                         }
                         _ => self.derivative(
                             expr,
@@ -288,6 +396,20 @@ impl SymbolicCalculus for ExprGraph {
 
     fn integrate(&self, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
         crate::risch::RischIntegrator::integrate(self, expr, wrt)
+    }
+
+    fn integrate_definite(
+        &self,
+        expr: ExprId,
+        wrt: SymbolId,
+        lower: ExprId,
+        upper: ExprId,
+    ) -> AlgebraResult<ExprId> {
+        let f_antideriv = self.integrate(expr, wrt)?;
+        let f_b = self.substitute(f_antideriv, wrt, upper);
+        let f_a = self.substitute(f_antideriv, wrt, lower);
+        let diff = self.sub(f_b, f_a);
+        Ok(crate::simplify::Simplifier::simplify(self, diff).unwrap_or(diff))
     }
 
     fn summation(

@@ -60,12 +60,12 @@ pub struct QuantizedTransformerWeights {
 }
 
 impl QuantizedTransformerWeights {
-    /// Ingest from a SafeTensors binary byte buffer using `spodeian-ml-utils`.
+    /// Ingest from a SafeTensors binary byte buffer using `sml-runtime`.
     pub fn from_safetensors_bytes(bytes: &[u8]) -> Result<Self, String> {
-        // First try central spodeian_ml_utils loader backed by Candle
-        if let Ok(loaded) = spodeian_ml_utils::LoadedModelWeights::from_bytes(
+        // First try central sml_runtime loader backed by Candle
+        if let Ok(loaded) = sml_runtime::LoadedModelWeights::from_bytes(
             bytes,
-            &spodeian_ml_utils::candle_core::Device::Cpu,
+            &sml_runtime::candle_core::Device::Cpu,
         ) {
             let emb_tensor = loaded
                 .get_tensor("embeddings")
@@ -78,8 +78,8 @@ impl QuantizedTransformerWeights {
                 let scale = 0.05f32;
 
                 let token_embeddings =
-                    if tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
-                        spodeian_ml_utils::LoadedModelWeights::dequantize_int8(tensor, scale)
+                    if tensor.dtype() == sml_runtime::candle_core::DType::U8 {
+                        sml_runtime::LoadedModelWeights::dequantize_int8(tensor, scale)
                             .map_err(|e| e.to_string())?
                             .flatten_all()
                             .map_err(|e| e.to_string())?
@@ -87,7 +87,7 @@ impl QuantizedTransformerWeights {
                             .map_err(|e| e.to_string())?
                     } else {
                         tensor
-                            .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
+                            .to_dtype(sml_runtime::candle_core::DType::F32)
                             .map_err(|e| e.to_string())?
                             .flatten_all()
                             .map_err(|e| e.to_string())?
@@ -99,8 +99,8 @@ impl QuantizedTransformerWeights {
                     .get_tensor("projection")
                     .or_else(|_| loaded.get_tensor("projection_weights"))
                 {
-                    if p_tensor.dtype() == spodeian_ml_utils::candle_core::DType::U8 {
-                        spodeian_ml_utils::LoadedModelWeights::dequantize_int8(p_tensor, scale)
+                    if p_tensor.dtype() == sml_runtime::candle_core::DType::U8 {
+                        sml_runtime::LoadedModelWeights::dequantize_int8(p_tensor, scale)
                             .map_err(|e| e.to_string())?
                             .flatten_all()
                             .map_err(|e| e.to_string())?
@@ -108,7 +108,7 @@ impl QuantizedTransformerWeights {
                             .map_err(|e| e.to_string())?
                     } else {
                         p_tensor
-                            .to_dtype(spodeian_ml_utils::candle_core::DType::F32)
+                            .to_dtype(sml_runtime::candle_core::DType::F32)
                             .map_err(|e| e.to_string())?
                             .flatten_all()
                             .map_err(|e| e.to_string())?
@@ -279,7 +279,7 @@ impl QuantizedTransformerWeights {
 #[derive(Debug, Clone)]
 pub struct NeuralExpressionEmbedder {
     pub weights: QuantizedTransformerWeights,
-    pub evaluator: spodeian_ml_utils::ast::MathAstEvaluator,
+    pub evaluator: sml_runtime::ast::MathAstEvaluator,
 }
 
 impl Default for NeuralExpressionEmbedder {
@@ -297,7 +297,7 @@ impl Default for NeuralExpressionEmbedder {
 
 impl NeuralExpressionEmbedder {
     pub fn new(weights: QuantizedTransformerWeights) -> Self {
-        let mut evaluator = spodeian_ml_utils::ast::MathAstEvaluator::default_with_dim(
+        let mut evaluator = sml_runtime::ast::MathAstEvaluator::default_with_dim(
             weights.embed_dim,
             weights.vocab_size,
         );
@@ -336,10 +336,10 @@ impl NeuralExpressionEmbedder {
     }
 
     /// Compute continuous semantic vector embedding for an expression AST DAG
-    /// using `spodeian_ml_utils::ast::MathAstEvaluator`.
+    /// using `sml_runtime::ast::MathAstEvaluator`.
     pub fn embed_expression(&self, graph: &ExprGraph, root: ExprId) -> Vec<f32> {
         use smallvec::SmallVec;
-        use spodeian_ml_utils::ast::{AstNodeKind, CanonicalAstNode};
+        use sml_runtime::ast::{AstNodeKind, CanonicalAstNode};
 
         let mut nodes: Vec<CanonicalAstNode> = Vec::new();
         let mut id_map: ahash::AHashMap<ExprId, usize> = ahash::AHashMap::new();

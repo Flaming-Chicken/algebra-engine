@@ -76,9 +76,7 @@ spodeian-tokens = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2
 spodeian-telemetry = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
 spodeian-export = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^2.0.0" }
 spodeian-web-utils = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
-spodeian-ml-utils = { package = "sml-runtime", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
 sml-runtime = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
-spodeian-lake = { package = "sml-lake", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
 sml-lake = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
 
 

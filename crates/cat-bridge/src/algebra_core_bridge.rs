@@ -424,16 +424,16 @@ impl RetrofittableAst for LegacyAstTree {
             // Multiplication: check for scalar * symbol or im * I
             Self::Mul(factors) => {
                 if factors.len() == 2 {
-                    if let (im_term, Self::Number(Number::Constant(Constant::I))) =
-                        (&factors[0], &factors[1])
+                    if let (
+                        Self::Number(Number::Integer(i)),
+                        Self::Number(Number::Constant(Constant::I)),
+                    ) = (&factors[0], &factors[1])
                     {
-                        if let Self::Number(Number::Integer(i)) = im_term {
-                            let atom = ScalarAtom::gaussian_int(0, *i);
-                            let sid = ctx.intern_scalar(atom.clone());
-                            let spine = EnrichedSpine::exact(sid, atom);
-                            let diag_id = ctx.intern_diagram(OpenHypergraph::new());
-                            return Ok(CatTerm::new(dim_scalar, spine, diag_id));
-                        }
+                        let atom = ScalarAtom::gaussian_int(0, *i);
+                        let sid = ctx.intern_scalar(atom.clone());
+                        let spine = EnrichedSpine::exact(sid, atom);
+                        let diag_id = ctx.intern_diagram(OpenHypergraph::new());
+                        return Ok(CatTerm::new(dim_scalar, spine, diag_id));
                     }
                 }
 

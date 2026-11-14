@@ -36,6 +36,7 @@ pub mod lagrange;
 pub mod lemma_miner;
 pub mod lifting;
 pub mod limits;
+pub mod linprog;
 pub mod logic;
 pub mod macros;
 pub mod matrix;
@@ -187,4 +188,5 @@ pub use weyl_dmodules::{
 };
 pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};
 pub use hecs::Hecs;
+pub use linprog::{LinprogSolution, LinprogStatus, linprog_minimize, yun_square_free_z};
 pub use urscript_pose::Pose;

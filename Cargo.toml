@@ -72,14 +72,14 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 egui_plot = "0.37"
 winit = { version = "0.30", default-features = false }
 android-activity = { version = "0.6", default-features = false, features = ["native-activity"] }
-spodeian-tokens = { path = "../spodeian-core/crates/spodeian-tokens" }
-spodeian-telemetry = { path = "../spodeian-core/crates/spodeian-telemetry" }
-spodeian-export = { path = "../spodeian-core/crates/spodeian-export" }
-spodeian-web-utils = { path = "../spodeian-core/crates/spodeian-web-utils" }
-spodeian-ui = { path = "../spodeian-core/crates/spodeian-ui" }
-spodeian-persist = { path = "../spodeian-core/crates/spodeian-persist" }
-sml-runtime = { path = "../spodeian-core/crates/sml-runtime" }
-sml-lake = { path = "../spodeian-core/crates/sml-lake" }
+spodeian-tokens = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-telemetry = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-export = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-web-utils = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-ui = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-persist = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+sml-runtime = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+sml-lake = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
 
 
 # Numerics & High-Precision CAS
@@ -98,7 +98,7 @@ parking_lot = "0.12"
 smallvec = { version = "1.13", features = ["serde"] }
 ahash = { version = "0.8", features = ["serde"] }
 mimalloc = "0.1"
-spodeian-parallel = { path = "../spodeian-core/crates/spodeian-parallel" }
+spodeian-parallel = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
 
 # Serialization & formatters
 serde = { version = "1.0", features = ["derive"] }

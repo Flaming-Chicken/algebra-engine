@@ -5009,6 +5009,7 @@ dependencies = [
 [[package]]
 name = "sml-lake"
 version = "0.2.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5026,6 +5027,7 @@ dependencies = [
 [[package]]
 name = "sml-runtime"
 version = "0.2.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "ahash 0.8.12",
  "byteorder",
@@ -5084,6 +5086,7 @@ dependencies = [
 [[package]]
 name = "spodeian-cache"
 version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "base64 0.22.1",
  "js-sys",
@@ -5100,6 +5103,7 @@ dependencies = [
 [[package]]
 name = "spodeian-export"
 version = "2.0.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "bson",
  "miniz_oxide 0.8.9",
@@ -5111,6 +5115,7 @@ dependencies = [
 [[package]]
 name = "spodeian-parallel"
 version = "1.0.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "rayon",
 ]
@@ -5118,6 +5123,7 @@ dependencies = [
 [[package]]
 name = "spodeian-telemetry"
 version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -5131,6 +5137,7 @@ dependencies = [
 [[package]]
 name = "spodeian-tokens"
 version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "serde",
  "serde_json",
@@ -5139,6 +5146,7 @@ dependencies = [
 [[package]]
 name = "spodeian-web-utils"
 version = "1.1.0"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
 dependencies = [
  "base64 0.22.1",
  "js-sys",

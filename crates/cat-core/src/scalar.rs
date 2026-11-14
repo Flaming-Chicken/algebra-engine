@@ -363,7 +363,7 @@ pub enum ScalarAtom {
         im_num: i64,
         im_den: i64,
     },
-    /// Exact Gaussian integer \mathbb{Z}[i].
+    /// Exact Gaussian integer `\mathbb{Z}[i]`.
     GaussianInt { re: i64, im: i64 },
     /// Exact Eisenstein integer \mathbb{Z}[\omega] where \omega = e^{2\pi i/3}.
     EisensteinInt { a: i64, b: i64 },
@@ -608,7 +608,7 @@ impl ScalarAtom {
         }
     }
 
-    /// Create canonical exact Gaussian integer \mathbb{Z}[i].
+    /// Create canonical exact Gaussian integer `\mathbb{Z}[i]`.
     pub const fn gaussian_int(re: i64, im: i64) -> Self {
         if im == 0 {
             if re == 0 {

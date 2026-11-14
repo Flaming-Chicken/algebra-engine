@@ -94,7 +94,7 @@ impl ButlerPortugal {
     }
 
     /// Garnir Young projector for First Bianchi Identity:
-    /// For Riemann curvature tensor, R_{a[bcd]} = R_{abcd} + R_{acdb} + R_{adbc} = 0.
+    /// For Riemann curvature tensor, `R_{a[bcd]} = R_{abcd} + R_{acdb} + R_{adbc} = 0`.
     /// Reduces non-canonical cyclic triad R_{adbc} -> (-R_{abcd}, -R_{acdb}).
     pub fn garnir_bianchi_project(
         indices: [u8; 4],

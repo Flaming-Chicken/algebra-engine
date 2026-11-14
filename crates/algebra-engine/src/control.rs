@@ -2,7 +2,7 @@
 //!
 //! Control Theory & Dynamic Systems:
 //! - State-Space Linear Systems: $\dot{x} = A x + B u, \quad y = C x + D u$ (Continuous)
-//! - Discrete State-Space Systems: $x[k+1] = A_d x[k] + B_d u[k], \quad y[k] = C_d x[k] + D_d u[k]$
+//! - Discrete State-Space Systems: $x\[k+1\] = A_d x\[k\] + B_d u\[k\], \quad y\[k\] = C_d x\[k\] + D_d u\[k\]$
 //! - SISO (Single-Input Single-Output) and MIMO (Multi-Input Multi-Output) Systems
 //! - Zero-Order Hold (ZOH) Continuous-to-Discrete Discretization: $A_d = e^{A T_s}, B_d = \int_0^{T_s} e^{A\tau} B d\tau$
 //! - Controllability & Observability Gramians and Kalman Rank Tests
@@ -19,7 +19,7 @@ pub enum TimeDomain {
     /// Continuous-time system: dx/dt = A x + B u
     #[default]
     Continuous,
-    /// Discrete-time system: x[k+1] = A x[k] + B u[k] with sampling period Ts
+    /// Discrete-time system: `x[k+1] = A x[k] + B u[k]` with sampling period Ts
     Discrete { sample_time: f64 },
 }
 

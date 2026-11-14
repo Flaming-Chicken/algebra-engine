@@ -69,56 +69,56 @@ impl DimVector {
 
     // --- Standard Physical Units ---
 
-    /// Length [L]
+    /// Length `[L]`
     pub const fn length() -> Self {
         let mut v = [0; 8];
         v[DIM_L] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Mass [M]
+    /// Mass `[M]`
     pub const fn mass() -> Self {
         let mut v = [0; 8];
         v[DIM_M] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Time [T]
+    /// Time `[T]`
     pub const fn time() -> Self {
         let mut v = [0; 8];
         v[DIM_T] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Electric Current [I]
+    /// Electric Current `[I]`
     pub const fn current() -> Self {
         let mut v = [0; 8];
         v[DIM_I] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Thermodynamic Temperature [Theta]
+    /// Thermodynamic Temperature `[Theta]`
     pub const fn temperature() -> Self {
         let mut v = [0; 8];
         v[DIM_THETA] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Amount of Substance [N]
+    /// Amount of Substance `[N]`
     pub const fn amount() -> Self {
         let mut v = [0; 8];
         v[DIM_N] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Luminous Intensity [J]
+    /// Luminous Intensity `[J]`
     pub const fn luminous_intensity() -> Self {
         let mut v = [0; 8];
         v[DIM_J] = 12;
         Self { scaled_twelfths: v }
     }
 
-    /// Plane Angle [Angle] (dimensionless in SI, but tracked in categorical operad)
+    /// Plane Angle `[Angle]` (dimensionless in SI, but tracked in categorical operad)
     pub const fn angle() -> Self {
         let mut v = [0; 8];
         v[DIM_ANGLE] = 12;
@@ -316,7 +316,7 @@ pub enum UnitGaugeSystem {
     #[default]
     SI,
     /// High-energy natural units: \hbar = c = 1.
-    /// Energy, mass, and momentum have dimension [E], length and time have dimension [E^-1].
+    /// Energy, mass, and momentum have dimension `[E]`, length and time have dimension `[E^-1]`.
     Natural,
     /// Planck units: \hbar = c = G = k_B = 1.
     Planck,

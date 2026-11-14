@@ -607,7 +607,7 @@ pub fn decompose_rational(num: i64, den: i64) -> PrimeDecompositionResult {
     }
 }
 
-/// Gaussian integer division $\alpha / \beta$ in $\mathbb{Z}[i]$. Returns quotient if exact division.
+/// Gaussian integer division $\alpha / \beta$ in $\mathbb{Z}\[i\]$. Returns quotient if exact division.
 pub fn gaussian_div_exact(a: i64, b: i64, c: i64, d: i64) -> Option<(i64, i64)> {
     let norm = c * c + d * d;
     if norm == 0 {
@@ -622,7 +622,7 @@ pub fn gaussian_div_exact(a: i64, b: i64, c: i64, d: i64) -> Option<(i64, i64)> 
     }
 }
 
-/// Decompose a Gaussian integer $\alpha = a + bi \in \mathbb{Z}[i]$ into Gaussian primes with classification.
+/// Decompose a Gaussian integer $\alpha = a + bi \in \mathbb{Z}\[i\]$ into Gaussian primes with classification.
 pub fn decompose_gaussian(mut a: i64, mut b: i64) -> PrimeDecompositionResult {
     let original = if b == 0 {
         format!("{}", a)

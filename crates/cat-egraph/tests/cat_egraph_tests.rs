@@ -14,11 +14,17 @@ fn test_two_tiered_equivalence_lattice() {
     let n3 = egraph.add(ENode::Var("x_approx".into()));
 
     // Union n1 and n2 via Strong Exact equality
-    egraph.union(n1, n2, EquivalenceKind::strong_exact(true), "Identity division by 1");
+    egraph.union(
+        n1,
+        n2,
+        EquivalenceKind::strong_exact(true),
+        "Identity division by 1",
+    );
     assert_eq!(egraph.find(n1), egraph.find(n2));
 
     // Union n1 and n3 via Weak Association with tau tolerance
-    let weak_kind = EquivalenceKind::weak_association(1e-6, UniversalBall::real_with_radius(0.0, 1e-6));
+    let weak_kind =
+        EquivalenceKind::weak_association(1e-6, UniversalBall::real_with_radius(0.0, 1e-6));
     egraph.union(n1, n3, weak_kind, "Float tolerance match");
     assert_eq!(egraph.find(n1), egraph.find(n3));
 
@@ -44,7 +50,10 @@ fn test_buckingham_pi_reynolds_number() {
     let pi_groups = BuckinghamPi::find_dimensionless_groups(&vars);
 
     // 4 variables, 3 independent dimensions (L, M, T) => 4 - 3 = 1 dimensionless group (Reynolds number Re!)
-    assert!(!pi_groups.is_empty(), "Must find dimensionless Pi group for fluid dynamics");
+    assert!(
+        !pi_groups.is_empty(),
+        "Must find dimensionless Pi group for fluid dynamics"
+    );
     let re = &pi_groups[0];
 
     // Verify \prod v_i^{a_i} is dimensionless
@@ -65,10 +74,18 @@ fn test_egraph_flop_optimal_extraction() {
     let mul_x_0 = egraph.add(ENode::Mul(smallvec::smallvec![var_x, num_0]));
 
     // Strong zero contraction rule: x * 0 -> 0
-    egraph.union(mul_x_0, num_0, EquivalenceKind::strong_exact(true), "Zero annihilation");
+    egraph.union(
+        mul_x_0,
+        num_0,
+        EquivalenceKind::strong_exact(true),
+        "Zero annihilation",
+    );
 
     // Extract optimal cost node
     let (best, cost) = egraph.extract_min_cost(mul_x_0);
     assert_eq!(best, ENode::Scalar(0));
-    assert_eq!(cost, 0, "Scalar 0 has 0 FLOP cost compared to multiplication");
+    assert_eq!(
+        cost, 0,
+        "Scalar 0 has 0 FLOP cost compared to multiplication"
+    );
 }

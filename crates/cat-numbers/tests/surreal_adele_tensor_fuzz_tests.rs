@@ -226,10 +226,7 @@ fn test_tensor_symmetrization_fuzzing() {
             for j in 0..dim {
                 let a_ij = anti.get(&[i, j]);
                 let a_ji = anti.get(&[j, i]);
-                assert!(
-                    (a_ij + a_ji).abs() < 1e-14,
-                    "A_ij must equal -A_ji"
-                );
+                assert!((a_ij + a_ji).abs() < 1e-14, "A_ij must equal -A_ji");
             }
         }
     }

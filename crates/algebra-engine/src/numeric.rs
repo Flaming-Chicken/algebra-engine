@@ -432,7 +432,8 @@ pub fn eval_digamma(mut x: f64) -> f64 {
     }
     let inv_x = 1.0 / x;
     let inv_x2 = inv_x * inv_x;
-    result += x.ln() - 0.5 * inv_x - inv_x2 * (1.0 / 12.0 - inv_x2 * (1.0 / 120.0 - inv_x2 / 252.0));
+    result +=
+        x.ln() - 0.5 * inv_x - inv_x2 * (1.0 / 12.0 - inv_x2 * (1.0 / 120.0 - inv_x2 / 252.0));
     result
 }
 
@@ -494,7 +495,8 @@ pub fn eval_zeta(s: f64) -> f64 {
     }
     if s < 0.0 {
         let pi = std::f64::consts::PI;
-        let factor = 2.0_f64.powf(s) * pi.powf(s - 1.0) * (pi * s / 2.0).sin() * eval_gamma(1.0 - s);
+        let factor =
+            2.0_f64.powf(s) * pi.powf(s - 1.0) * (pi * s / 2.0).sin() * eval_gamma(1.0 - s);
         return factor * eval_zeta(1.0 - s);
     }
     // Exact values for positive even integers

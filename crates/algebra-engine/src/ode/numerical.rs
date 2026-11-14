@@ -168,7 +168,15 @@ impl ButcherTableau {
             a: vec![
                 vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                 vec![0.161, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                vec![-0.008480655492356989, 0.335480655492357, 0.0, 0.0, 0.0, 0.0, 0.0],
+                vec![
+                    -0.008480655492356989,
+                    0.335480655492357,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
                 vec![
                     2.897153057105493,
                     -6.359448489975075,
@@ -215,15 +223,7 @@ impl ButcherTableau {
                 2.324710524099774,
                 0.0,
             ],
-            c: vec![
-                0.0,
-                0.161,
-                0.327,
-                0.9,
-                0.9800255409045097,
-                1.0,
-                1.0,
-            ],
+            c: vec![0.0, 0.161, 0.327, 0.9, 0.9800255409045097, 1.0, 1.0],
             b_hat: Some(vec![
                 0.09468075576583946,
                 0.009183565540343253,
@@ -447,7 +447,12 @@ impl NumericalOdeSolver {
         let mut t = t0;
         let mut y = y0.to_vec();
         let dir = if tend >= t0 { 1.0 } else { -1.0 };
-        let mut h = config.initial_step.unwrap_or(0.01).abs().min(config.max_step) * dir;
+        let mut h = config
+            .initial_step
+            .unwrap_or(0.01)
+            .abs()
+            .min(config.max_step)
+            * dir;
 
         let mut t_vec = vec![t];
         let mut y_vec = vec![y.clone()];
@@ -1007,13 +1012,9 @@ mod tests {
         );
 
         // 3. Stiff exponential boundary layer y' = -100 * y on [0, 0.2]
-        let stiff = NumericalOdeSolver::solve(
-            |_t, y| vec![-100.0 * y[0]],
-            (0.0, 0.2),
-            &[1.0],
-            &meta_cfg,
-        )
-        .expect("meta stiff solve");
+        let stiff =
+            NumericalOdeSolver::solve(|_t, y| vec![-100.0 * y[0]], (0.0, 0.2), &[1.0], &meta_cfg)
+                .expect("meta stiff solve");
         assert!(
             stiff.y.last().unwrap()[0].abs() < 1e-4,
             "stiff decay got {}",

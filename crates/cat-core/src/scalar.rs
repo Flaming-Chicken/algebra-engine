@@ -170,7 +170,12 @@ impl CocycleMultivector {
             }
             AlgebraKind::Quaternion => {
                 // Hamilton quaternion product
-                let (w1, x1, y1, z1) = (self.blades[0], self.blades[1], self.blades[2], self.blades[3]);
+                let (w1, x1, y1, z1) = (
+                    self.blades[0],
+                    self.blades[1],
+                    self.blades[2],
+                    self.blades[3],
+                );
                 let (w2, x2, y2, z2) = (rhs.blades[0], rhs.blades[1], rhs.blades[2], rhs.blades[3]);
                 let mut out = [0.0; 8];
                 out[0] = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2;
@@ -185,10 +190,30 @@ impl CocycleMultivector {
             AlgebraKind::Octonion => {
                 // Cayley-Dickson multiplication of octonions (A, B)(C, D) = (AC - D*B, DA + BC*)
                 // where A, B, C, D are quaternions!
-                let a = CocycleMultivector::quaternion(self.blades[0], self.blades[1], self.blades[2], self.blades[3]);
-                let b = CocycleMultivector::quaternion(self.blades[4], self.blades[5], self.blades[6], self.blades[7]);
-                let c = CocycleMultivector::quaternion(rhs.blades[0], rhs.blades[1], rhs.blades[2], rhs.blades[3]);
-                let d = CocycleMultivector::quaternion(rhs.blades[4], rhs.blades[5], rhs.blades[6], rhs.blades[7]);
+                let a = CocycleMultivector::quaternion(
+                    self.blades[0],
+                    self.blades[1],
+                    self.blades[2],
+                    self.blades[3],
+                );
+                let b = CocycleMultivector::quaternion(
+                    self.blades[4],
+                    self.blades[5],
+                    self.blades[6],
+                    self.blades[7],
+                );
+                let c = CocycleMultivector::quaternion(
+                    rhs.blades[0],
+                    rhs.blades[1],
+                    rhs.blades[2],
+                    rhs.blades[3],
+                );
+                let d = CocycleMultivector::quaternion(
+                    rhs.blades[4],
+                    rhs.blades[5],
+                    rhs.blades[6],
+                    rhs.blades[7],
+                );
 
                 let ac = a.geometric_product(&c);
                 let d_star = d.quaternion_conjugate();
@@ -254,7 +279,11 @@ impl CocycleMultivector {
         let mut out = [0.0; 8];
         for mask in 0..8u8 {
             let grade = mask.count_ones();
-            let sign = if (grade * (grade - 1) / 2) % 2 == 1 { -1.0 } else { 1.0 };
+            let sign = if (grade * (grade - 1) / 2) % 2 == 1 {
+                -1.0
+            } else {
+                1.0
+            };
             out[mask as usize] = self.blades[mask as usize] * sign;
         }
         Self {
@@ -426,7 +455,11 @@ impl AdeleAtom {
             return Self::default();
         }
         if num == 0 {
-            return Self { arch_num: 0, arch_den: 1, p_adic_valuations: smallvec::SmallVec::new() };
+            return Self {
+                arch_num: 0,
+                arch_den: 1,
+                p_adic_valuations: smallvec::SmallVec::new(),
+            };
         }
         let g = gcd_i64(num, den);
         num /= g;
@@ -498,7 +531,12 @@ impl Hash for ScalarAtom {
                 re.to_bits().hash(state);
                 im.to_bits().hash(state);
             }
-            Self::ComplexRational { re_num, re_den, im_num, im_den } => {
+            Self::ComplexRational {
+                re_num,
+                re_den,
+                im_num,
+                im_den,
+            } => {
                 6u8.hash(state);
                 re_num.hash(state);
                 re_den.hash(state);
@@ -526,11 +564,31 @@ impl Hash for ScalarAtom {
                 10u8.hash(state);
                 match s {
                     SurrealAtom::Zero => 0u8.hash(state),
-                    SurrealAtom::Integer(i) => { 1u8.hash(state); i.hash(state); }
-                    SurrealAtom::DyadicRational { num, exp2 } => { 2u8.hash(state); num.hash(state); exp2.hash(state); }
-                    SurrealAtom::Infinitesimal { order, coeff } => { 3u8.hash(state); order.hash(state); coeff.to_bits().hash(state); }
-                    SurrealAtom::Infinity { order, coeff } => { 4u8.hash(state); order.hash(state); coeff.to_bits().hash(state); }
-                    SurrealAtom::ConwayForm { finite_num, finite_den, omega_coeff, epsilon_coeff } => {
+                    SurrealAtom::Integer(i) => {
+                        1u8.hash(state);
+                        i.hash(state);
+                    }
+                    SurrealAtom::DyadicRational { num, exp2 } => {
+                        2u8.hash(state);
+                        num.hash(state);
+                        exp2.hash(state);
+                    }
+                    SurrealAtom::Infinitesimal { order, coeff } => {
+                        3u8.hash(state);
+                        order.hash(state);
+                        coeff.to_bits().hash(state);
+                    }
+                    SurrealAtom::Infinity { order, coeff } => {
+                        4u8.hash(state);
+                        order.hash(state);
+                        coeff.to_bits().hash(state);
+                    }
+                    SurrealAtom::ConwayForm {
+                        finite_num,
+                        finite_den,
+                        omega_coeff,
+                        epsilon_coeff,
+                    } => {
                         5u8.hash(state);
                         finite_num.hash(state);
                         finite_den.hash(state);
@@ -561,7 +619,11 @@ impl ScalarAtom {
         if num == 0 {
             return Self::Zero;
         }
-        let sign = if (num > 0 && den > 0) || (num < 0 && den < 0) { 1 } else { -1 };
+        let sign = if (num > 0 && den > 0) || (num < 0 && den < 0) {
+            1
+        } else {
+            -1
+        };
         let g = gcd_i64(num, den);
         let n = (num.abs() / g) * sign;
         let d = den.abs() / g;
@@ -588,8 +650,16 @@ impl ScalarAtom {
         }
         let g_re = gcd_i64(re_n, re_d);
         let g_im = gcd_i64(im_n, im_d);
-        let sign_re = if (re_n > 0 && re_d > 0) || (re_n < 0 && re_d < 0) { 1 } else { -1 };
-        let sign_im = if (im_n > 0 && im_d > 0) || (im_n < 0 && im_d < 0) { 1 } else { -1 };
+        let sign_re = if (re_n > 0 && re_d > 0) || (re_n < 0 && re_d < 0) {
+            1
+        } else {
+            -1
+        };
+        let sign_im = if (im_n > 0 && im_d > 0) || (im_n < 0 && im_d < 0) {
+            1
+        } else {
+            -1
+        };
 
         let re_num = (re_n.abs() / g_re) * sign_re;
         let re_den = re_d.abs() / g_re;
@@ -655,9 +725,12 @@ impl ScalarAtom {
             Self::Rational(1, 1) => true,
             Self::Float(f) => *f == 1.0,
             Self::ComplexF64 { re, im } => *re == 1.0 && *im == 0.0,
-            Self::ComplexRational { re_num, re_den, im_num, .. } => {
-                *re_num == 1 && *re_den == 1 && *im_num == 0
-            }
+            Self::ComplexRational {
+                re_num,
+                re_den,
+                im_num,
+                ..
+            } => *re_num == 1 && *re_den == 1 && *im_num == 0,
             Self::GaussianInt { re, im } => *re == 1 && *im == 0,
             Self::Surreal(SurrealAtom::Integer(1)) => true,
             Self::Adele(a) => a.arch_num == 1 && a.arch_den == 1 && a.p_adic_valuations.is_empty(),
@@ -674,16 +747,25 @@ impl ScalarAtom {
             Self::Rational(n, d) => Some(*n as f64 / *d as f64),
             Self::Float(f) => Some(*f),
             Self::ComplexF64 { re, im } if *im == 0.0 => Some(*re),
-            Self::ComplexRational { re_num, re_den, im_num, .. } if *im_num == 0 => {
-                Some(*re_num as f64 / *re_den as f64)
-            }
+            Self::ComplexRational {
+                re_num,
+                re_den,
+                im_num,
+                ..
+            } if *im_num == 0 => Some(*re_num as f64 / *re_den as f64),
             Self::GaussianInt { re, im } if *im == 0 => Some(*re as f64),
             Self::Surreal(SurrealAtom::Zero) => Some(0.0),
             Self::Surreal(SurrealAtom::Integer(i)) => Some(*i as f64),
-            Self::Surreal(SurrealAtom::DyadicRational { num, exp2 }) => Some(*num as f64 / (1u64 << exp2) as f64),
+            Self::Surreal(SurrealAtom::DyadicRational { num, exp2 }) => {
+                Some(*num as f64 / (1u64 << exp2) as f64)
+            }
             Self::Surreal(SurrealAtom::Infinitesimal { .. }) => Some(0.0), // Standard part of infinitesimal is 0
             Self::Surreal(SurrealAtom::Infinity { .. }) => Some(f64::INFINITY),
-            Self::Surreal(SurrealAtom::ConwayForm { finite_num, finite_den, .. }) => Some(*finite_num as f64 / *finite_den as f64),
+            Self::Surreal(SurrealAtom::ConwayForm {
+                finite_num,
+                finite_den,
+                ..
+            }) => Some(*finite_num as f64 / *finite_den as f64),
             Self::Adele(a) => Some(a.arch_num as f64 / a.arch_den as f64),
             _ => None,
         }
@@ -698,9 +780,15 @@ impl ScalarAtom {
             Self::Rational(n, d) => (*n as f64 / *d as f64, 0.0),
             Self::Float(f) => (*f, 0.0),
             Self::ComplexF64 { re, im } => (*re, *im),
-            Self::ComplexRational { re_num, re_den, im_num, im_den } => {
-                (*re_num as f64 / *re_den as f64, *im_num as f64 / *im_den as f64)
-            }
+            Self::ComplexRational {
+                re_num,
+                re_den,
+                im_num,
+                im_den,
+            } => (
+                *re_num as f64 / *re_den as f64,
+                *im_num as f64 / *im_den as f64,
+            ),
             Self::GaussianInt { re, im } => (*re as f64, *im as f64),
             Self::EisensteinInt { a, b } => {
                 // a + b \omega = a + b(-1/2 + \sqrt{3}/2 i)
@@ -731,14 +819,18 @@ impl ScalarLattice {
 
         match (a, b) {
             // Integer + Integer
-            (ScalarAtom::Integer(x), ScalarAtom::Integer(y)) => {
-                match x.checked_add(*y) {
-                    Some(sum) => {
-                        if sum == 0 { ScalarAtom::Zero } else if sum == 1 { ScalarAtom::One } else { ScalarAtom::Integer(sum) }
+            (ScalarAtom::Integer(x), ScalarAtom::Integer(y)) => match x.checked_add(*y) {
+                Some(sum) => {
+                    if sum == 0 {
+                        ScalarAtom::Zero
+                    } else if sum == 1 {
+                        ScalarAtom::One
+                    } else {
+                        ScalarAtom::Integer(sum)
                     }
-                    None => ScalarAtom::Float(*x as f64 + *y as f64),
                 }
-            }
+                None => ScalarAtom::Float(*x as f64 + *y as f64),
+            },
             // Rational + Integer / Rational + Rational
             (ScalarAtom::Integer(x), ScalarAtom::Rational(ny, dy))
             | (ScalarAtom::Rational(ny, dy), ScalarAtom::Integer(x)) => {
@@ -751,12 +843,25 @@ impl ScalarLattice {
                 ScalarAtom::rational(n, d)
             }
             // Gaussian Integer + Gaussian Integer
-            (ScalarAtom::GaussianInt { re: r1, im: i1 }, ScalarAtom::GaussianInt { re: r2, im: i2 }) => {
-                ScalarAtom::gaussian_int(r1 + r2, i1 + i2)
-            }
+            (
+                ScalarAtom::GaussianInt { re: r1, im: i1 },
+                ScalarAtom::GaussianInt { re: r2, im: i2 },
+            ) => ScalarAtom::gaussian_int(r1 + r2, i1 + i2),
             // Exact Gaussian Rational additions
-            (ScalarAtom::ComplexRational { re_num: r1n, re_den: r1d, im_num: i1n, im_den: i1d },
-             ScalarAtom::ComplexRational { re_num: r2n, re_den: r2d, im_num: i2n, im_den: i2d }) => {
+            (
+                ScalarAtom::ComplexRational {
+                    re_num: r1n,
+                    re_den: r1d,
+                    im_num: i1n,
+                    im_den: i1d,
+                },
+                ScalarAtom::ComplexRational {
+                    re_num: r2n,
+                    re_den: r2d,
+                    im_num: i2n,
+                    im_den: i2d,
+                },
+            ) => {
                 let re_n = r1n * r2d + r2n * r1d;
                 let re_d = r1d * r2d;
                 let im_n = i1n * i2d + i2n * i1d;
@@ -769,44 +874,44 @@ impl ScalarLattice {
                 ScalarAtom::gaussian_int(re + k, *im)
             }
             // Multivector additions
-            (ScalarAtom::CocycleMultivector(m1), ScalarAtom::CocycleMultivector(m2)) if m1.kind == m2.kind => {
+            (ScalarAtom::CocycleMultivector(m1), ScalarAtom::CocycleMultivector(m2))
+                if m1.kind == m2.kind =>
+            {
                 ScalarAtom::CocycleMultivector(m1.add(m2))
             }
             // Surreal + Surreal additions
-            (ScalarAtom::Surreal(s1), ScalarAtom::Surreal(s2)) => {
-                match (s1, s2) {
-                    (SurrealAtom::Integer(i1), SurrealAtom::Integer(i2)) => {
-                        ScalarAtom::Surreal(SurrealAtom::Integer(i1 + i2))
-                    }
-                    (SurrealAtom::Integer(i), SurrealAtom::Infinitesimal { coeff, .. })
-                    | (SurrealAtom::Infinitesimal { coeff, .. }, SurrealAtom::Integer(i)) => {
-                        ScalarAtom::Surreal(SurrealAtom::ConwayForm {
-                            finite_num: *i,
-                            finite_den: 1,
-                            omega_coeff: 0.0,
-                            epsilon_coeff: *coeff,
-                        })
-                    }
-                    _ => {
-                        let f1 = a.to_f64().unwrap_or(0.0);
-                        let f2 = b.to_f64().unwrap_or(0.0);
-                        ScalarAtom::Float(f1 + f2)
-                    }
+            (ScalarAtom::Surreal(s1), ScalarAtom::Surreal(s2)) => match (s1, s2) {
+                (SurrealAtom::Integer(i1), SurrealAtom::Integer(i2)) => {
+                    ScalarAtom::Surreal(SurrealAtom::Integer(i1 + i2))
                 }
-            }
-            (ScalarAtom::Integer(i), ScalarAtom::Surreal(s))
-            | (ScalarAtom::Surreal(s), ScalarAtom::Integer(i)) => {
-                match s {
-                    SurrealAtom::Integer(s_i) => ScalarAtom::Surreal(SurrealAtom::Integer(s_i + i)),
-                    SurrealAtom::Infinitesimal { coeff, .. } => ScalarAtom::Surreal(SurrealAtom::ConwayForm {
+                (SurrealAtom::Integer(i), SurrealAtom::Infinitesimal { coeff, .. })
+                | (SurrealAtom::Infinitesimal { coeff, .. }, SurrealAtom::Integer(i)) => {
+                    ScalarAtom::Surreal(SurrealAtom::ConwayForm {
                         finite_num: *i,
                         finite_den: 1,
                         omega_coeff: 0.0,
                         epsilon_coeff: *coeff,
-                    }),
-                    _ => ScalarAtom::Float(*i as f64 + a.to_f64().unwrap_or(0.0)),
+                    })
                 }
-            }
+                _ => {
+                    let f1 = a.to_f64().unwrap_or(0.0);
+                    let f2 = b.to_f64().unwrap_or(0.0);
+                    ScalarAtom::Float(f1 + f2)
+                }
+            },
+            (ScalarAtom::Integer(i), ScalarAtom::Surreal(s))
+            | (ScalarAtom::Surreal(s), ScalarAtom::Integer(i)) => match s {
+                SurrealAtom::Integer(s_i) => ScalarAtom::Surreal(SurrealAtom::Integer(s_i + i)),
+                SurrealAtom::Infinitesimal { coeff, .. } => {
+                    ScalarAtom::Surreal(SurrealAtom::ConwayForm {
+                        finite_num: *i,
+                        finite_den: 1,
+                        omega_coeff: 0.0,
+                        epsilon_coeff: *coeff,
+                    })
+                }
+                _ => ScalarAtom::Float(*i as f64 + a.to_f64().unwrap_or(0.0)),
+            },
             // Adele + Adele additions
             (ScalarAtom::Adele(a1), ScalarAtom::Adele(a2)) => {
                 let num = a1.arch_num * a2.arch_den + a2.arch_num * a1.arch_den;
@@ -864,14 +969,16 @@ impl ScalarLattice {
 
         match (a, b) {
             // Integer * Integer
-            (ScalarAtom::Integer(x), ScalarAtom::Integer(y)) => {
-                match x.checked_mul(*y) {
-                    Some(prod) => {
-                        if prod == 1 { ScalarAtom::One } else { ScalarAtom::Integer(prod) }
+            (ScalarAtom::Integer(x), ScalarAtom::Integer(y)) => match x.checked_mul(*y) {
+                Some(prod) => {
+                    if prod == 1 {
+                        ScalarAtom::One
+                    } else {
+                        ScalarAtom::Integer(prod)
                     }
-                    None => ScalarAtom::Float(*x as f64 * *y as f64),
                 }
-            }
+                None => ScalarAtom::Float(*x as f64 * *y as f64),
+            },
             // Rational * Rational
             (ScalarAtom::Rational(nx, dx), ScalarAtom::Rational(ny, dy)) => {
                 ScalarAtom::rational(nx * ny, dx * dy)
@@ -881,12 +988,25 @@ impl ScalarLattice {
                 ScalarAtom::rational(k * n, *d)
             }
             // Gaussian Integer multiplication: (a + bi)(c + di) = (ac - bd) + (ad + bc)i
-            (ScalarAtom::GaussianInt { re: a, im: b }, ScalarAtom::GaussianInt { re: c, im: d }) => {
-                ScalarAtom::gaussian_int(a * c - b * d, a * d + b * c)
-            }
+            (
+                ScalarAtom::GaussianInt { re: a, im: b },
+                ScalarAtom::GaussianInt { re: c, im: d },
+            ) => ScalarAtom::gaussian_int(a * c - b * d, a * d + b * c),
             // Exact Gaussian Rational multiplication
-            (ScalarAtom::ComplexRational { re_num: r1n, re_den: r1d, im_num: i1n, im_den: i1d },
-             ScalarAtom::ComplexRational { re_num: r2n, re_den: r2d, im_num: i2n, im_den: i2d }) => {
+            (
+                ScalarAtom::ComplexRational {
+                    re_num: r1n,
+                    re_den: r1d,
+                    im_num: i1n,
+                    im_den: i1d,
+                },
+                ScalarAtom::ComplexRational {
+                    re_num: r2n,
+                    re_den: r2d,
+                    im_num: i2n,
+                    im_den: i2d,
+                },
+            ) => {
                 // ac - bd
                 let ac_n = (r1n * r2n) * (i1d * i2d);
                 let bd_n = (i1n * i2n) * (r1d * r2d);
@@ -902,7 +1022,9 @@ impl ScalarLattice {
                 ScalarAtom::complex_rational(re_n, re_d, im_n, im_d)
             }
             // Multivector multiplication
-            (ScalarAtom::CocycleMultivector(m1), ScalarAtom::CocycleMultivector(m2)) if m1.kind == m2.kind => {
+            (ScalarAtom::CocycleMultivector(m1), ScalarAtom::CocycleMultivector(m2))
+                if m1.kind == m2.kind =>
+            {
                 ScalarAtom::CocycleMultivector(m1.geometric_product(m2))
             }
             // Surreal * Surreal multiplication
@@ -912,8 +1034,26 @@ impl ScalarLattice {
                         ScalarAtom::Surreal(SurrealAtom::Integer(i1 * i2))
                     }
                     // \omega * \epsilon = 1 (Conway fundamental identity)
-                    (SurrealAtom::Infinity { order: o1, coeff: c1 }, SurrealAtom::Infinitesimal { order: o2, coeff: c2 })
-                    | (SurrealAtom::Infinitesimal { order: o2, coeff: c2 }, SurrealAtom::Infinity { order: o1, coeff: c1 }) => {
+                    (
+                        SurrealAtom::Infinity {
+                            order: o1,
+                            coeff: c1,
+                        },
+                        SurrealAtom::Infinitesimal {
+                            order: o2,
+                            coeff: c2,
+                        },
+                    )
+                    | (
+                        SurrealAtom::Infinitesimal {
+                            order: o2,
+                            coeff: c2,
+                        },
+                        SurrealAtom::Infinity {
+                            order: o1,
+                            coeff: c1,
+                        },
+                    ) => {
                         if o1 == o2 {
                             let prod = c1 * c2;
                             if (prod - 1.0).abs() < 1e-12 {
@@ -922,9 +1062,15 @@ impl ScalarLattice {
                                 ScalarAtom::Float(prod)
                             }
                         } else if o1 > o2 {
-                            ScalarAtom::Surreal(SurrealAtom::Infinity { order: o1 - o2, coeff: c1 * c2 })
+                            ScalarAtom::Surreal(SurrealAtom::Infinity {
+                                order: o1 - o2,
+                                coeff: c1 * c2,
+                            })
                         } else {
-                            ScalarAtom::Surreal(SurrealAtom::Infinitesimal { order: o2 - o1, coeff: c1 * c2 })
+                            ScalarAtom::Surreal(SurrealAtom::Infinitesimal {
+                                order: o2 - o1,
+                                coeff: c1 * c2,
+                            })
                         }
                     }
                     _ => {
@@ -935,14 +1081,22 @@ impl ScalarLattice {
                 }
             }
             (ScalarAtom::Integer(k), ScalarAtom::Surreal(s))
-            | (ScalarAtom::Surreal(s), ScalarAtom::Integer(k)) => {
-                match s {
-                    SurrealAtom::Integer(i) => ScalarAtom::Surreal(SurrealAtom::Integer(k * i)),
-                    SurrealAtom::Infinitesimal { order, coeff } => ScalarAtom::Surreal(SurrealAtom::Infinitesimal { order: *order, coeff: coeff * (*k as f64) }),
-                    SurrealAtom::Infinity { order, coeff } => ScalarAtom::Surreal(SurrealAtom::Infinity { order: *order, coeff: coeff * (*k as f64) }),
-                    _ => ScalarAtom::Float(*k as f64 * a.to_f64().unwrap_or(0.0)),
+            | (ScalarAtom::Surreal(s), ScalarAtom::Integer(k)) => match s {
+                SurrealAtom::Integer(i) => ScalarAtom::Surreal(SurrealAtom::Integer(k * i)),
+                SurrealAtom::Infinitesimal { order, coeff } => {
+                    ScalarAtom::Surreal(SurrealAtom::Infinitesimal {
+                        order: *order,
+                        coeff: coeff * (*k as f64),
+                    })
                 }
-            }
+                SurrealAtom::Infinity { order, coeff } => {
+                    ScalarAtom::Surreal(SurrealAtom::Infinity {
+                        order: *order,
+                        coeff: coeff * (*k as f64),
+                    })
+                }
+                _ => ScalarAtom::Float(*k as f64 * a.to_f64().unwrap_or(0.0)),
+            },
             // Adele * Adele multiplication
             (ScalarAtom::Adele(a1), ScalarAtom::Adele(a2)) => {
                 let num = a1.arch_num * a2.arch_num;
@@ -1009,7 +1163,12 @@ impl fmt::Display for ScalarAtom {
                     write!(f, "{:.4} - {:.4}i", re, -im)
                 }
             }
-            Self::ComplexRational { re_num, re_den, im_num, im_den } => {
+            Self::ComplexRational {
+                re_num,
+                re_den,
+                im_num,
+                im_den,
+            } => {
                 write!(f, "({}/{} + {}/{} i)", re_num, re_den, im_num, im_den)
             }
             Self::GaussianInt { re, im } => {
@@ -1024,14 +1183,33 @@ impl fmt::Display for ScalarAtom {
             Self::Surreal(s) => match s {
                 SurrealAtom::Zero => write!(f, "Surreal(0)"),
                 SurrealAtom::Integer(i) => write!(f, "Surreal({})", i),
-                SurrealAtom::DyadicRational { num, exp2 } => write!(f, "Surreal({}/2^{})", num, exp2),
-                SurrealAtom::Infinitesimal { order, coeff } => write!(f, "Surreal({:.3}*ε^{})", coeff, order),
-                SurrealAtom::Infinity { order, coeff } => write!(f, "Surreal({:.3}*ω^{})", coeff, order),
-                SurrealAtom::ConwayForm { finite_num, finite_den, omega_coeff, epsilon_coeff } => {
-                    write!(f, "Surreal({}/{} + {:.2}ω + {:.2}ε)", finite_num, finite_den, omega_coeff, epsilon_coeff)
+                SurrealAtom::DyadicRational { num, exp2 } => {
+                    write!(f, "Surreal({}/2^{})", num, exp2)
+                }
+                SurrealAtom::Infinitesimal { order, coeff } => {
+                    write!(f, "Surreal({:.3}*ε^{})", coeff, order)
+                }
+                SurrealAtom::Infinity { order, coeff } => {
+                    write!(f, "Surreal({:.3}*ω^{})", coeff, order)
+                }
+                SurrealAtom::ConwayForm {
+                    finite_num,
+                    finite_den,
+                    omega_coeff,
+                    epsilon_coeff,
+                } => {
+                    write!(
+                        f,
+                        "Surreal({}/{} + {:.2}ω + {:.2}ε)",
+                        finite_num, finite_den, omega_coeff, epsilon_coeff
+                    )
                 }
             },
-            Self::Adele(a) => write!(f, "Adele({}/{}, vals={:?})", a.arch_num, a.arch_den, a.p_adic_valuations),
+            Self::Adele(a) => write!(
+                f,
+                "Adele({}/{}, vals={:?})",
+                a.arch_num, a.arch_den, a.p_adic_valuations
+            ),
         }
     }
 }

@@ -6,7 +6,7 @@
 //! Formulates the Artin Product Formula:
 //! \prod_{v \le \infty} |x|_v = |x|_\infty \times \prod_p |x|_p = 1 \quad (\forall x \in \mathbb{Q}^\times).
 
-use cat_core::scalar::{gcd_i64, AdeleAtom};
+use cat_core::scalar::{AdeleAtom, gcd_i64};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::fmt;
@@ -140,7 +140,9 @@ impl AdeleNumber {
 
             // Factor out odd primes
             let mut p = 3u64;
-            while (p.saturating_mul(p) <= rem_n && rem_n > 0) || (p.saturating_mul(p) <= rem_d && rem_d > 0) {
+            while (p.saturating_mul(p) <= rem_n && rem_n > 0)
+                || (p.saturating_mul(p) <= rem_d && rem_d > 0)
+            {
                 let mut div_p = false;
                 while rem_n > 0 && rem_n.is_multiple_of(p) {
                     rem_n /= p;

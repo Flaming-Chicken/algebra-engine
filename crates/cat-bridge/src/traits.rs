@@ -34,7 +34,10 @@ pub enum MigrationVerifyStatus {
     ExactMatch,
     /// Legacy output and `CatTerm` differ syntactically, but their difference vanishes
     /// inside the Two-Tiered Equivalence Lattice or lies within `UniversalBall` tolerance.
-    EquivalentWithinEnclosure { max_deviation: f64, ball: UniversalBall },
+    EquivalentWithinEnclosure {
+        max_deviation: f64,
+        ball: UniversalBall,
+    },
     /// The new engine caught a bug in the legacy library (e.g., invalid branch cut,
     /// missing Itô 1/2 dt drift, or illegal affine sum of Christoffel symbols / Celsius).
     LegacyBugDetected { explanation: &'static str },

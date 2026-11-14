@@ -115,12 +115,19 @@ impl UniversalBall {
         match self {
             Self::ExactScalar(s) => s.is_zero(),
             Self::RealInterval { min, max } => *min <= 0.0 && *max >= 0.0,
-            Self::ComplexDisk { center_re, center_im, radius } => {
-                (center_re * center_re + center_im * center_im).sqrt() <= *radius
-            }
-            Self::LieManifoldAffine { center, uncertainty, .. } => {
-                center.iter().zip(uncertainty.iter()).all(|(&c, &u)| c.abs() <= u)
-            }
+            Self::ComplexDisk {
+                center_re,
+                center_im,
+                radius,
+            } => (center_re * center_re + center_im * center_im).sqrt() <= *radius,
+            Self::LieManifoldAffine {
+                center,
+                uncertainty,
+                ..
+            } => center
+                .iter()
+                .zip(uncertainty.iter())
+                .all(|(&c, &u)| c.abs() <= u),
             Self::UltrametricValuation { .. } => true,
             Self::SurrealHalo { center_finite, .. } => center_finite.abs() < 1e-12,
             Self::AdelicBall { arch_radius, .. } => *arch_radius >= 0.0,
@@ -138,7 +145,11 @@ impl UniversalBall {
                     false
                 }
             }
-            Self::ComplexDisk { center_re, center_im, radius } => {
+            Self::ComplexDisk {
+                center_re,
+                center_im,
+                radius,
+            } => {
                 let (re, im) = atom.to_complex_f64();
                 let dre = re - center_re;
                 let dim = im - center_im;
@@ -173,7 +184,10 @@ impl UniversalBall {
                 uncertainty.iter().map(|&u| u * u).sum::<f64>().sqrt()
             }
             Self::UltrametricValuation { p, valuation, .. } => (*p as f64).powi(-valuation),
-            Self::SurrealHalo { infinitesimal_order, .. } => 10f64.powi(-(*infinitesimal_order as i32 * 10)),
+            Self::SurrealHalo {
+                infinitesimal_order,
+                ..
+            } => 10f64.powi(-(*infinitesimal_order as i32 * 10)),
             Self::AdelicBall { arch_radius, .. } => *arch_radius,
         }
     }
@@ -184,20 +198,35 @@ impl UniversalBall {
             (Self::ExactScalar(a), Self::ExactScalar(b)) => {
                 Self::ExactScalar(crate::scalar::ScalarLattice::add(a, b))
             }
-            (Self::ComplexDisk { center_re: r1, center_im: i1, radius: rad1 },
-             Self::ComplexDisk { center_re: r2, center_im: i2, radius: rad2 }) => {
+            (
                 Self::ComplexDisk {
-                    center_re: r1 + r2,
-                    center_im: i1 + i2,
-                    radius: rad1 + rad2,
-                }
-            }
-            (Self::RealInterval { min: min1, max: max1 }, Self::RealInterval { min: min2, max: max2 }) => {
+                    center_re: r1,
+                    center_im: i1,
+                    radius: rad1,
+                },
+                Self::ComplexDisk {
+                    center_re: r2,
+                    center_im: i2,
+                    radius: rad2,
+                },
+            ) => Self::ComplexDisk {
+                center_re: r1 + r2,
+                center_im: i1 + i2,
+                radius: rad1 + rad2,
+            },
+            (
                 Self::RealInterval {
-                    min: min1 + min2,
-                    max: max1 + max2,
-                }
-            }
+                    min: min1,
+                    max: max1,
+                },
+                Self::RealInterval {
+                    min: min2,
+                    max: max2,
+                },
+            ) => Self::RealInterval {
+                min: min1 + min2,
+                max: max1 + max2,
+            },
             // Mixed or fallback addition: lift to complex disk
             _ => {
                 let (r1, i1) = self.center_complex();
@@ -217,8 +246,18 @@ impl UniversalBall {
             (Self::ExactScalar(a), Self::ExactScalar(b)) => {
                 Self::ExactScalar(crate::scalar::ScalarLattice::mul(a, b))
             }
-            (Self::ComplexDisk { center_re: r1, center_im: i1, radius: rad1 },
-             Self::ComplexDisk { center_re: r2, center_im: i2, radius: rad2 }) => {
+            (
+                Self::ComplexDisk {
+                    center_re: r1,
+                    center_im: i1,
+                    radius: rad1,
+                },
+                Self::ComplexDisk {
+                    center_re: r2,
+                    center_im: i2,
+                    radius: rad2,
+                },
+            ) => {
                 // (c1 + B1)(c2 + B2) = c1*c2 + c1*B2 + c2*B1 + B1*B2
                 // center = c1 * c2
                 let c_re = r1 * r2 - i1 * i2;
@@ -256,7 +295,11 @@ impl UniversalBall {
         match self {
             Self::ExactScalar(s) => s.to_complex_f64(),
             Self::RealInterval { min, max } => ((min + max) * 0.5, 0.0),
-            Self::ComplexDisk { center_re, center_im, .. } => (*center_re, *center_im),
+            Self::ComplexDisk {
+                center_re,
+                center_im,
+                ..
+            } => (*center_re, *center_im),
             Self::LieManifoldAffine { center, .. } => (center[0], center[1]),
             Self::UltrametricValuation { .. } => (0.0, 0.0),
             Self::SurrealHalo { center_finite, .. } => (*center_finite, 0.0),
@@ -276,20 +319,50 @@ impl fmt::Display for UniversalBall {
         match self {
             Self::ExactScalar(s) => write!(f, "Exact({})", s),
             Self::RealInterval { min, max } => write!(f, "[{:.4}, {:.4}]", min, max),
-            Self::ComplexDisk { center_re, center_im, radius } => {
-                write!(f, "Disk({:.4}+{:.4}i, r={:.4e})", center_re, center_im, radius)
+            Self::ComplexDisk {
+                center_re,
+                center_im,
+                radius,
+            } => {
+                write!(
+                    f,
+                    "Disk({:.4}+{:.4}i, r={:.4e})",
+                    center_re, center_im, radius
+                )
             }
-            Self::LieManifoldAffine { group, center, uncertainty } => {
-                write!(f, "LieBall({:?}, c={:?}, ±{:?})", group, center, uncertainty)
+            Self::LieManifoldAffine {
+                group,
+                center,
+                uncertainty,
+            } => {
+                write!(
+                    f,
+                    "LieBall({:?}, c={:?}, ±{:?})",
+                    group, center, uncertainty
+                )
             }
             Self::UltrametricValuation { p, valuation, .. } => {
                 write!(f, "{}-adic(v={})", p, valuation)
             }
-            Self::SurrealHalo { center_finite, infinitesimal_order } => {
-                write!(f, "SurrealHalo(c={:.4}, order={})", center_finite, infinitesimal_order)
+            Self::SurrealHalo {
+                center_finite,
+                infinitesimal_order,
+            } => {
+                write!(
+                    f,
+                    "SurrealHalo(c={:.4}, order={})",
+                    center_finite, infinitesimal_order
+                )
             }
-            Self::AdelicBall { arch_radius, min_p_adic_valuations } => {
-                write!(f, "AdelicBall(r_∞={:.4}, v_p={:?})", arch_radius, min_p_adic_valuations)
+            Self::AdelicBall {
+                arch_radius,
+                min_p_adic_valuations,
+            } => {
+                write!(
+                    f,
+                    "AdelicBall(r_∞={:.4}, v_p={:?})",
+                    arch_radius, min_p_adic_valuations
+                )
             }
         }
     }

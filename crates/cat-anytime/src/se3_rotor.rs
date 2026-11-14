@@ -29,7 +29,12 @@ impl Se3Rotor {
     pub fn step(&self, omega: [f64; 3], v: [f64; 3], dt: f64) -> Self {
         let theta = (omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2]).sqrt() * dt;
         let delta_q = if theta < 1e-12 {
-            [1.0, 0.5 * omega[0] * dt, 0.5 * omega[1] * dt, 0.5 * omega[2] * dt]
+            [
+                1.0,
+                0.5 * omega[0] * dt,
+                0.5 * omega[1] * dt,
+                0.5 * omega[2] * dt,
+            ]
         } else {
             let half = 0.5 * theta;
             let s = half.sin() / (theta / dt);
@@ -38,7 +43,12 @@ impl Se3Rotor {
 
         // Hamilton quaternion multiplication: q_new = delta_q * q_curr
         let (w1, x1, y1, z1) = (delta_q[0], delta_q[1], delta_q[2], delta_q[3]);
-        let (w2, x2, y2, z2) = (self.rotation[0], self.rotation[1], self.rotation[2], self.rotation[3]);
+        let (w2, x2, y2, z2) = (
+            self.rotation[0],
+            self.rotation[1],
+            self.rotation[2],
+            self.rotation[3],
+        );
 
         let mut q_new = [
             w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
@@ -48,7 +58,9 @@ impl Se3Rotor {
         ];
 
         // Exact manifold projection onto S^3
-        let norm = (q_new[0] * q_new[0] + q_new[1] * q_new[1] + q_new[2] * q_new[2] + q_new[3] * q_new[3]).sqrt();
+        let norm =
+            (q_new[0] * q_new[0] + q_new[1] * q_new[1] + q_new[2] * q_new[2] + q_new[3] * q_new[3])
+                .sqrt();
         q_new[0] /= norm;
         q_new[1] /= norm;
         q_new[2] /= norm;
@@ -68,7 +80,12 @@ impl Se3Rotor {
 
     /// Deviation from unit norm condition: |\|q\|^2 - 1|.
     pub fn norm_deviation(&self) -> f64 {
-        let (w, x, y, z) = (self.rotation[0], self.rotation[1], self.rotation[2], self.rotation[3]);
+        let (w, x, y, z) = (
+            self.rotation[0],
+            self.rotation[1],
+            self.rotation[2],
+            self.rotation[3],
+        );
         let norm_sq = w * w + x * x + y * y + z * z;
         (norm_sq - 1.0).abs()
     }

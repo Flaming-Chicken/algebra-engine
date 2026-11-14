@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 pub enum EquivalenceKind {
     /// Strong Exact Equality (=_exact): mathematically sound, strictly guarded.
     /// E.g. x/x = 1 only if x is proven non-zero and invertible!
-    StrongExact {
-        is_invertible: bool,
-    },
+    StrongExact { is_invertible: bool },
     /// Weak Association (\approx_st): metric-enriched approximation edge with error tolerance \tau.
     WeakAssociation {
         tau_tolerance: f64,
@@ -34,7 +32,12 @@ impl EquivalenceKind {
 
     /// Check if this edge qualifies as strong exact.
     pub fn is_exact(&self) -> bool {
-        matches!(self, Self::StrongExact { is_invertible: true })
+        matches!(
+            self,
+            Self::StrongExact {
+                is_invertible: true
+            }
+        )
     }
 }
 

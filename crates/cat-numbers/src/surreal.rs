@@ -123,7 +123,12 @@ impl SurrealNumber {
     /// Canonical first transfinite ordinal \omega born on Day \omega as \{ 0, 1, 2, ... \mid \}.
     pub fn omega() -> Self {
         Self {
-            left: vec![Self::zero(), Self::one(), Self::from_i64(2), Self::from_i64(3)],
+            left: vec![
+                Self::zero(),
+                Self::one(),
+                Self::from_i64(2),
+                Self::from_i64(3),
+            ],
             right: Vec::new(),
             birthday: 32, // Day \omega proxy
             approx: 1e15,
@@ -136,7 +141,10 @@ impl SurrealNumber {
         let max_b_r = right.iter().map(|x| x.birthday).max().unwrap_or(0);
         let birthday = max_b_l.max(max_b_r) + 1;
 
-        let left_max_approx = left.iter().map(|x| x.approx).fold(f64::NEG_INFINITY, f64::max);
+        let left_max_approx = left
+            .iter()
+            .map(|x| x.approx)
+            .fold(f64::NEG_INFINITY, f64::max);
         let right_min_approx = right.iter().map(|x| x.approx).fold(f64::INFINITY, f64::min);
         let approx = if left_max_approx.is_finite() && right_min_approx.is_finite() {
             (left_max_approx + right_min_approx) * 0.5
@@ -212,10 +220,10 @@ impl SurrealNumber {
         }
 
         // Exact canonical shortcut for integers
-        let is_int_self = self.approx.fract() == 0.0
-            && (self.left.is_empty() || self.right.is_empty());
-        let is_int_other = other.approx.fract() == 0.0
-            && (other.left.is_empty() || other.right.is_empty());
+        let is_int_self =
+            self.approx.fract() == 0.0 && (self.left.is_empty() || self.right.is_empty());
+        let is_int_other =
+            other.approx.fract() == 0.0 && (other.left.is_empty() || other.right.is_empty());
         if is_int_self && is_int_other {
             return Self::from_i64((self.approx + other.approx) as i64);
         }
@@ -266,10 +274,10 @@ impl SurrealNumber {
         }
 
         // For integers, evaluate directly
-        let is_int_self = self.approx.fract() == 0.0
-            && (self.left.is_empty() || self.right.is_empty());
-        let is_int_other = other.approx.fract() == 0.0
-            && (other.left.is_empty() || other.right.is_empty());
+        let is_int_self =
+            self.approx.fract() == 0.0 && (self.left.is_empty() || self.right.is_empty());
+        let is_int_other =
+            other.approx.fract() == 0.0 && (other.left.is_empty() || other.right.is_empty());
         if is_int_self && is_int_other {
             return Self::from_i64((self.approx * other.approx) as i64);
         }
@@ -287,9 +295,15 @@ impl SurrealNumber {
         if self.equiv(&Self::zero()) {
             SurrealAtom::Zero
         } else if self.approx > 1e10 {
-            SurrealAtom::Infinity { order: 1, coeff: 1.0 }
+            SurrealAtom::Infinity {
+                order: 1,
+                coeff: 1.0,
+            }
         } else if self.approx > 0.0 && self.approx < 1e-10 {
-            SurrealAtom::Infinitesimal { order: 1, coeff: 1.0 }
+            SurrealAtom::Infinitesimal {
+                order: 1,
+                coeff: 1.0,
+            }
         } else if self.approx.fract() == 0.0 {
             SurrealAtom::Integer(self.approx as i64)
         } else {

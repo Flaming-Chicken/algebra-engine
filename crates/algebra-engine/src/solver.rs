@@ -90,15 +90,9 @@ impl DiophantineSolver {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolveOutcome<T> {
     /// Complete closed-form solution set obtained.
-    Solved {
-        solution: T,
-        method: &'static str,
-    },
+    Solved { solution: T, method: &'static str },
     /// Partial solution set obtained (e.g., `RootOf` implicit placeholders or principal branch only).
-    IncompleteCoverage {
-        partial: T,
-        reason: String,
-    },
+    IncompleteCoverage { partial: T, reason: String },
     /// Equation class is unsupported or no closed-form isolation exists.
     Unsupported {
         reason: String,
@@ -261,8 +255,9 @@ impl SymbolicSolver for ExprGraph {
                 };
             }
             return SolveOutcome::Unsupported {
-                reason: "Closed-form isolation unsupported for mixed or non-algebraic subexpression"
-                    .to_string(),
+                reason:
+                    "Closed-form isolation unsupported for mixed or non-algebraic subexpression"
+                        .to_string(),
                 failing_subexpr: Some(sub_expr),
             };
         }
@@ -1260,11 +1255,7 @@ fn solve_transcendental_product(
             }
         }
     }
-    if !roots.is_empty() {
-        Some(roots)
-    } else {
-        None
-    }
+    if !roots.is_empty() { Some(roots) } else { None }
 }
 
 fn solve_transcendental_quadratic(
@@ -1311,12 +1302,7 @@ fn solve_transcendental_quadratic(
     Some(x_roots)
 }
 
-fn replace_exact(
-    graph: &ExprGraph,
-    expr: ExprId,
-    pattern: ExprId,
-    replacement: ExprId,
-) -> ExprId {
+fn replace_exact(graph: &ExprGraph, expr: ExprId, pattern: ExprId, replacement: ExprId) -> ExprId {
     if expr == pattern {
         return replacement;
     }
@@ -1378,9 +1364,9 @@ fn find_non_polynomial_subexpr(
     match &graph.get(expr).kind {
         ExprKind::Number(_) | ExprKind::Symbol(_) => None,
         ExprKind::Neg(inner) => find_non_polynomial_subexpr(graph, *inner, target),
-        ExprKind::Add(items) | ExprKind::Mul(items) => {
-            items.iter().find_map(|&item| find_non_polynomial_subexpr(graph, item, target))
-        }
+        ExprKind::Add(items) | ExprKind::Mul(items) => items
+            .iter()
+            .find_map(|&item| find_non_polynomial_subexpr(graph, item, target)),
         ExprKind::Sub(a, b) => find_non_polynomial_subexpr(graph, *a, target)
             .or_else(|| find_non_polynomial_subexpr(graph, *b, target)),
         ExprKind::Div(num, den) => {

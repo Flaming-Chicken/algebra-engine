@@ -197,7 +197,11 @@ impl DifferentialForm {
                     let target = mask ^ (1 << i);
                     // Sign from passing X through preceding 1-forms
                     let preceding = mask & ((1 << i) - 1);
-                    let sign = if (preceding as u32).count_ones() % 2 == 1 { -1.0 } else { 1.0 };
+                    let sign = if (preceding as u32).count_ones() % 2 == 1 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
                     out[target] += c * vector_field[i] * sign;
                 }
             }

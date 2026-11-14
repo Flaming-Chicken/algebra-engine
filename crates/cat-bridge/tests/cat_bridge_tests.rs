@@ -46,7 +46,10 @@ fn test_complex_types_lifting_and_lowering() {
     // Lower back to LegacyAstTree
     let lowered = LegacyAstTree::lower_from_cat(&cat_term, &ctx, &bridge)
         .expect("Lower complex from cat should succeed");
-    assert_eq!(lowered, complex_ast, "Lowered complex number must match original legacy AST structure");
+    assert_eq!(
+        lowered, complex_ast,
+        "Lowered complex number must match original legacy AST structure"
+    );
 
     // Exact Gaussian Rational: 1/2 + 3/4 i
     let complex_rat_ast = LegacyAstTree::Add(vec![
@@ -87,7 +90,11 @@ fn test_tensor_contraction_dummy_index_erasure() {
     );
 
     let diag = ctx.get_diagram(cat_term.diagram).unwrap();
-    assert_eq!(diag.edges.len(), 3, "Diag contains tensor_a, tensor_b, and Contraction edges");
+    assert_eq!(
+        diag.edges.len(),
+        3,
+        "Diag contains tensor_a, tensor_b, and Contraction edges"
+    );
     let contraction_edge = diag
         .edges
         .iter()
@@ -96,7 +103,11 @@ fn test_tensor_contraction_dummy_index_erasure() {
 
     match &contraction_edge.op {
         cat_core::HyperOp::Contraction { pairs } => {
-            assert_eq!(pairs.len(), 2, "Must have 2 internal anonymous wire pairs contracted");
+            assert_eq!(
+                pairs.len(),
+                2,
+                "Must have 2 internal anonymous wire pairs contracted"
+            );
         }
         _ => unreachable!(),
     }
@@ -106,7 +117,9 @@ fn test_tensor_contraction_dummy_index_erasure() {
         .expect("Lower tensor contraction should succeed");
 
     match lowered {
-        LegacyAstTree::TensorContraction { contracted_indices, .. } => {
+        LegacyAstTree::TensorContraction {
+            contracted_indices, ..
+        } => {
             assert_eq!(contracted_indices.len(), 2);
             assert_eq!(contracted_indices[0], ("_w0".into(), "_w1".into()));
             assert_eq!(contracted_indices[1], ("_w2".into(), "_w3".into()));
@@ -128,8 +141,11 @@ fn test_expr_graph_roundtrip_integration() {
 
     // Convert ExprGraph -> LegacyAstTree -> CatTerm -> LegacyAstTree -> ExprGraph
     let tree = LegacyAstTree::from_graph(expr_id, &graph).expect("From graph should succeed");
-    let cat_term = tree.lift_to_cat(&mut ctx, &mut bridge).expect("Lift should succeed");
-    let lowered_tree = LegacyAstTree::lower_from_cat(&cat_term, &ctx, &bridge).expect("Lower should succeed");
+    let cat_term = tree
+        .lift_to_cat(&mut ctx, &mut bridge)
+        .expect("Lift should succeed");
+    let lowered_tree =
+        LegacyAstTree::lower_from_cat(&cat_term, &ctx, &bridge).expect("Lower should succeed");
 
     let dest_graph = ExprGraph::new();
     let restored_id = lowered_tree.to_graph(&dest_graph);

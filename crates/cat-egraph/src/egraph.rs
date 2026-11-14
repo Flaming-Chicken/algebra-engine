@@ -106,7 +106,10 @@ impl EGraph {
         for _ in 0..max_iterations {
             let mut iteration_rewrites = 0;
             // Execute Tier A contractions first
-            for r in rules.iter().filter(|r| r.tier == RuleTier::TierAContractions) {
+            for r in rules
+                .iter()
+                .filter(|r| r.tier == RuleTier::TierAContractions)
+            {
                 iteration_rewrites += (r.apply)(self);
             }
             // Execute Tier B explorers

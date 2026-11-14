@@ -15,7 +15,9 @@ fn test_colored_operad_dimensional_elaboration() {
         rhs: Box::new(CatExpr::Variable("time".into())),
     };
 
-    let dim = elab.infer_dimension(&expr).expect("Dimension inference must succeed");
+    let dim = elab
+        .infer_dimension(&expr)
+        .expect("Dimension inference must succeed");
     assert_eq!(dim, DimVector::velocity());
 
     // Inconsistent addition: length + time => Error
@@ -25,7 +27,10 @@ fn test_colored_operad_dimensional_elaboration() {
         rhs: Box::new(CatExpr::Variable("time".into())),
     };
     let err = elab.infer_dimension(&bad_add);
-    assert!(err.is_err(), "Adding length and time must fail dimensional elaboration");
+    assert!(
+        err.is_err(),
+        "Adding length and time must fail dimensional elaboration"
+    );
 }
 
 #[test]
@@ -73,7 +78,8 @@ fn test_binary_arena_persistence_roundtrip() {
     };
 
     let bytes = CatBinary::save_script(&script).expect("Serialization to .catb must succeed");
-    let restored: CatScriptAst = CatBinary::load_script(&bytes).expect("Deserialization from .catb must succeed");
+    let restored: CatScriptAst =
+        CatBinary::load_script(&bytes).expect("Deserialization from .catb must succeed");
     assert_eq!(restored, script);
 }
 

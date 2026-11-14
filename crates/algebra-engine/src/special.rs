@@ -234,8 +234,10 @@ impl SpecialFunctions for ExprGraph {
             } else if fn_name == "beta" && args.len() == 2 {
                 let a_node = self.get(args[0]);
                 let b_node = self.get(args[1]);
-                if let (ExprKind::Number(Number::Integer(m)), ExprKind::Number(Number::Integer(n))) =
-                    (&a_node.kind, &b_node.kind)
+                if let (
+                    ExprKind::Number(Number::Integer(m)),
+                    ExprKind::Number(Number::Integer(n)),
+                ) = (&a_node.kind, &b_node.kind)
                 {
                     if *m > 0 && *n > 0 {
                         // B(m, n) = (m-1)! * (n-1)! / (m+n-1)!
@@ -264,7 +266,6 @@ impl SpecialFunctions for ExprGraph {
                     }
                 }
             }
-
             // =========================================================================
             // 2. RIEMANN ZETA & DIRICHLET ETA
             // =========================================================================
@@ -298,10 +299,10 @@ impl SpecialFunctions for ExprGraph {
                             let pi_10 = self.pow(pi, self.integer(10));
                             return Ok(self.div(pi_10, self.integer(93555)));
                         }
-                        -1 => return Ok(self.rational(-1, 12)),  // zeta(-1) = -1/12
-                        -3 => return Ok(self.rational(1, 120)),  // zeta(-3) = 1/120
+                        -1 => return Ok(self.rational(-1, 12)), // zeta(-1) = -1/12
+                        -3 => return Ok(self.rational(1, 120)), // zeta(-3) = 1/120
                         -5 => return Ok(self.rational(-1, 252)), // zeta(-5) = -1/252
-                        -7 => return Ok(self.rational(1, 240)),  // zeta(-7) = 1/240
+                        -7 => return Ok(self.rational(1, 240)), // zeta(-7) = 1/240
                         k if k < 0 && k % 2 == 0 => {
                             // Trivial zeros: zeta(-2k) = 0 for k in N+
                             return Ok(self.integer(0));
@@ -332,7 +333,6 @@ impl SpecialFunctions for ExprGraph {
                     }
                 }
             }
-
             // =========================================================================
             // 3. ERROR FUNCTIONS (erf, erfc, erfi)
             // =========================================================================
@@ -347,7 +347,6 @@ impl SpecialFunctions for ExprGraph {
                     return Ok(self.integer(1)); // erfc(0) = 1
                 }
             }
-
             // =========================================================================
             // 4. LAMBERT W FUNCTION
             // =========================================================================
@@ -364,7 +363,6 @@ impl SpecialFunctions for ExprGraph {
                     _ => {}
                 }
             }
-
             // =========================================================================
             // 5. BESSEL FUNCTIONS
             // =========================================================================
@@ -381,7 +379,6 @@ impl SpecialFunctions for ExprGraph {
                     }
                 }
             }
-
             // =========================================================================
             // 6. SINE & COSINE INTEGRALS
             // =========================================================================
@@ -391,7 +388,6 @@ impl SpecialFunctions for ExprGraph {
                     return Ok(self.integer(0)); // Si(0) = 0
                 }
             }
-
             // =========================================================================
             // 7. POLYLOGARITHM
             // =========================================================================

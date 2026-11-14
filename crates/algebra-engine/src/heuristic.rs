@@ -77,23 +77,22 @@ impl QuantizedTransformerWeights {
                 let embed_dim = *shape.get(1).unwrap_or(&8);
                 let scale = 0.05f32;
 
-                let token_embeddings =
-                    if tensor.dtype() == sml_runtime::candle_core::DType::U8 {
-                        sml_runtime::LoadedModelWeights::dequantize_int8(tensor, scale)
-                            .map_err(|e| e.to_string())?
-                            .flatten_all()
-                            .map_err(|e| e.to_string())?
-                            .to_vec1::<f32>()
-                            .map_err(|e| e.to_string())?
-                    } else {
-                        tensor
-                            .to_dtype(sml_runtime::candle_core::DType::F32)
-                            .map_err(|e| e.to_string())?
-                            .flatten_all()
-                            .map_err(|e| e.to_string())?
-                            .to_vec1::<f32>()
-                            .map_err(|e| e.to_string())?
-                    };
+                let token_embeddings = if tensor.dtype() == sml_runtime::candle_core::DType::U8 {
+                    sml_runtime::LoadedModelWeights::dequantize_int8(tensor, scale)
+                        .map_err(|e| e.to_string())?
+                        .flatten_all()
+                        .map_err(|e| e.to_string())?
+                        .to_vec1::<f32>()
+                        .map_err(|e| e.to_string())?
+                } else {
+                    tensor
+                        .to_dtype(sml_runtime::candle_core::DType::F32)
+                        .map_err(|e| e.to_string())?
+                        .flatten_all()
+                        .map_err(|e| e.to_string())?
+                        .to_vec1::<f32>()
+                        .map_err(|e| e.to_string())?
+                };
 
                 let projection_weights = if let Ok(p_tensor) = loaded
                     .get_tensor("projection")

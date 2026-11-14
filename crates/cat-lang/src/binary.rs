@@ -1,7 +1,7 @@
 //! Zero-copy binary arena persistence (.catb).
 
 use crate::ast::{CatPadNotebook, CatScriptAst};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Binary persistence engine for `.catb` format.
 pub struct CatBinary;

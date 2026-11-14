@@ -431,7 +431,9 @@ impl SymbolicCalculus for ExprGraph {
                 steps.push(MathStep::new(
                     1,
                     "Power Rule",
-                    format!("Applied Power Rule with n = 1: ∫ {wrt_name} d{wrt_name} = {wrt_name}^2 / 2"),
+                    format!(
+                        "Applied Power Rule with n = 1: ∫ {wrt_name} d{wrt_name} = {wrt_name}^2 / 2"
+                    ),
                     expr,
                     res,
                 ));
@@ -456,7 +458,11 @@ impl SymbolicCalculus for ExprGraph {
                     steps.push(MathStep::new(
                         idx + 1,
                         "Sum Linearity Term",
-                        format!("Integrated additive term {} of {} with respect to {wrt_name}", idx + 1, terms.len()),
+                        format!(
+                            "Integrated additive term {} of {} with respect to {wrt_name}",
+                            idx + 1,
+                            terms.len()
+                        ),
                         term,
                         sub_int,
                     ));
@@ -504,7 +510,9 @@ impl SymbolicCalculus for ExprGraph {
                 let (title, desc) = if has_const {
                     (
                         "Constant Multiple / Risch Product Rule",
-                        format!("Factored constants independent of {wrt_name} and integrated remaining factor"),
+                        format!(
+                            "Factored constants independent of {wrt_name} and integrated remaining factor"
+                        ),
                     )
                 } else {
                     (
@@ -520,7 +528,9 @@ impl SymbolicCalculus for ExprGraph {
                 steps.push(MathStep::new(
                     1,
                     "Power Rule",
-                    format!("Applied Power Rule ∫ {wrt_name}^n d{wrt_name} = {wrt_name}^(n+1) / (n+1)"),
+                    format!(
+                        "Applied Power Rule ∫ {wrt_name}^n d{wrt_name} = {wrt_name}^(n+1) / (n+1)"
+                    ),
                     expr,
                     res,
                 ));
@@ -693,7 +703,9 @@ mod tests {
         let parser = ExprParser::new(&graph);
 
         let poly = parser.parse("3*x^2 + cos(x)").expect("parse integrand");
-        let stepped = graph.integrate_with_steps(poly, x).expect("integrate_with_steps");
+        let stepped = graph
+            .integrate_with_steps(poly, x)
+            .expect("integrate_with_steps");
         assert_eq!(stepped.steps.len(), 3);
         assert_eq!(stepped.steps[0].rule_name, "Sum Linearity Term");
         assert_eq!(stepped.steps[2].rule_name, "Linear Combination");

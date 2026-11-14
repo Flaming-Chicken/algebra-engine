@@ -7,11 +7,17 @@ fn test_lifetime_free_arena_deduplication() {
 
     let obj1 = ctx.intern_obj(ObjectDescriptor::linear_scalar(DimVector::length()));
     let obj2 = ctx.intern_obj(ObjectDescriptor::linear_scalar(DimVector::length()));
-    assert_eq!(obj1, obj2, "Hash-consing must deduplicate identical object descriptors");
+    assert_eq!(
+        obj1, obj2,
+        "Hash-consing must deduplicate identical object descriptors"
+    );
 
     let s1 = ctx.intern_scalar(ScalarAtom::complex_rational(1, 2, 3, 4));
     let s2 = ctx.intern_scalar(ScalarAtom::complex_rational(2, 4, 6, 8));
-    assert_eq!(s1, s2, "Gaussian rationals must reduce to canonical form and share ScalarId");
+    assert_eq!(
+        s1, s2,
+        "Gaussian rationals must reduce to canonical form and share ScalarId"
+    );
 
     let mut diag1 = OpenHypergraph::new();
     let w0 = diag1.alloc_wire();
@@ -25,7 +31,10 @@ fn test_lifetime_free_arena_deduplication() {
 
     let d1 = ctx.intern_diagram(diag1);
     let d2 = ctx.intern_diagram(diag2);
-    assert_eq!(d1, d2, "1-WL canonicalization must produce identical DiagramId for isomorphic hypergraphs");
+    assert_eq!(
+        d1, d2,
+        "1-WL canonicalization must produce identical DiagramId for isomorphic hypergraphs"
+    );
 }
 
 #[test]
@@ -74,7 +83,10 @@ fn test_complex_types_and_gaussian_rationals() {
     assert_eq!(prod, ScalarAtom::rational(13, 16));
 
     // Pushout addition: Integer(5) + Gaussian(2 + 3i) = Gaussian(7 + 3i)
-    let sum = ScalarLattice::add(&ScalarAtom::Integer(5), &ScalarAtom::GaussianInt { re: 2, im: 3 });
+    let sum = ScalarLattice::add(
+        &ScalarAtom::Integer(5),
+        &ScalarAtom::GaussianInt { re: 2, im: 3 },
+    );
     assert_eq!(sum, ScalarAtom::GaussianInt { re: 7, im: 3 });
 }
 
@@ -96,9 +108,12 @@ fn test_quaternion_and_octonion_cocycle_algebra() {
     assert_eq!(ii.blades[0], -1.0, "i^2 must equal -1");
 
     // Octonions: verify non-associativity: (e_1 * e_2) * e_4 != e_1 * (e_2 * e_4)
-    let mut e1_blades = [0.0; 8]; e1_blades[1] = 1.0;
-    let mut e2_blades = [0.0; 8]; e2_blades[2] = 1.0;
-    let mut e4_blades = [0.0; 8]; e4_blades[4] = 1.0;
+    let mut e1_blades = [0.0; 8];
+    e1_blades[1] = 1.0;
+    let mut e2_blades = [0.0; 8];
+    e2_blades[2] = 1.0;
+    let mut e4_blades = [0.0; 8];
+    e4_blades[4] = 1.0;
 
     let e1 = CocycleMultivector::octonion(e1_blades);
     let e2 = CocycleMultivector::octonion(e2_blades);
@@ -115,7 +130,10 @@ fn test_quaternion_and_octonion_cocycle_algebra() {
     let e1_e1 = e1.geometric_product(&e1);
     let alt_lhs = e1_e1.geometric_product(&e2);
     let alt_rhs = e1.geometric_product(&e1_e2);
-    assert_eq!(alt_lhs.blades, alt_rhs.blades, "Octonions must satisfy left alternative law");
+    assert_eq!(
+        alt_lhs.blades, alt_rhs.blades,
+        "Octonions must satisfy left alternative law"
+    );
 }
 
 #[test]
@@ -154,10 +172,16 @@ fn test_matrix_exponentiation_dimensional_validity() {
     let col_dims = smallvec![l, v];
 
     let se3_block = ObjectDescriptor::graded_matrix(2, 2, row_dims, col_dims);
-    assert!(se3_block.check_matrix_exp_validity().is_ok(), "Consistent graded matrix exp must succeed");
+    assert!(
+        se3_block.check_matrix_exp_validity().is_ok(),
+        "Consistent graded matrix exp must succeed"
+    );
 
     // Inconsistent dimensions
     let bad_col = smallvec![t, l];
     let bad_mat = ObjectDescriptor::graded_matrix(2, 2, smallvec![l, v], bad_col);
-    assert!(bad_mat.check_matrix_exp_validity().is_err(), "Inconsistent graded matrix exp must fail");
+    assert!(
+        bad_mat.check_matrix_exp_validity().is_err(),
+        "Inconsistent graded matrix exp must fail"
+    );
 }

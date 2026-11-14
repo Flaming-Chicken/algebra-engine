@@ -168,17 +168,9 @@ fn rotate_vec<T: Float>(q: [T; 4], v: [T; 3]) -> [T; 3] {
     let w = q[0];
     let c1 = cross(u, v);
     // Standard Rodrigues quaternion vector rotation: v + 2 * (u x (u x v + w * v))
-    let inner = [
-        c1[0] + w * v[0],
-        c1[1] + w * v[1],
-        c1[2] + w * v[2],
-    ];
+    let inner = [c1[0] + w * v[0], c1[1] + w * v[1], c1[2] + w * v[2]];
     let c2 = cross(u, inner);
-    [
-        v[0] + two * c2[0],
-        v[1] + two * c2[1],
-        v[2] + two * c2[2],
-    ]
+    [v[0] + two * c2[0], v[1] + two * c2[1], v[2] + two * c2[2]]
 }
 
 fn cross<T: Float>(a: [T; 3], b: [T; 3]) -> [T; 3] {

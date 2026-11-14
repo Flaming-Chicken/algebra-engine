@@ -10,13 +10,13 @@
 
 use algebra_core::format::{Formatter, UnicodeFormatter};
 use algebra_core::{Constant, ExprGraph};
+use algebra_engine::ExecutionContext;
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::matrix::SymbolicMatrix;
 use algebra_engine::numeric::{EvalContext, NumericalEval};
 use algebra_engine::solver::SymbolicSolver;
 use algebra_engine::special::SpecialFunctions;
 use algebra_engine::wolfram::WolframAlphaEngine;
-use algebra_engine::ExecutionContext;
 
 // =========================================================================
 // 1. SPECIAL FUNCTIONS EXACT VALUES
@@ -194,7 +194,11 @@ fn test_special_function_derivatives() {
     let d_erf = graph.diff(erf_x, x_sym);
     let d_erf_str = fmt.format(&graph, d_erf).unwrap();
     assert!(d_erf_str.contains("√(π)") || d_erf_str.contains("pi"));
-    assert!(d_erf_str.contains("exp(-x^2)") || d_erf_str.contains("exp(-(x^2))") || d_erf_str.contains("exp"));
+    assert!(
+        d_erf_str.contains("exp(-x^2)")
+            || d_erf_str.contains("exp(-(x^2))")
+            || d_erf_str.contains("exp")
+    );
 
     // d/dx [lambert_w(x)] = W(x) / (x * (1 + W(x)))
     let w_x = graph.lambert_w(x);
@@ -265,7 +269,10 @@ fn test_transcendental_equation_solving() {
     let eq5 = graph.add([diff, graph.integer(2)]);
     let roots5 = graph.solveset(eq5, x_sym).unwrap();
     assert_eq!(roots5.len(), 2);
-    let root_strs: Vec<String> = roots5.iter().map(|&r| fmt.format(&graph, r).unwrap()).collect();
+    let root_strs: Vec<String> = roots5
+        .iter()
+        .map(|&r| fmt.format(&graph, r).unwrap())
+        .collect();
     assert!(root_strs.contains(&"0".to_string()) || root_strs.contains(&"ln(1)".to_string()));
     assert!(root_strs.contains(&"ln(2)".to_string()));
 }
@@ -320,7 +327,9 @@ fn test_advanced_symbolic_integration() {
     assert!(int5_str.contains("1/2") && int5_str.contains("exp(x)"));
 
     // 6. Definite Integral: int_0^2 x dx = 2^2/2 - 0 = 2
-    let int_def = graph.integrate_definite(x, x_sym, graph.integer(0), graph.integer(2)).unwrap();
+    let int_def = graph
+        .integrate_definite(x, x_sym, graph.integer(0), graph.integer(2))
+        .unwrap();
     let eval_ctx = EvalContext::default();
     let num_val = graph.evalf(int_def, &eval_ctx).unwrap().to_f64();
     assert!((num_val - 2.0).abs() < 1e-12);

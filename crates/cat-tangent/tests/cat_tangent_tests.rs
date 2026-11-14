@@ -12,8 +12,16 @@ fn test_ito_lemma_drift_and_diffusion() {
     let sigma = 0.5;
     let (drift, diffusion) = jet.apply_ito_lemma(9.0, 6.0, 2.0, sigma);
 
-    assert_eq!(drift, 0.5 * 0.25 * 2.0, "Drift must equal 1/2 * sigma^2 * f'' = 0.25");
-    assert_eq!(diffusion, 6.0 * 0.5, "Diffusion must equal f' * sigma = 3.0");
+    assert_eq!(
+        drift,
+        0.5 * 0.25 * 2.0,
+        "Drift must equal 1/2 * sigma^2 * f'' = 0.25"
+    );
+    assert_eq!(
+        diffusion,
+        6.0 * 0.5,
+        "Diffusion must equal f' * sigma = 3.0"
+    );
 }
 
 #[test]
@@ -25,13 +33,17 @@ fn test_hilger_time_scale_unification() {
         primal: 2.0,
         tangent: 3.0,
         second_order: 0.0,
-        kind: CalculusKind::HilgerTimeScale { graininess_mu_twelfths: 0 },
+        kind: CalculusKind::HilgerTimeScale {
+            graininess_mu_twelfths: 0,
+        },
     };
     let j2 = WeilJet {
         primal: 4.0,
         tangent: 5.0,
         second_order: 0.0,
-        kind: CalculusKind::HilgerTimeScale { graininess_mu_twelfths: 0 },
+        kind: CalculusKind::HilgerTimeScale {
+            graininess_mu_twelfths: 0,
+        },
     };
     let cont_prod = j1.mul(&j2);
     // (2 * 5) + (3 * 4) = 10 + 12 = 22
@@ -42,13 +54,17 @@ fn test_hilger_time_scale_unification() {
         primal: 2.0,
         tangent: 3.0,
         second_order: 0.0,
-        kind: CalculusKind::HilgerTimeScale { graininess_mu_twelfths: 12 },
+        kind: CalculusKind::HilgerTimeScale {
+            graininess_mu_twelfths: 12,
+        },
     };
     let jd2 = WeilJet {
         primal: 4.0,
         tangent: 5.0,
         second_order: 0.0,
-        kind: CalculusKind::HilgerTimeScale { graininess_mu_twelfths: 12 },
+        kind: CalculusKind::HilgerTimeScale {
+            graininess_mu_twelfths: 12,
+        },
     };
     let disc_prod = jd1.mul(&jd2);
     // 22 + (3 * 5) * 1.0 = 22 + 15 = 37 (Exact forward difference \Delta(f g)!)

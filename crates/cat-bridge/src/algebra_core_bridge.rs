@@ -112,7 +112,11 @@ impl LegacyAstTree {
                     order,
                 })
             }
-            ExprKind::Matrix { rows, cols, elements } => {
+            ExprKind::Matrix {
+                rows,
+                cols,
+                elements,
+            } => {
                 let mut v = Vec::with_capacity(elements.len());
                 for &e in &elements {
                     v.push(Self::from_graph(e, graph)?);
@@ -155,9 +159,14 @@ impl LegacyAstTree {
                 for &a in &args {
                     v.push(Self::from_graph(a, graph)?);
                 }
-                Ok(Self::Function { name: f_name, args: v })
+                Ok(Self::Function {
+                    name: f_name,
+                    args: v,
+                })
             }
-            _ => Err(BridgeError::LoweringError("Unsupported ExprKind variant".into())),
+            _ => Err(BridgeError::LoweringError(
+                "Unsupported ExprKind variant".into(),
+            )),
         }
     }
 
@@ -205,7 +214,11 @@ impl LegacyAstTree {
                     },
                 ))
             }
-            Self::Matrix { rows, cols, elements } => {
+            Self::Matrix {
+                rows,
+                cols,
+                elements,
+            } => {
                 let ids: Vec<ExprId> = elements.iter().map(|e| e.to_graph(graph)).collect();
                 graph.intern(ExprNode::new(
                     Domain::Reals,
@@ -246,10 +259,7 @@ impl LegacyAstTree {
                 let a = args.iter().map(|x| x.to_graph(graph)).collect();
                 graph.intern(ExprNode::new(
                     Domain::Reals,
-                    ExprKind::Function {
-                        name: f,
-                        args: a,
-                    },
+                    ExprKind::Function { name: f, args: a },
                 ))
             }
             Self::Surreal(s) => match s {
@@ -354,8 +364,7 @@ impl RetrofittableAst for LegacyAstTree {
                                         let atom = ScalarAtom::gaussian_int(*r, *i);
                                         let sid = ctx.intern_scalar(atom.clone());
                                         let spine = EnrichedSpine::exact(sid, atom);
-                                        let diag_id =
-                                            ctx.intern_diagram(OpenHypergraph::new());
+                                        let diag_id = ctx.intern_diagram(OpenHypergraph::new());
                                         return Ok(CatTerm::new(dim_scalar, spine, diag_id));
                                     } else if let (
                                         Number::Rational(rn, rd),
@@ -367,8 +376,7 @@ impl RetrofittableAst for LegacyAstTree {
                                         );
                                         let sid = ctx.intern_scalar(atom.clone());
                                         let spine = EnrichedSpine::exact(sid, atom);
-                                        let diag_id =
-                                            ctx.intern_diagram(OpenHypergraph::new());
+                                        let diag_id = ctx.intern_diagram(OpenHypergraph::new());
                                         return Ok(CatTerm::new(dim_scalar, spine, diag_id));
                                     }
                                 }
@@ -413,7 +421,11 @@ impl RetrofittableAst for LegacyAstTree {
                     }
                 }
 
-                combined_diag.add_edge(HyperEdge::new(in_wires, smallvec::smallvec![out_w], HyperOp::Add));
+                combined_diag.add_edge(HyperEdge::new(
+                    in_wires,
+                    smallvec::smallvec![out_w],
+                    HyperOp::Add,
+                ));
 
                 let diag_id = ctx.intern_diagram(combined_diag);
                 let sid = ctx.intern_scalar(total_scalar.clone());
@@ -471,7 +483,11 @@ impl RetrofittableAst for LegacyAstTree {
                     }
                 }
 
-                combined_diag.add_edge(HyperEdge::new(in_wires, smallvec::smallvec![out_w], HyperOp::Mul));
+                combined_diag.add_edge(HyperEdge::new(
+                    in_wires,
+                    smallvec::smallvec![out_w],
+                    HyperOp::Mul,
+                ));
 
                 let diag_id = ctx.intern_diagram(combined_diag);
                 let sid = ctx.intern_scalar(factor_scalar.clone());
@@ -588,7 +604,11 @@ impl RetrofittableAst for LegacyAstTree {
             }
 
             // Matrices
-            Self::Matrix { rows, cols, elements } => {
+            Self::Matrix {
+                rows,
+                cols,
+                elements,
+            } => {
                 let mut cat_elements = Vec::with_capacity(elements.len());
                 for e in elements {
                     cat_elements.push(e.lift_to_cat(ctx, bridge)?);
@@ -628,7 +648,9 @@ impl RetrofittableAst for LegacyAstTree {
         ctx: &CatRuntimeContext,
         bridge: &LegacyBridgeContext,
     ) -> Result<Self, Self::LegacyError> {
-        let scalar_atom = ctx.get_scalar(term.spine.scalar).unwrap_or(ScalarAtom::Zero);
+        let scalar_atom = ctx
+            .get_scalar(term.spine.scalar)
+            .unwrap_or(ScalarAtom::Zero);
         let diag = ctx.get_diagram(term.diagram).unwrap_or_default();
 
         // 1. If hypergraph is empty, reconstruct scalar directly
@@ -658,7 +680,12 @@ impl RetrofittableAst for LegacyAstTree {
                         ]));
                     }
                 }
-                ScalarAtom::ComplexRational { re_num, re_den, im_num, im_den } => {
+                ScalarAtom::ComplexRational {
+                    re_num,
+                    re_den,
+                    im_num,
+                    im_den,
+                } => {
                     return Ok(Self::Add(vec![
                         Self::Number(Number::rational(*re_num, *re_den)),
                         Self::Mul(vec![

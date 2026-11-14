@@ -51,7 +51,8 @@ impl LegacyBridgeContext {
         }
         let id = self.next_symbol_id;
         self.next_symbol_id += 1;
-        self.symbol_bijection.insert(name.to_string(), (id, obj, dim));
+        self.symbol_bijection
+            .insert(name.to_string(), (id, obj, dim));
         self.reverse_symbols.insert(id, name.to_string());
         id
     }

@@ -77,9 +77,7 @@ impl AmitsurLevitzki {
     /// Compute the standard polynomial S_4 on four 2x2 matrices:
     /// S_4(A, B, C, D) = \sum_{\sigma \in S_4} sgn(\sigma) X_{\sigma(1)} X_{\sigma(2)} X_{\sigma(3)} X_{\sigma(4)}.
     /// By Amitsur-Levitzki, this MUST be identically 0 for any 4 matrices of size 2x2!
-    pub fn standard_polynomial_s4(
-        m: &[Matrix2Fp; 4],
-    ) -> Matrix2Fp {
+    pub fn standard_polynomial_s4(m: &[Matrix2Fp; 4]) -> Matrix2Fp {
         let p = m[0].p;
         let mut sum = Matrix2Fp::zero(p);
 

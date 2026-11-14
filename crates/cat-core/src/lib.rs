@@ -18,8 +18,8 @@ pub mod term;
 
 pub use ball::{LieGroupKind, UniversalBall};
 pub use context::{
-    set_ambient_context, with_ambient_context, CatRuntimeContext, HyperArena, ObjArena,
-    ScalarArena, SymDimArena,
+    CatRuntimeContext, HyperArena, ObjArena, ScalarArena, SymDimArena, set_ambient_context,
+    with_ambient_context,
 };
 pub use descriptor::ObjectDescriptor;
 pub use dimensions::{DimVector, UnitGaugeSystem, UnitSpaceKind};

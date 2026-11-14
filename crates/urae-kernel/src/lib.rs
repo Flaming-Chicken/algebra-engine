@@ -758,8 +758,11 @@ mod tests {
     #[test]
     fn test_jupyter_kernel_info_and_kernelspec() {
         let mut controller = NotebookSessionController::new();
-        let out =
-            controller.handle_jupyter_message(&req("m1", "kernel_info_request", serde_json::json!({})));
+        let out = controller.handle_jupyter_message(&req(
+            "m1",
+            "kernel_info_request",
+            serde_json::json!({}),
+        ));
         assert_eq!(out.shell_reply.header.msg_type, "kernel_info_reply");
         assert_eq!(out.shell_reply.content["status"], "ok");
         assert_eq!(out.shell_reply.content["protocol_version"], "5.3");
@@ -768,9 +771,10 @@ mod tests {
         assert_eq!(out.iopub_messages[0].content["execution_state"], "busy");
         assert_eq!(out.iopub_messages[1].content["execution_state"], "idle");
 
-        let spec: serde_json::Value =
-            serde_json::from_str(&NotebookSessionController::kernelspec_json("/usr/bin/urae-kernel"))
-                .expect("valid kernelspec json");
+        let spec: serde_json::Value = serde_json::from_str(
+            &NotebookSessionController::kernelspec_json("/usr/bin/urae-kernel"),
+        )
+        .expect("valid kernelspec json");
         assert_eq!(spec["language"], "urae");
         assert_eq!(spec["argv"][0], "/usr/bin/urae-kernel");
         assert_eq!(spec["argv"][2], "{connection_file}");

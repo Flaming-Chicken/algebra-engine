@@ -109,7 +109,8 @@ impl MetricTensor {
                         let d_nu_g_mu_sigma = dg.get(&[nu, mu, sigma]);
                         let d_sigma_g_mu_nu = dg.get(&[sigma, mu, nu]);
 
-                        sum += 0.5 * g_inv_ls * (d_mu_g_nu_sigma + d_nu_g_mu_sigma - d_sigma_g_mu_nu);
+                        sum +=
+                            0.5 * g_inv_ls * (d_mu_g_nu_sigma + d_nu_g_mu_sigma - d_sigma_g_mu_nu);
                     }
                     gamma.set(&[lambda, mu, nu], sum);
                 }

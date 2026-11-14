@@ -91,7 +91,9 @@ impl BuckinghamPi {
                 // Verify resulting dimension vector is indeed dimensionless
                 let mut check = DimVector::DIMENSIONLESS;
                 for (i, &p) in powers.iter().enumerate() {
-                    let scaled = variables[i].pow_rational(p, 1).unwrap_or(DimVector::DIMENSIONLESS);
+                    let scaled = variables[i]
+                        .pow_rational(p, 1)
+                        .unwrap_or(DimVector::DIMENSIONLESS);
                     check = check + scaled;
                 }
 

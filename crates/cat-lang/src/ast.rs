@@ -15,7 +15,10 @@ pub enum CatTypeAnnotation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CatExpr {
     Number(f64),
-    Complex { re: f64, im: f64 },
+    Complex {
+        re: f64,
+        im: f64,
+    },
     Variable(String),
     BinaryOp {
         op: String,

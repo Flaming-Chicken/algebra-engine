@@ -90,11 +90,8 @@ impl DividedPowerAtom {
             return None;
         }
         let p = self.characteristic as u64;
-        let binom = lucas_binomial_mod_p(
-            (self.degree + other.degree) as u64,
-            self.degree as u64,
-            p,
-        );
+        let binom =
+            lucas_binomial_mod_p((self.degree + other.degree) as u64, self.degree as u64, p);
         let c = (((self.coeff * other.coeff) % p) * binom) % p;
         Some(Self {
             degree: self.degree + other.degree,

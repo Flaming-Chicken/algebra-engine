@@ -46,10 +46,7 @@ pub enum HyperOp {
         pairs: SmallVec<[(WireId, WireId); 2]>,
     },
     /// Formal derivation / tangent functor: \partial^n / \partial x^n.
-    Derivation {
-        wrt: WireId,
-        order: u32,
-    },
+    Derivation { wrt: WireId, order: u32 },
     /// Lie bracket morphism [A, B] = A B - B A.
     LieBracket,
     /// Clifford / Cayley-Dickson geometric product.
@@ -69,7 +66,11 @@ pub struct HyperEdge {
 impl HyperEdge {
     /// Create a new hyper-edge.
     pub fn new(inputs: SmallVec<[WireId; 4]>, outputs: SmallVec<[WireId; 4]>, op: HyperOp) -> Self {
-        Self { inputs, outputs, op }
+        Self {
+            inputs,
+            outputs,
+            op,
+        }
     }
 
     /// Create a nullary generator edge producing a single output wire from a scalar.
@@ -191,23 +192,20 @@ impl OpenHypergraph {
 
             for &in_w in &edge.inputs {
                 if (in_w.0 as usize) < wire_colors.len() {
-                    wire_colors[in_w.0 as usize] = wire_colors[in_w.0 as usize]
-                        .rotate_left(5)
-                        ^ op_hash;
+                    wire_colors[in_w.0 as usize] =
+                        wire_colors[in_w.0 as usize].rotate_left(5) ^ op_hash;
                 }
             }
             for &out_w in &edge.outputs {
                 if (out_w.0 as usize) < wire_colors.len() {
-                    wire_colors[out_w.0 as usize] = wire_colors[out_w.0 as usize]
-                        .rotate_left(7)
-                        ^ (op_hash << 1);
+                    wire_colors[out_w.0 as usize] =
+                        wire_colors[out_w.0 as usize].rotate_left(7) ^ (op_hash << 1);
                 }
             }
         }
 
         // 3. Compute deterministic permutation mapping old WireId -> new canonical WireId
-        let mut sorted_wires: Vec<(usize, u64)> =
-            wire_colors.into_iter().enumerate().collect();
+        let mut sorted_wires: Vec<(usize, u64)> = wire_colors.into_iter().enumerate().collect();
         sorted_wires.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
         let mut remap: Vec<WireId> = vec![WireId(0); self.wire_count as usize];

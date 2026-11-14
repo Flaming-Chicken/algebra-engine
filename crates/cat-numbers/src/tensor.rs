@@ -113,7 +113,10 @@ impl Tensor {
     pub fn contract(&self, contra_idx: usize, covar_idx: usize) -> Self {
         let rank = self.rank();
         assert!(rank >= 2, "Cannot contract tensor of rank < 2");
-        assert!(contra_idx < self.valence.0, "contra_idx must be in contravariant slots");
+        assert!(
+            contra_idx < self.valence.0,
+            "contra_idx must be in contravariant slots"
+        );
         assert!(
             covar_idx >= self.valence.0 && covar_idx < rank,
             "covar_idx must be in covariant slots"

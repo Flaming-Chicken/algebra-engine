@@ -13,7 +13,9 @@ use urae::prelude::*;
 
 /// Helper to format an expression node into `PyExprGraph`.
 fn node_to_py_expr(graph: &ExprGraph, id: ExprId) -> Result<PyExprGraph, String> {
-    let latex = LatexFormatter.format(graph, id).map_err(|e| e.to_string())?;
+    let latex = LatexFormatter
+        .format(graph, id)
+        .map_err(|e| e.to_string())?;
     let unicode = UnicodeFormatter
         .format(graph, id)
         .map_err(|e| e.to_string())?;
@@ -258,20 +260,17 @@ pub fn py_grobner_basis(polys: &[&str], vars: &[&str]) -> Result<Vec<String>, St
     }
 
     let var_names: Vec<String> = vars.iter().map(|v| (*v).to_string()).collect();
-    let basis = GrobnerBasis::from_exprs(
-        &graph,
-        &generators,
-        &var_names,
-        MonomialOrder::GrevLex,
-    )
-    .map_err(|e| e.to_string())?;
+    let basis = GrobnerBasis::from_exprs(&graph, &generators, &var_names, MonomialOrder::GrevLex)
+        .map_err(|e| e.to_string())?;
 
     basis
         .polynomials
         .iter()
         .map(|p| {
             let expr_id = p.to_expr(&graph);
-            UnicodeFormatter.format(&graph, expr_id).map_err(|e| e.to_string())
+            UnicodeFormatter
+                .format(&graph, expr_id)
+                .map_err(|e| e.to_string())
         })
         .collect()
 }
@@ -282,7 +281,9 @@ fn validate_square_matrix(rows: &[Vec<f64>]) -> Result<usize, String> {
     }
     let n = rows.len();
     if rows.iter().any(|r| r.len() != n) {
-        return Err(format!("Matrix must be square ({n} columns expected per row)"));
+        return Err(format!(
+            "Matrix must be square ({n} columns expected per row)"
+        ));
     }
     if rows.iter().flatten().any(|v| !v.is_finite()) {
         return Err("Matrix entries must be finite".to_string());
@@ -410,9 +411,7 @@ pub fn py_ode_solve(
             state_vars.len()
         ));
     }
-    if !t_span.0.is_finite()
-        || !t_span.1.is_finite()
-        || (t_span.1 - t_span.0).abs() <= f64::EPSILON
+    if !t_span.0.is_finite() || !t_span.1.is_finite() || (t_span.1 - t_span.0).abs() <= f64::EPSILON
     {
         return Err("t_span must be finite with t0 != tend".to_string());
     }
@@ -686,10 +685,13 @@ mod tests {
         assert!(traj_tsit5.method_used.contains("Tsitouras"));
         let final_tsit5 = traj_tsit5.y.last().expect("non-empty tsit5 trajectory")[0];
         let exact = (-1.0_f64).exp();
-        assert!((final_tsit5 - exact).abs() < 1e-5, "tsit5 final={final_tsit5}");
+        assert!(
+            (final_tsit5 - exact).abs() < 1e-5,
+            "tsit5 final={final_tsit5}"
+        );
 
-        let traj_meta = py_ode_solve(&["-y"], &["y"], "t", (0.0, 1.0), &[1.0], "meta")
-            .expect("meta ode solve");
+        let traj_meta =
+            py_ode_solve(&["-y"], &["y"], "t", (0.0, 1.0), &[1.0], "meta").expect("meta ode solve");
         assert!(traj_meta.method_used.contains("SelfOptimizingMeta"));
         let final_meta = traj_meta.y.last().expect("non-empty meta trajectory")[0];
         assert!((final_meta - exact).abs() < 1e-2, "meta final={final_meta}");

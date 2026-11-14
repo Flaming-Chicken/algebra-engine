@@ -49,10 +49,11 @@
 //! ```
 
 use num::{
-    integer::{sqrt, Roots},
+    Integer, NumCast, Signed, Zero,
+    integer::{Roots, sqrt},
     one,
     traits::Euclid,
-    zero, Integer, NumCast, Signed, Zero,
+    zero,
 };
 use std::{
     fmt::Display,
@@ -138,20 +139,12 @@ where
 
     /// Convert the `a` flag to the integer type `T` (`1` if `true`, `0` if `false`).
     pub fn a_as_integer(&self) -> T {
-        if self.a {
-            T::one()
-        } else {
-            T::zero()
-        }
+        if self.a { T::one() } else { T::zero() }
     }
 
     /// Convert the `a` flag to `f64` (`1.0` if `true`, `0.0` if `false`).
     pub fn a_as_f64(&self) -> f64 {
-        if self.a {
-            1.0
-        } else {
-            0.0
-        }
+        if self.a { 1.0 } else { 0.0 }
     }
 }
 
@@ -321,11 +314,7 @@ where
             return None;
         }
         let order: (&Self, &Self) = if self.a ^ other.a {
-            if self.a {
-                (self, other)
-            } else {
-                (other, self)
-            }
+            if self.a { (self, other) } else { (other, self) }
         } else {
             let one: T = T::one();
             if (self.r.mod_floor(&one) < other.r.mod_floor(&one))

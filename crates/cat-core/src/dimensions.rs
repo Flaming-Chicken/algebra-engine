@@ -225,7 +225,9 @@ impl DimVector {
             }
             out[i] = p as i16;
         }
-        Ok(Self { scaled_twelfths: out })
+        Ok(Self {
+            scaled_twelfths: out,
+        })
     }
 
     /// Square root of dimension vector.
@@ -242,7 +244,9 @@ impl Add for DimVector {
         for i in 0..8 {
             out[i] = self.scaled_twelfths[i].saturating_add(rhs.scaled_twelfths[i]);
         }
-        Self { scaled_twelfths: out }
+        Self {
+            scaled_twelfths: out,
+        }
     }
 }
 
@@ -254,7 +258,9 @@ impl Sub for DimVector {
         for i in 0..8 {
             out[i] = self.scaled_twelfths[i].saturating_sub(rhs.scaled_twelfths[i]);
         }
-        Self { scaled_twelfths: out }
+        Self {
+            scaled_twelfths: out,
+        }
     }
 }
 
@@ -347,14 +353,18 @@ impl UnitGaugeSystem {
                 out[DIM_N] = dim.scaled_twelfths[DIM_N];
                 out[DIM_J] = dim.scaled_twelfths[DIM_J];
                 out[DIM_ANGLE] = dim.scaled_twelfths[DIM_ANGLE];
-                DimVector { scaled_twelfths: out }
+                DimVector {
+                    scaled_twelfths: out,
+                }
             }
             Self::Planck => {
                 // All mechanical dimensions become dimensionless (1)
                 let mut out = [0i16; 8];
                 out[DIM_N] = dim.scaled_twelfths[DIM_N];
                 out[DIM_ANGLE] = dim.scaled_twelfths[DIM_ANGLE];
-                DimVector { scaled_twelfths: out }
+                DimVector {
+                    scaled_twelfths: out,
+                }
             }
             Self::Geometrized => {
                 // G = c = 1 => [M] = [L] = [T]
@@ -369,14 +379,18 @@ impl UnitGaugeSystem {
                 out[DIM_N] = dim.scaled_twelfths[DIM_N];
                 out[DIM_J] = dim.scaled_twelfths[DIM_J];
                 out[DIM_ANGLE] = dim.scaled_twelfths[DIM_ANGLE];
-                DimVector { scaled_twelfths: out }
+                DimVector {
+                    scaled_twelfths: out,
+                }
             }
             Self::Atomic => {
                 // e = \hbar = m_e = 1
                 let mut out = dim.scaled_twelfths;
                 out[DIM_M] = 0;
                 out[DIM_I] = 0;
-                DimVector { scaled_twelfths: out }
+                DimVector {
+                    scaled_twelfths: out,
+                }
             }
         }
     }

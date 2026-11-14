@@ -18,7 +18,10 @@ fn test_butler_portugal_riemann_canonicalization() {
 
     // R_{0023} has first two indices identical -> vanishes identically (sign == 0)
     let res3 = ButlerPortugal::canonicalize_4([0, 0, 2, 3], &sym);
-    assert_eq!(res3.sign, 0, "Antisymmetric tensor with identical indices must vanish");
+    assert_eq!(
+        res3.sign, 0,
+        "Antisymmetric tensor with identical indices must vanish"
+    );
 
     // Garnir Young Projector for First Bianchi Identity:
     // When indices are standard [0, 1, 2, 3], returns single term with sign +1
@@ -47,7 +50,9 @@ fn test_divided_power_pd_algebra_lucas() {
     // Modulo p=3: 10 mod 3 = 1
     let dp1 = DividedPowerAtom::new(3, 3, 1);
     let dp2 = DividedPowerAtom::new(2, 3, 1);
-    let prod = dp1.mul(&dp2).expect("Mul in same characteristic must succeed");
+    let prod = dp1
+        .mul(&dp2)
+        .expect("Mul in same characteristic must succeed");
     assert_eq!(prod.degree, 5);
     assert_eq!(prod.coeff, 1, "10 mod 3 == 1");
 
@@ -79,7 +84,9 @@ fn test_lyndon_words_and_lie_brackets() {
     let w = LyndonWord::generator(0);
     let w1 = LyndonWord::generator(1);
     let w01 = LyndonWord(smallvec::smallvec![0, 1]);
-    let (u, v) = w01.shirshov_factorization().expect("Factorization of [0, 1] must succeed");
+    let (u, v) = w01
+        .shirshov_factorization()
+        .expect("Factorization of [0, 1] must succeed");
     assert_eq!(u, w);
     assert_eq!(v, w1);
 
@@ -97,8 +104,10 @@ fn test_lyndon_words_and_lie_brackets() {
 #[test]
 fn test_cocycle_wedge_and_associator() {
     // In Cl(3, 0): e_1 ^ e_2 = e_12
-    let mut b1 = [0.0; 8]; b1[1] = 1.0;
-    let mut b2 = [0.0; 8]; b2[2] = 1.0;
+    let mut b1 = [0.0; 8];
+    b1[1] = 1.0;
+    let mut b2 = [0.0; 8];
+    b2[2] = 1.0;
     let e1 = CocycleMultivector::cl3(b1);
     let e2 = CocycleMultivector::cl3(b2);
 
@@ -119,9 +128,12 @@ fn test_cocycle_wedge_and_associator() {
     assert!(assoc_q.is_zero(), "Quaternion associator must be zero");
 
     // Octonions: non-associative for basis elements e_1, e_2, e_4
-    let mut o1 = [0.0; 8]; o1[1] = 1.0;
-    let mut o2 = [0.0; 8]; o2[2] = 1.0;
-    let mut o4 = [0.0; 8]; o4[4] = 1.0;
+    let mut o1 = [0.0; 8];
+    o1[1] = 1.0;
+    let mut o2 = [0.0; 8];
+    o2[2] = 1.0;
+    let mut o4 = [0.0; 8];
+    o4[4] = 1.0;
     let oct1 = CocycleMultivector::octonion(o1);
     let oct2 = CocycleMultivector::octonion(o2);
     let oct4 = CocycleMultivector::octonion(o4);

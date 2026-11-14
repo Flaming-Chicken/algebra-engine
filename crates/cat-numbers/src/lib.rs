@@ -20,6 +20,6 @@ pub use differential_forms::DifferentialForm;
 pub use lyndon::{LieBracketTree, LyndonWord};
 pub use magnitude::Magnitude;
 pub use metric::MetricTensor;
-pub use pd_algebra::{lucas_binomial_mod_p, DividedPowerAtom};
+pub use pd_algebra::{DividedPowerAtom, lucas_binomial_mod_p};
 pub use surreal::SurrealNumber;
 pub use tensor::{IndexVariance, Tensor};

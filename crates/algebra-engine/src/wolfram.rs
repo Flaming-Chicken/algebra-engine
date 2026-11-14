@@ -14,10 +14,10 @@
 //! - **Pod 6: Derivative & Integral Companion Analysis**
 //! - **Pod 7: Roots & Critical Points**
 
+use algebra_core::ExprGraph;
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::operation::*;
 use algebra_core::parser::parse_operation;
-use algebra_core::ExprGraph;
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -295,7 +295,10 @@ impl WolframAlphaEngine {
             } => {
                 let v = variable.as_deref().unwrap_or("x");
                 let text = format!("d^{}/d{}^{} [{}]", order, v, order, expression);
-                let latex = format!("\\frac{{d^{}}}{{d{}^{}}} \\left[ {} \\right]", order, v, order, expression);
+                let latex = format!(
+                    "\\frac{{d^{}}}{{d{}^{}}} \\left[ {} \\right]",
+                    order, v, order, expression
+                );
                 let unicode = format!("d^{}/d{}^{} [{}]", order, v, order, expression);
                 (text, latex, unicode)
             }
@@ -403,7 +406,8 @@ impl WolframAlphaEngine {
                     if !step_res.steps.is_empty() {
                         let mut lines = Vec::new();
                         for s in &step_res.steps {
-                            let to_str = unicode_fmt.format(graph, s.after_expr).unwrap_or_default();
+                            let to_str =
+                                unicode_fmt.format(graph, s.after_expr).unwrap_or_default();
                             lines.push(format!("{}: {} -> {}", s.rule_name, s.description, to_str));
                         }
                         return Some(
@@ -466,7 +470,8 @@ impl WolframAlphaEngine {
                 let mut inner_norm = inner.to_string();
                 for num in ["2", "3", "4", "5", "6", "7", "8", "9"] {
                     for var in ["x", "t", "y", "z"] {
-                        inner_norm = inner_norm.replace(&format!("{}{}", num, var), &format!("{}*{}", num, var));
+                        inner_norm = inner_norm
+                            .replace(&format!("{}{}", num, var), &format!("{}*{}", num, var));
                     }
                 }
                 let rep = format!("exp({})", inner_norm);
@@ -478,14 +483,17 @@ impl WolframAlphaEngine {
         }
 
         // 4. Normalize e^x, e^t, e^y, e^z -> exp(x), exp(t), etc.
-        s = s.replace("e^x", "exp(x)")
-             .replace("e^t", "exp(t)")
-             .replace("e^y", "exp(y)")
-             .replace("e^z", "exp(z)");
+        s = s
+            .replace("e^x", "exp(x)")
+            .replace("e^t", "exp(t)")
+            .replace("e^y", "exp(y)")
+            .replace("e^z", "exp(z)");
 
         // 5. Implicit coefficient multiplication: 3exp(x) -> 3*exp(x)
         for num in ["2", "3", "4", "5", "6", "7", "8", "9"] {
-            for fn_name in ["exp", "sin", "cos", "tan", "ln", "log", "erf", "zeta", "gamma"] {
+            for fn_name in [
+                "exp", "sin", "cos", "tan", "ln", "log", "erf", "zeta", "gamma",
+            ] {
                 let target = format!("{}{}(", num, fn_name);
                 let rep = format!("{}*{}(", num, fn_name);
                 s = s.replace(&target, &rep);

@@ -100,7 +100,9 @@ impl WeilJet {
                     kind: self.kind,
                 }
             }
-            CalculusKind::HilgerTimeScale { graininess_mu_twelfths } => {
+            CalculusKind::HilgerTimeScale {
+                graininess_mu_twelfths,
+            } => {
                 // In Hilger calculus: \epsilon^2 = \mu \epsilon
                 let mu = graininess_mu_twelfths as f64 / 12.0;
                 let adjusted_t = t + s * mu;
@@ -117,7 +119,13 @@ impl WeilJet {
     /// Apply Itô's Lemma to scalar function f(X_t):
     /// d(f(X_t)) = f'(X_t) dX_t + 1/2 f''(X_t) (dX_t)^2.
     /// If dX_t = \mu dt + \sigma dW_t, returns the exact drift and diffusion coefficients.
-    pub fn apply_ito_lemma(&self, _f_val: f64, f_prime: f64, f_double_prime: f64, sigma: f64) -> (f64, f64) {
+    pub fn apply_ito_lemma(
+        &self,
+        _f_val: f64,
+        f_prime: f64,
+        f_double_prime: f64,
+        sigma: f64,
+    ) -> (f64, f64) {
         // Drift = 1/2 \sigma^2 f''(x)
         let ito_drift = 0.5 * sigma * sigma * f_double_prime;
         let diffusion = f_prime * sigma;

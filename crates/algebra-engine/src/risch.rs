@@ -449,8 +449,10 @@ impl RischIntegrator {
                 (v, u)
             } else {
                 // Check e^x * sin(x) or e^x * cos(x)
-                if let (ExprKind::Function { name: n1, args: a1 }, ExprKind::Function { name: n2, args: a2 }) =
-                    (&graph.get(u).kind, &graph.get(v).kind)
+                if let (
+                    ExprKind::Function { name: n1, args: a1 },
+                    ExprKind::Function { name: n2, args: a2 },
+                ) = (&graph.get(u).kind, &graph.get(v).kind)
                 {
                     let fn1 = graph.symbols.resolve(*n1).unwrap_or_default();
                     let fn2 = graph.symbols.resolve(*n2).unwrap_or_default();

@@ -55,8 +55,16 @@ impl TangentFunctor {
                     }
                     if let Some(&out_w) = edge.outputs.first() {
                         if let Some(&(pw, tw)) = wire_map.get(&out_w) {
-                            t_diag.add_edge(HyperEdge::new(primal_in, smallvec::smallvec![pw], HyperOp::Add));
-                            t_diag.add_edge(HyperEdge::new(tangent_in, smallvec::smallvec![tw], HyperOp::Add));
+                            t_diag.add_edge(HyperEdge::new(
+                                primal_in,
+                                smallvec::smallvec![pw],
+                                HyperOp::Add,
+                            ));
+                            t_diag.add_edge(HyperEdge::new(
+                                tangent_in,
+                                smallvec::smallvec![tw],
+                                HyperOp::Add,
+                            ));
                         }
                     }
                 }

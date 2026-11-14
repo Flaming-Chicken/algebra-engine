@@ -27,6 +27,7 @@ pub mod executor;
 pub mod geometric_dl;
 pub mod geometry;
 pub mod gpu;
+pub mod hecs;
 pub mod heuristic;
 pub mod html_export;
 pub mod hyperop;
@@ -74,7 +75,6 @@ pub mod urscript_pose;
 pub mod visualizer;
 pub mod weyl_dmodules;
 pub mod wolfram;
-pub mod hecs;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,
@@ -107,6 +107,7 @@ pub use executor::{ExecutionContext, OperationExecutor, OperationResult};
 pub use geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer};
 pub use geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder};
 pub use gpu::{GpuKernelDescriptor, WgslShaderGenerator};
+pub use hecs::Hecs;
 pub use heuristic::{
     CompositeSearchHeuristic, HeuristicSearchEngine, NeuralExpressionEmbedder,
     SchwartzZippelHeuristic, SearchCandidate, SearchHeuristic, TreeSizeHeuristic,
@@ -122,6 +123,7 @@ pub use lifting::{
     RetractionCleaner, WeierstrassLiftingFunctor,
 };
 pub use limits::{LimitDirection, LimitEngine};
+pub use linprog::{LinprogSolution, LinprogStatus, linprog_minimize, yun_square_free_z};
 pub use logic::{AssumptionsContext, GeneralizedValuedLogic, SatSolver, ThreeValuedLogic};
 pub use matrix::SymbolicMatrix;
 pub use mcts::{
@@ -181,12 +183,10 @@ pub use tensor::SymbolicTensor;
 pub use topology::SimplicialComplex;
 pub use transforms::SymbolicTransforms;
 pub use tropical::{MaxPlus, MinPlus, TropicalMatrix, log_sum_exp};
+pub use urscript_pose::Pose;
 pub use visualizer::{ColorRgba, DomainColoring, RiemannSurface, VectorFieldVisualizer};
 pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
 };
 pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};
-pub use hecs::Hecs;
-pub use linprog::{LinprogSolution, LinprogStatus, linprog_minimize, yun_square_free_z};
-pub use urscript_pose::Pose;

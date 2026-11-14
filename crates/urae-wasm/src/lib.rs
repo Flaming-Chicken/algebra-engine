@@ -65,7 +65,8 @@ pub fn wasm_pad_eval_session(session_text: &str) -> String {
         if let Some((lhs, rhs)) = trimmed.split_once('=') {
             let var_name = lhs.trim();
             let val_str = rhs.trim().trim_end_matches(';');
-            if !var_name.contains('(') && var_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !var_name.contains('(') && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
                 if let Ok(val) = val_str.parse::<f64>() {
                     ctx.bindings.insert(var_name.to_string(), val);
                 }

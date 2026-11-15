@@ -11,7 +11,7 @@ description = "Python CPython bindings for the Universal Rust Algebra Engine (UR
 [lib]
 name = "urae_py"
 crate-type = ["cdylib", "rlib"]
-test = false
+test = true
 doctest = false
 
 [lints]

@@ -1,53 +1,80 @@
+/* ==============================================================================
+   URAE // ALPHA — Modern Wolfram Alpha Computational Interface & Rust Extended Pad
+   ============================================================================== */
+
 :root {
-  --font-stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Fira Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-math: "KaTeX_Math", "Noto Sans Math", STIXGeneral, serif;
+
+  /* Wolfram Brand Accents */
+  --wa-orange: #ff7e00;
+  --wa-orange-hover: #ff9429;
+  --wa-orange-dark: #cc6500;
+  --wa-orange-glow: rgba(255, 126, 0, 0.25);
+  --wa-gold: #f5a623;
+  --wa-gold-soft: rgba(245, 166, 35, 0.12);
+
+/* Desmos & GeoGebra Iconic Palette */
+  --desmos-blue: #2d70b3;
+  --desmos-red: #c74440;
+  --desmos-green: #388c46;
+  --desmos-purple: #6042a6;
+  --desmos-orange: #fa7e19;
+  --desmos-cyan: #0099b8;
+
+  /* Symbolab Accent Palette */
+  --symbolab-red: #e02424;
+  --symbolab-soft: rgba(224, 36, 36, 0.12);
+  --symbolab-green: #0e9f6e;
+
+  /* Dark Theme Palette (Default) */
+  --bg-app: #0d1117;
+  --bg-surface: #161b22;
+  --bg-surface-elevated: #21262d;
+  --bg-input: #0d1117;
+  --border-main: #30363d;
+  --border-focus: #ff7e00;
+  --text-main: #f0f6fc;
+  --text-muted: #8b949e;
+  --text-secondary: #c9d1d9;
+  --pod-header-bg: #1c2128;
+  --pod-border: #30363d;
+  --pod-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --badge-bg: #21262d;
+  --badge-text: #58a6ff;
+  --badge-rust-bg: rgba(245, 166, 35, 0.15);
+  --badge-rust-text: #f5a623;
+  --success: #3fb950;
+  --error: #f85149;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+  --transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-:root, [data-theme=dark] {
-  --bg-canvas: #0d1117;
-  --text-main: #c9d1d9;
-  --border-subtle: #30363d;
-  --bg-toast: #161b22;
-  --text-toast: #f0f6fc;
-  --btn-primary-bg: #238636;
-  --btn-primary-fg: #ffffff;
-  --focus-ring-color: #58a6ff;
-  --focus-ring-width: 2px;
-}
-
-[data-theme=light] {
-  --bg-canvas: #f6f8fa;
+[data-theme="light"] {
+  --bg-app: #f6f8fa;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f0f2f5;
+  --bg-input: #ffffff;
+  --border-main: #d0d7de;
+  --border-focus: #ff7e00;
   --text-main: #1f2328;
-  --border-subtle: #d0d7de;
-  --bg-toast: #ffffff;
-  --text-toast: #1f2328;
-  --btn-primary-bg: #1a7f37;
-  --btn-primary-fg: #ffffff;
-  --focus-ring-color: #0969da;
-  --focus-ring-width: 2px;
+  --text-muted: #656d76;
+  --text-secondary: #24292f;
+  --pod-header-bg: #f6f8fa;
+  --pod-border: #d0d7de;
+  --pod-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --badge-bg: #eaeef2;
+  --badge-text: #0969da;
+  --badge-rust-bg: rgba(245, 166, 35, 0.15);
+  --badge-rust-text: #b86b00;
 }
 
-[data-theme=high-contrast-dark] {
-  --bg-canvas: #000000;
-  --text-main: #ffffff;
-  --border-subtle: #ffffff;
-  --bg-toast: #000000;
-  --text-toast: #ffffff;
-  --btn-primary-bg: #ffff00;
-  --btn-primary-fg: #000000;
-  --focus-ring-color: #ffff00;
-  --focus-ring-width: 3px;
-}
-
-[data-theme=high-contrast-light] {
-  --bg-canvas: #ffffff;
-  --text-main: #000000;
-  --border-subtle: #000000;
-  --bg-toast: #ffffff;
-  --text-toast: #000000;
-  --btn-primary-bg: #0000cc;
-  --btn-primary-fg: #ffffff;
-  --focus-ring-color: #0000cc;
-  --focus-ring-width: 3px;
+*, *::before, *::after {
+  box-sizing: border-box;
 }
 
 html, body {
@@ -56,87 +83,1346 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--bg-canvas);
+  background: var(--bg-app);
   color: var(--text-main);
   font-family: var(--font-stack);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* --------------------------------------------------------------------------
+   App Layout
+   -------------------------------------------------------------------------- */
 #app_container {
   display: flex;
   flex-direction: column;
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
+  position: relative;
 }
 
+/* --------------------------------------------------------------------------
+   Navbar
+   -------------------------------------------------------------------------- */
+.alpha-navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-main);
+  height: 56px;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.brand-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.spikey-logo {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 2px 6px rgba(255, 126, 0, 0.4));
+  transition: transform 0.25s ease;
+}
+.brand-section:hover .spikey-logo {
+  transform: rotate(15deg) scale(1.05);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.brand-title .alpha-tag {
+  background: linear-gradient(135deg, #ff7e00, #ffb347);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 900;
+}
+
+.brand-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+}
+
+/* Mode Switcher Tabs */
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-app);
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-main);
+  gap: 2px;
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+  background: var(--bg-surface);
+  color: var(--wa-orange);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-main);
+}
+
+/* Nav Actions */
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  background: transparent;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.icon-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  border-color: var(--wa-orange);
+}
+
+.engine-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--badge-rust-bg);
+  color: var(--badge-rust-text);
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 8px #3fb950;
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+/* --------------------------------------------------------------------------
+   Main Workspace Layout
+   -------------------------------------------------------------------------- */
+.main-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Panes */
+.alpha-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-app);
+  padding: 24px 32px 64px 32px;
+  scroll-behavior: smooth;
+}
+
+.pad-pane {
+  flex: 1;
+  display: none;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-main);
+  padding: 0;
+}
+
+.canvas-pane {
+  display: none;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: var(--bg-app);
+}
+
+/* View Mode Toggles via Layout Classes */
+.layout-alpha .alpha-pane { display: flex; }
+.layout-alpha .pad-pane { display: none; }
+.layout-alpha .canvas-pane { display: none; }
+
+.layout-pad .alpha-pane { display: none; }
+.layout-pad .pad-pane { display: flex; flex: 1; border-left: none; }
+.layout-pad .canvas-pane { display: none; }
+
+.layout-split .alpha-pane { display: flex; flex: 1; border-right: 1px solid var(--border-main); }
+.layout-split .pad-pane { display: flex; flex: 1; }
+.layout-split .canvas-pane { display: none; }
+
+.layout-canvas .alpha-pane { display: none; }
+.layout-canvas .pad-pane { display: none; }
+.layout-canvas .canvas-pane { display: block; }
+
+/* --------------------------------------------------------------------------
+   Wolfram Alpha Search Section
+   -------------------------------------------------------------------------- */
+.alpha-search-wrapper {
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.alpha-hero {
+  text-align: center;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.alpha-hero h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin: 0 0 6px 0;
+  color: var(--text-main);
+}
+.alpha-hero p {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* The Iconic Search Box */
+.alpha-search-form {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border: 2px solid var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  transition: var(--transition);
+}
+
+.alpha-search-form:focus-within {
+  border-color: var(--wa-orange);
+  box-shadow: 0 0 0 4px var(--wa-orange-glow), 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.search-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--wa-orange);
+  font-size: 20px;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+
+.alpha-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-family: var(--font-stack);
+  font-size: 16px;
+  padding: 8px 12px;
+}
+
+.alpha-search-input::placeholder {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.search-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clear-input-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+.clear-input-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-main);
+}
+
+.keypad-toggle-btn {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 7px 11px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: var(--transition);
+}
+.keypad-toggle-btn:hover, .keypad-toggle-btn.active {
+  color: var(--wa-orange);
+  border-color: var(--wa-orange);
+  background: var(--wa-gold-soft);
+}
+
+.compute-btn {
+  background: linear-gradient(135deg, #ff7e00, #ff9429);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(255, 126, 0, 0.3);
+  transition: var(--transition);
+}
+.compute-btn:hover {
+  background: linear-gradient(135deg, #e06d00, #ff8419);
+  box-shadow: 0 6px 16px rgba(255, 126, 0, 0.45);
+  transform: translateY(-1px);
+}
+.compute-btn:active {
+  transform: translateY(0);
+}
+
+/* --------------------------------------------------------------------------
+   Virtual Math Keypad
+   -------------------------------------------------------------------------- */
+.math-keypad {
+  display: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  animation: slideDown 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.math-keypad.open {
+  display: block;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.keypad-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-main);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+.keypad-tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.keypad-tab-btn.active {
+  background: var(--bg-surface-elevated);
+  color: var(--wa-orange);
+  font-weight: 600;
+}
+
+.keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  gap: 6px;
+}
+
+.math-key {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  color: var(--text-main);
+  font-family: var(--font-math), var(--font-stack);
+  font-size: 15px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+  user-select: none;
+}
+.math-key:hover {
+  background: var(--wa-gold-soft);
+  color: var(--wa-orange);
+  border-color: var(--wa-orange);
+  transform: scale(1.05);
+}
+.math-key:active {
+  transform: scale(0.95);
+}
+
+/* --------------------------------------------------------------------------
+   Quick Explore Suggestion Pills
+   -------------------------------------------------------------------------- */
+.explore-pills-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.explore-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 4px;
+}
+
+.pill-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.pill-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--wa-orange);
+  border-color: var(--wa-orange);
+  transform: translateY(-1px);
+}
+
+/* --------------------------------------------------------------------------
+   Wolfram Alpha Pods Layout
+   -------------------------------------------------------------------------- */
+.alpha-results-container {
+  max-width: 900px;
+  width: 100%;
+  margin: 28px auto 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Pod Card */
+.wa-pod {
+  background: var(--bg-surface);
+  border: 1px solid var(--pod-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--pod-shadow);
+  overflow: hidden;
+  transition: var(--transition);
+  animation: fadeInPod 0.25s ease-out;
+}
+
+@keyframes fadeInPod {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.wa-pod:hover {
+  border-color: rgba(255, 126, 0, 0.4);
+}
+
+/* Pod Header */
+.wa-pod-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px;
+  background: var(--pod-header-bg);
+  border-bottom: 1px solid var(--pod-border);
+}
+
+.wa-pod-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wa-pod-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  background: var(--wa-orange);
+  border-radius: 2px;
+}
+
+.wa-pod-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pod-action-btn {
+  background: transparent;
+  border: 1px solid var(--border-main);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: var(--transition);
+}
+.pod-action-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  border-color: var(--wa-orange);
+}
+
+.pod-action-btn.send-to-pad {
+  background: var(--wa-gold-soft);
+  color: var(--wa-orange);
+  border-color: rgba(255, 126, 0, 0.3);
+  font-weight: 600;
+}
+.pod-action-btn.send-to-pad:hover {
+  background: var(--wa-orange);
+  color: #ffffff;
+}
+
+/* Pod Body */
+.wa-pod-body {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.math-render-area {
+  font-size: 18px;
+  overflow-x: auto;
+  padding: 8px 0;
+  color: var(--text-main);
+}
+
+/* KaTeX formatting overrides */
+.katex-display {
+  margin: 0 !important;
+  text-align: left !important;
+}
+
+.unicode-fallback {
+  font-family: var(--font-math), var(--font-mono);
+  font-size: 16px;
+  white-space: pre-wrap;
+  color: var(--text-main);
+}
+
+/* Pod Substeps / Pedagogical derivations */
+.subpods-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding-left: 18px;
+  border-left: 2px solid var(--border-main);
+}
+
+.subpod-item {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Pod Footer */
+.wa-pod-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 18px;
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid var(--pod-border);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* Loading State */
+.loading-pod {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-main);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  gap: 14px;
+  font-size: 14px;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border-main);
+  border-top-color: var(--wa-orange);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --------------------------------------------------------------------------
+   Symbolab Topic Ribbon & Visual Templates
+   -------------------------------------------------------------------------- */
+.symbolab-topic-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 10px 2px;
+  scrollbar-width: none;
+}
+.symbolab-topic-ribbon::-webkit-scrollbar {
+  display: none;
+}
+
+.topic-btn {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+.topic-btn:hover {
+  background: var(--wa-gold-soft);
+  color: var(--wa-orange);
+  border-color: var(--wa-orange);
+}
+.topic-btn.active {
+  background: linear-gradient(135deg, #ff7e00, #ff9429);
+  color: #ffffff;
+  border-color: var(--wa-orange);
+  box-shadow: 0 2px 8px var(--wa-orange-glow);
+}
+
+.symbolab-drawer {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: -6px;
+  margin-bottom: 8px;
+}
+.symbolab-drawer.open {
+  display: flex;
+}
+.drawer-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+.drawer-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.drawer-tag-btn {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  color: var(--text-main);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.drawer-tag-btn:hover {
+  border-color: var(--wa-orange);
+  color: var(--wa-orange);
+}
+
+/* Symbolab Step-by-Step Breakdown Accordion */
+.symbolab-steps-card {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin-top: 10px;
+}
+.symbolab-steps-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-surface-elevated);
+  cursor: pointer;
+  user-select: none;
+}
+.symbolab-steps-toggle:hover {
+  background: rgba(255, 126, 0, 0.08);
+}
+.steps-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--wa-orange);
+}
+.step-item-card {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-main);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.step-rule-pill {
+  align-self: flex-start;
+  background: var(--badge-rust-bg);
+  color: var(--wa-orange);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+.step-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.step-math {
+  font-size: 15px;
+  padding: 4px 0;
+  color: var(--text-main);
+}
+
+/* --------------------------------------------------------------------------
+   GeoGebra / Desmos Inspired Graphing Pad
+   -------------------------------------------------------------------------- */
+.desmos-pad-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+/* Left: Desmos Expression List Sidebar */
+.desmos-expr-sidebar {
+  width: 390px;
+  min-width: 320px;
+  max-width: 480px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-main);
+  overflow-y: auto;
+  padding: 16px 18px;
+  flex-shrink: 0;
+}
+
+.desmos-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-main);
+  margin-bottom: 12px;
+}
+
+.desmos-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.desmos-brand h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.desmos-pill-tag {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--desmos-blue);
+  background: rgba(45, 112, 179, 0.15);
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  align-self: flex-start;
+}
+
+.desmos-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.icon-btn.sm {
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+/* Active Scope Variables Bar */
+.pad-scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-app);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-main);
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.scope-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.scope-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.scope-chip {
+  background: var(--badge-rust-bg);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  color: var(--badge-rust-text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* Desmos Expression Cards */
+.desmos-lines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.desmos-expr-card {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  transition: var(--transition);
+}
+.desmos-expr-card:focus-within {
+  border-color: var(--desmos-blue);
+  box-shadow: 0 0 0 2px rgba(45, 112, 179, 0.25);
+}
+
+.expr-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Desmos Graph Color Icon Toggle */
+.desmos-color-indicator {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  transition: var(--transition);
+  position: relative;
+}
+.desmos-color-indicator.hidden-curve {
+  opacity: 0.3;
+  border-style: dashed;
+}
+.desmos-color-indicator::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: #ffffff;
+  border-radius: 50%;
+  opacity: 0;
+  transition: var(--transition);
+}
+.desmos-color-indicator:hover::after {
+  opacity: 0.9;
+}
+
+.expr-line-number {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  min-width: 14px;
+}
+
+.expr-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.expr-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.6;
+  transition: var(--transition);
+}
+.desmos-expr-card:hover .expr-card-actions,
+.desmos-expr-card:focus-within .expr-card-actions {
+  opacity: 1;
+}
+
+.expr-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  transition: var(--transition);
+}
+.expr-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+}
+.expr-btn.del:hover {
+  color: var(--error);
+}
+
+/* Live Math Preview Row */
+.expr-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-main);
+  margin-left: 36px;
+}
+.expr-math-display {
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+/* Desmos Continuous Parameter Slider Row */
+.desmos-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 2px 0;
+  margin-left: 36px;
+}
+
+.slider-play-btn {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  color: var(--desmos-blue);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+.slider-play-btn:hover, .slider-play-btn.playing {
+  background: var(--desmos-blue);
+  color: #ffffff;
+  border-color: var(--desmos-blue);
+}
+
+.desmos-slider-track {
+  flex: 1;
+  accent-color: var(--desmos-blue);
+  cursor: pointer;
+}
+
+.desmos-slider-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--desmos-blue);
+  min-width: 42px;
+  text-align: right;
+}
+
+/* Desmos Slider Bounds Editor */
+.slider-bounds-editor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 72px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bound-input {
+  width: 44px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 4px;
+  text-align: center;
+}
+
+/* Add Expression Button */
+.add-line-btn {
+  margin-top: 12px;
+  background: transparent;
+  border: 1px dashed var(--border-main);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: var(--transition);
+}
+.add-line-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--desmos-blue);
+  border-color: var(--desmos-blue);
+}
+
+/* --------------------------------------------------------------------------
+   Right: GeoGebra / Desmos 2D Graph Coordinate Plane Canvas
+   -------------------------------------------------------------------------- */
+.desmos-graph-pane {
+  flex: 1;
+  height: 100%;
+  position: relative;
+  background: #ffffff;
+  overflow: hidden;
+  user-select: none;
+}
+[data-theme="dark"] .desmos-graph-pane {
+  background: #0d1117;
+}
+
+canvas#desmos_graph_canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+canvas#desmos_graph_canvas:active {
+  cursor: grabbing;
+}
+
+/* Floating On-Graph Control Widget */
+.desmos-graph-controls {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 10;
+}
+
+.graph-ctrl-btn {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+.graph-ctrl-btn:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--desmos-blue);
+}
+
+/* Cursor Coordinates Badge */
+.desmos-coords-badge {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border-main);
+  color: #f0f6fc;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Point inspection tooltip */
+.desmos-point-tooltip {
+  position: absolute;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-main);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  z-index: 20;
+  transform: translate(-50%, -130%);
+}
+
+/* --------------------------------------------------------------------------
+   Canvas View
+   -------------------------------------------------------------------------- */
 canvas#urae_canvas {
   width: 100%;
   height: 100%;
-  background: var(--bg-canvas);
   display: block;
-  touch-action: none;
   outline: none;
 }
-canvas#urae_canvas:focus-visible {
-  outline: var(--focus-ring-width, 2px) solid var(--focus-ring-color, #58a6ff);
-  outline-offset: -2px;
+
+/* --------------------------------------------------------------------------
+   Modals & Drawers
+   -------------------------------------------------------------------------- */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-out;
+}
+.modal-overlay.open {
+  display: flex;
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 640px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-main);
+}
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.example-category-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--wa-orange);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.example-item-btn {
+  text-align: left;
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.example-item-btn:hover {
+  background: var(--bg-surface-elevated);
+  border-color: var(--wa-orange);
+  color: var(--wa-orange);
+}
+
+/* --------------------------------------------------------------------------
+   Toast
+   -------------------------------------------------------------------------- */
 #urae_update_toast {
   display: none;
   position: fixed;
   bottom: 20px;
   right: 20px;
   z-index: 999999;
-  background: var(--bg-toast);
-  color: var(--text-toast);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
   padding: 12px 18px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--pod-shadow);
   font-size: 13px;
   align-items: center;
   gap: 12px;
-}
-#urae_update_toast #urae_update_reload_btn {
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-fg);
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 12px;
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-#urae_update_toast #urae_update_reload_btn:hover {
-  filter: brightness(1.1);
-}
-#urae_update_toast #urae_update_dismiss_btn {
-  background: transparent;
-  color: #8b949e;
-  border: none;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 0 4px;
-  line-height: 1;
-  min-height: 32px;
-  min-width: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-#urae_update_toast #urae_update_dismiss_btn:hover {
-  color: #f0f6fc;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
 }

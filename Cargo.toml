@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/cat-core",
+    "crates/cat-bridge",
+    "crates/cat-numbers",
+    "crates/cat-anytime",
+    "crates/cat-tangent",
+    "crates/cat-egraph",
+    "crates/cat-lang",
     "crates/auto-promoters",
     "crates/algebra-core",
     "crates/algebra-engine",
@@ -17,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Liam <spodeian@proton.me>"]
 edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -40,6 +47,13 @@ match_like_matches_macro = "allow"
 
 [workspace.dependencies]
 # Internal workspace crates
+cat-core = { path = "crates/cat-core" }
+cat-bridge = { path = "crates/cat-bridge" }
+cat-numbers = { path = "crates/cat-numbers" }
+cat-anytime = { path = "crates/cat-anytime" }
+cat-tangent = { path = "crates/cat-tangent" }
+cat-egraph = { path = "crates/cat-egraph" }
+cat-lang = { path = "crates/cat-lang" }
 auto-promoters = { path = "crates/auto-promoters" }
 algebra-core = { path = "crates/algebra-core" }
 algebra-engine = { path = "crates/algebra-engine" }
@@ -58,14 +72,14 @@ eframe = { version = "0.36", default-features = false, features = ["default_font
 egui_plot = "0.37"
 winit = { version = "0.30", default-features = false }
 android-activity = { version = "0.6", default-features = false, features = ["native-activity"] }
-spodeian-tokens = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
-spodeian-telemetry = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
-spodeian-export = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^2.0.0" }
-spodeian-web-utils = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^1.1.0" }
-spodeian-ml-utils = { package = "sml-runtime", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
-sml-runtime = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
-spodeian-lake = { package = "sml-lake", git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
-sml-lake = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0", version = "^0.1.0" }
+spodeian-tokens = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-telemetry = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-export = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-web-utils = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-ui = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+spodeian-persist = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+sml-runtime = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
+sml-lake = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
 
 
 # Numerics & High-Precision CAS
@@ -84,7 +98,7 @@ parking_lot = "0.12"
 smallvec = { version = "1.13", features = ["serde"] }
 ahash = { version = "0.8", features = ["serde"] }
 mimalloc = "0.1"
-spodeian-parallel = { git = "https://github.com/Spodeian/spodeian-core", tag = "v2.0.0" }
+spodeian-parallel = { git = "https://github.com/Spodeian/spodeian-core", tag = "v3.0.0" }
 
 # Serialization & formatters
 serde = { version = "1.0", features = ["derive"] }

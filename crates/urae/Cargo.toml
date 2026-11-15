@@ -15,6 +15,7 @@ workspace = true
 algebra-core.workspace = true
 algebra-engine.workspace = true
 auto-promoters.workspace = true
+cat-numbers.workspace = true
 algebra-advanced = { workspace = true, optional = true }
 urae-cli = { workspace = true, optional = true }
 

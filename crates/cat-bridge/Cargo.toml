@@ -1,0 +1,23 @@
+[package]
+name = "cat-bridge"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Categorical Strangler-Fig Bridge (Lift ⊣ Lower) and differential verification gates"
+
+[lints]
+workspace = true
+
+[dependencies]
+cat-core = { workspace = true }
+algebra-core = { workspace = true }
+num-traits = { workspace = true }
+smallvec = { workspace = true }
+ahash = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

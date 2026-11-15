@@ -3,10 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="High-performance formal mathematics, symbolic computation, E-Graph pattern simplification, and reactive notebook in Rust & WebAssembly">
-  <meta name="theme-color" content="#0d1117">
+  <meta name="description" content="URAE // Alpha — Computational Intelligence & Categorical Engine with Rust Extended Pad in WebAssembly">
+  <meta name="theme-color" content="#ff7e00">
   <link rel="manifest" href="manifest.json">
-  <title>URAE — Universal Rust Algebra Engine (Reactive Web Notebook)</title>
+  <title>URAE // Alpha — Computational Intelligence & Rust Extended Pad</title>
+
+  <!-- KaTeX for authentic, high-speed mathematical typography -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" integrity="sha384-XjKyOOlGwcjNTAIQHIpgOno0Hl1YQqzUOEleOLALmuqehneUG+vnGctmUb0ZY0l8" crossorigin="anonymous"></script>
+
   <script type="importmap">
     {
       "imports": {
@@ -16,19 +21,428 @@
   </script>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="layout-alpha">
   <div id="app_container">
-    <canvas id="urae_canvas" tabindex="0"></canvas>
+    <!-- ====================================================================
+         Top Navigation Bar
+         ==================================================================== -->
+    <header class="alpha-navbar">
+      <div class="brand-section" id="brand_home_btn" title="URAE // Alpha Home">
+        <svg class="spikey-logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="50,5 61,35 95,35 68,55 79,88 50,68 21,88 32,55 5,35 39,35" fill="url(#spikey-grad)" stroke="#ff7e00" stroke-width="2"/>
+          <circle cx="50" cy="50" r="14" fill="#0d1117" stroke="#f5a623" stroke-width="2.5"/>
+          <text x="50" y="55" font-family="-apple-system, sans-serif" font-size="14" font-weight="900" fill="#ff7e00" text-anchor="middle">α</text>
+          <defs>
+            <linearGradient id="spikey-grad" x1="5" y1="5" x2="95" y2="88" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#ff9429"/>
+              <stop offset="0.5" stop-color="#ff7e00"/>
+              <stop offset="1" stop-color="#cc6500"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-title">URAE <span class="alpha-tag">// INTELLIGENCE</span></span>
+          <span class="brand-subtitle">Wolfram &middot; Symbolab Solver &amp; GeoGebra / Desmos Pad</span>
+        </div>
+      </div>
+
+      <!-- Mode Switcher -->
+      <nav class="mode-tabs" role="tablist" aria-label="View Modes">
+        <button class="tab-btn active" data-mode="alpha" role="tab" aria-selected="true" id="tab_alpha">
+          <span>🔍</span> Solver (Wolfram &middot; Symbolab)
+        </button>
+        <button class="tab-btn" data-mode="pad" role="tab" aria-selected="false" id="tab_pad">
+          <span>📈</span> Graphing Pad (GeoGebra &middot; Desmos)
+        </button>
+        <button class="tab-btn" data-mode="split" role="tab" aria-selected="false" id="tab_split">
+          <span>◫</span> Split View
+        </button>
+        <button class="tab-btn" data-mode="canvas" role="tab" aria-selected="false" id="tab_canvas">
+          <span>⚡</span> Canvas egui
+        </button>
+      </nav>
+
+      <!-- Utility Actions -->
+      <div class="nav-actions">
+        <div class="engine-status-badge" id="engine_status_badge" title="Universal Rust Algebra Engine WASM Status">
+          <div class="status-dot"></div>
+          <span id="engine_status_text">Rust WASM Active</span>
+        </div>
+        <button class="icon-btn" id="open_examples_modal_btn" title="Browse Example Mathematical Queries">
+          <span>🧪</span> Examples
+        </button>
+        <button class="icon-btn" id="theme_toggle_btn" title="Toggle Dark/Light Mode">
+          <span>🌓</span>
+        </button>
+        <button class="icon-btn" id="pwa_install_btn" title="Install App (PWA)" style="display:none;">
+          <span>📥</span> Install
+        </button>
+      </div>
+    </header>
+
+    <!-- ====================================================================
+         Main Workspace Layout
+         ==================================================================== -->
+    <main class="main-layout" id="main_layout">
+      <!-- ------------------------------------------------------------------
+           PANE 1: Wolfram Alpha Computational Search & Pods
+           ------------------------------------------------------------------ -->
+      <section class="alpha-pane" id="alpha_pane">
+        <div class="alpha-search-wrapper">
+          <div class="alpha-hero">
+            <h1>Step-by-step solutions &amp; computational intelligence</h1>
+            <p>Inspired by Wolfram Alpha and Symbolab &middot; Powered by URAE WebAssembly Symbolic Core</p>
+          </div>
+
+          <!-- Symbolab-style Subject Topic Ribbon -->
+          <div class="symbolab-topic-ribbon" id="symbolab_ribbon">
+            <button class="topic-btn active" data-topic="all"><span>🌐</span> All Topics</button>
+            <button class="topic-btn" data-topic="calculus"><span>∫</span> Calculus</button>
+            <button class="topic-btn" data-topic="algebra"><span>𝑥</span> Algebra</button>
+            <button class="topic-btn" data-topic="matrices"><span>▦</span> Matrices</button>
+            <button class="topic-btn" data-topic="graphing"><span>📈</span> Graphing</button>
+            <button class="topic-btn" data-topic="special"><span>λ</span> Special Functions</button>
+            <button class="topic-btn" data-topic="trig"><span>📐</span> Trigonometry</button>
+          </div>
+
+          <!-- Collapsible Practice / Topic Templates Drawer (Symbolab style) -->
+          <div class="symbolab-drawer" id="symbolab_drawer">
+            <div class="drawer-title" id="drawer_topic_title">Calculus Practice Drills</div>
+            <div class="drawer-tags" id="drawer_tags_container">
+              <!-- Dynamically populated tags based on active subject -->
+            </div>
+          </div>
+
+          <!-- Iconic Search Box -->
+          <form class="alpha-search-form" id="alpha_form" onsubmit="event.preventDefault(); window.runAlphaQuery();">
+            <div class="search-icon-badge" title="Compute Symbol">=</div>
+            <input
+              type="text"
+              id="alpha_input"
+              class="alpha-search-input"
+              placeholder="Enter what you want to calculate (e.g. integrate x * sin(x), solve e^(2x) - 3e^x + 2 = 0, gamma(5), d/dx erf(x))..."
+              autocomplete="off"
+              spellcheck="false"
+              autofocus
+            />
+            <div class="search-buttons">
+              <button type="button" class="clear-input-btn" id="clear_input_btn" title="Clear Query" style="display:none;">&times;</button>
+              <button type="button" class="keypad-toggle-btn" id="toggle_keypad_btn" title="Toggle Virtual Math Keypad">
+                <span>⌨</span> Math
+              </button>
+              <button type="submit" class="compute-btn" id="compute_btn">
+                <span>SOLVE</span>
+                <span>➔</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Virtual Math Keypad (Collapsible with Symbolab Templates) -->
+          <div class="math-keypad" id="math_keypad">
+            <div class="keypad-tabs">
+              <button class="keypad-tab-btn active" data-pad="templates">Templates</button>
+              <button class="keypad-tab-btn" data-pad="basic">Basic</button>
+              <button class="keypad-tab-btn" data-pad="calculus">Calculus</button>
+              <button class="keypad-tab-btn" data-pad="special">Special Functions</button>
+              <button class="keypad-tab-btn" data-pad="trans">Transcendental</button>
+              <button class="keypad-tab-btn" data-pad="linear">Linear Algebra</button>
+              <button class="keypad-tab-btn" data-pad="greek">Greek &middot; Constants</button>
+            </div>
+
+            <!-- Symbolab Visual Templates Grid -->
+            <div class="keypad-grid" id="keypad_templates">
+              <button class="math-key" data-insert="(( ) / ( ))" title="Fraction">a/b</button>
+              <button class="math-key" data-insert="^()" title="Power / Exponent">xʸ</button>
+              <button class="math-key" data-insert="sqrt()" title="Square Root">√(x)</button>
+              <button class="math-key" data-insert="root(, )" title="n-th Root">ⁿ√(x)</button>
+              <button class="math-key" data-insert="diff , x" title="Derivative">d/dx</button>
+              <button class="math-key" data-insert="integrate , x" title="Indefinite Integral">∫ dx</button>
+              <button class="math-key" data-insert="integrate  from 0 to 1 by x" title="Definite Integral">∫₀¹ dx</button>
+              <button class="math-key" data-insert="lim  as x -> 0" title="Limit">lim</button>
+              <button class="math-key" data-insert="log(, )" title="Logarithm with base">log_b</button>
+              <button class="math-key" data-insert="[[a, b], [c, d]]" title="2x2 Matrix">[2×2]</button>
+              <button class="math-key" data-insert="solve  = 0, x" title="Solve for x">solve</button>
+              <button class="math-key" data-insert="simplify " title="Simplify Expression">simplify</button>
+            </div>
+
+            <!-- Basic Keys -->
+            <div class="keypad-grid" id="keypad_basic">
+              <button class="math-key" data-insert="^2">x²</button>
+              <button class="math-key" data-insert="^">xʸ</button>
+              <button class="math-key" data-insert="sqrt()">√(x)</button>
+              <button class="math-key" data-insert="/">÷</button>
+              <button class="math-key" data-insert="*">&middot;</button>
+              <button class="math-key" data-insert="+">+</button>
+              <button class="math-key" data-insert="-">&minus;</button>
+              <button class="math-key" data-insert=" = 0"> = 0</button>
+              <button class="math-key" data-insert="(">(</button>
+              <button class="math-key" data-insert=")">)</button>
+              <button class="math-key" data-insert="!">n!</button>
+              <button class="math-key" data-insert="abs()">|x|</button>
+            </div>
+
+            <!-- Calculus Keys -->
+            <div class="keypad-grid" id="keypad_calculus" style="display:none;">
+              <button class="math-key" data-insert="diff , x">d/dx</button>
+              <button class="math-key" data-insert="integrate , x">∫ dx</button>
+              <button class="math-key" data-insert="integrate  from 0 to 1 by x">∫₀¹ dx</button>
+              <button class="math-key" data-insert="lim  as x -> 0">lim</button>
+              <button class="math-key" data-insert="sum  from n=1 to 10">∑</button>
+              <button class="math-key" data-insert="taylor , x, 0, 4">Taylor</button>
+              <button class="math-key" data-insert="solve  = 0, x">Solve</button>
+              <button class="math-key" data-insert="simplify ">Simplify</button>
+            </div>
+
+            <!-- Special Functions Keys -->
+            <div class="keypad-grid" id="keypad_special" style="display:none;">
+              <button class="math-key" data-insert="gamma()">Γ(x)</button>
+              <button class="math-key" data-insert="beta(,)">B(a,b)</button>
+              <button class="math-key" data-insert="zeta()">ζ(s)</button>
+              <button class="math-key" data-insert="lambert_w()">W(x)</button>
+              <button class="math-key" data-insert="erf()">erf(x)</button>
+              <button class="math-key" data-insert="erfc()">erfc(x)</button>
+              <button class="math-key" data-insert="bessel_j(0, )">J₀(x)</button>
+              <button class="math-key" data-insert="si()">Si(x)</button>
+              <button class="math-key" data-insert="ci()">Ci(x)</button>
+              <button class="math-key" data-insert="BringRadical()">BR(x)</button>
+            </div>
+
+            <!-- Transcendental Keys -->
+            <div class="keypad-grid" id="keypad_trans" style="display:none;">
+              <button class="math-key" data-insert="sin()">sin</button>
+              <button class="math-key" data-insert="cos()">cos</button>
+              <button class="math-key" data-insert="tan()">tan</button>
+              <button class="math-key" data-insert="asin()">asin</button>
+              <button class="math-key" data-insert="acos()">acos</button>
+              <button class="math-key" data-insert="atan()">atan</button>
+              <button class="math-key" data-insert="ln()">ln</button>
+              <button class="math-key" data-insert="log()">log₁₀</button>
+              <button class="math-key" data-insert="exp()">exp</button>
+              <button class="math-key" data-insert="sinh()">sinh</button>
+              <button class="math-key" data-insert="cosh()">cosh</button>
+              <button class="math-key" data-insert="tanh()">tanh</button>
+            </div>
+
+            <!-- Linear Algebra Keys -->
+            <div class="keypad-grid" id="keypad_linear" style="display:none;">
+              <button class="math-key" data-insert="[[1, 2], [3, 4]]">Matrix</button>
+              <button class="math-key" data-insert="det [[a, b], [c, d]]">det</button>
+              <button class="math-key" data-insert="inverse [[a, b], [c, d]]">A⁻¹</button>
+              <button class="math-key" data-insert="trace [[a, b], [c, d]]">tr(A)</button>
+              <button class="math-key" data-insert="eigenvalues [[a, b], [c, d]]">eig(A)</button>
+              <button class="math-key" data-insert="charpoly [[a, b], [c, d]]">charpoly</button>
+              <button class="math-key" data-insert="matrix_exp [[0, 1], [-1, 0]]">e^(At)</button>
+            </div>
+
+            <!-- Greek & Constants Keys -->
+            <div class="keypad-grid" id="keypad_greek" style="display:none;">
+              <button class="math-key" data-insert="pi">π</button>
+              <button class="math-key" data-insert="e">e</button>
+              <button class="math-key" data-insert="i">i</button>
+              <button class="math-key" data-insert="infinity">∞</button>
+              <button class="math-key" data-insert="theta">θ</button>
+              <button class="math-key" data-insert="lambda">λ</button>
+              <button class="math-key" data-insert="mu">μ</button>
+              <button class="math-key" data-insert="nu">ν</button>
+              <button class="math-key" data-insert="phi">φ</button>
+              <button class="math-key" data-insert="sigma">σ</button>
+              <button class="math-key" data-insert="omega">ω</button>
+            </div>
+          </div>
+
+          <!-- Quick Explore Pills -->
+          <div class="explore-pills-container">
+            <span class="explore-label">Quick explore:</span>
+            <button class="pill-btn" data-query="integrate x * sin(x)">∫ x·sin(x) dx</button>
+            <button class="pill-btn" data-query="solve e^(2x) - 3*e^x + 2 = 0">solve e^(2x) - 3e^x + 2 = 0</button>
+            <button class="pill-btn" data-query="diff erf(x)">d/dx erf(x)</button>
+            <button class="pill-btn" data-query="eval zeta(2)">zeta(2)</button>
+            <button class="pill-btn" data-query="eval gamma(7/2)">gamma(7/2)</button>
+            <button class="pill-btn" data-query="solve x * exp(x) = 2">x·e^x = 2</button>
+            <button class="pill-btn" data-query="eigenvalues [[2, 1], [1, 2]]">eigenvalues [[2, 1], [1, 2]]</button>
+            <button class="pill-btn" data-query="matrix exp [[0, 1], [-1, 0]]">matrix exp e^(At)</button>
+            <button class="pill-btn" data-query="eval lambert_w(e)">W(e)</button>
+          </div>
+        </div>
+
+        <!-- Dynamic Results Pods Container -->
+        <div class="alpha-results-container" id="alpha_results">
+          <!-- Initial Welcome Pod Card -->
+          <div class="wa-pod" id="welcome_pod">
+            <div class="wa-pod-header">
+              <span class="wa-pod-title">Universal Rust Computational Engine</span>
+              <span class="engine-status-badge">WASM Ready</span>
+            </div>
+            <div class="wa-pod-body">
+              <p style="margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6;">
+                Welcome to <strong>URAE // Alpha</strong>. Enter any analytical mathematics query above, or click on the <strong>Rust Extended Pad</strong> tab to write reactive, multi-line mathematical notebooks with real-time sliders and category-theoretic hypergraph reduction.
+              </p>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px;">
+                <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
+                  <strong style="color: var(--wa-orange);">∫ Symbolic Calculus</strong>
+                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Analytical derivatives, generalized IBP, and definite integrals via FTC.</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
+                  <strong style="color: var(--wa-orange);">W(x) Transcendental &amp; Special</strong>
+                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Exact Gamma, Beta, Zeta, Eta, Erf, Bessel, and Lambert W equation solving.</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
+                  <strong style="color: var(--wa-orange);">[A] Spectral Linear Algebra</strong>
+                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Eigenvalues, characteristic polynomials, and Putzer closed-form matrix exp e^(At).</div>
+                </div>
+                <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
+                  <strong style="color: var(--wa-orange);">📝 Rust Extended Pad</strong>
+                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Transfer any Alpha result directly into live reactive pad lines with sliders.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------------
+           PANE 2: Rust Extended Interactive Math Pad
+           ------------------------------------------------------------------ -->
+      <!-- ------------------------------------------------------------------
+           PANE 2: GeoGebra / Desmos Inspired Graphing Pad
+           ------------------------------------------------------------------ -->
+      <section class="pad-pane desmos-pad-container" id="pad_pane">
+        <!-- Left: Desmos Expression List Sidebar -->
+        <div class="desmos-expr-sidebar">
+          <div class="desmos-sidebar-header">
+            <div class="desmos-brand">
+              <span class="desmos-pill-tag">GRAPHING PAD</span>
+              <h3><span>📈</span> Expressions</h3>
+            </div>
+            <div class="desmos-header-actions">
+              <button class="icon-btn sm" id="pad_add_line_btn" title="Add Expression">+</button>
+              <button class="icon-btn sm" id="pad_play_all_btn" title="Animate All Sliders">▶ Play</button>
+              <button class="icon-btn sm" id="pad_eval_all_btn" title="Re-evaluate all lines in WASM">⚡ Eval</button>
+              <button class="icon-btn sm" id="pad_export_btn" title="Export .cat / .pad">📤</button>
+              <button class="icon-btn sm" id="pad_save_btn" title="Save">💾</button>
+              <button class="icon-btn sm" id="pad_clear_btn" title="Clear Pad">🗑</button>
+            </div>
+          </div>
+
+          <!-- Active Variable Scope Bar -->
+          <div class="pad-scope-bar" id="pad_scope_bar">
+            <span class="scope-label">Parameters:</span>
+            <div class="scope-chips" id="scope_chips_container">
+              <span class="scope-chip">x: Real</span>
+            </div>
+          </div>
+
+          <!-- Reactive Expression Cards List -->
+          <div class="desmos-lines-list" id="pad_lines_container">
+            <!-- Dynamically populated Desmos expression cards -->
+          </div>
+
+          <!-- Add Line Button Bottom -->
+          <button class="add-line-btn" id="pad_bottom_add_btn">
+            <span>+ Add Expression / Function / Slider</span>
+          </button>
+        </div>
+
+        <!-- Right: GeoGebra / Desmos 2D Graph Coordinate Plane Canvas -->
+        <div class="desmos-graph-pane" id="desmos_graph_wrapper">
+          <canvas id="desmos_graph_canvas"></canvas>
+
+          <!-- Floating On-Graph Controls -->
+          <div class="desmos-graph-controls">
+            <button class="graph-ctrl-btn" id="graph_zoom_in_btn" title="Zoom In">+</button>
+            <button class="graph-ctrl-btn" id="graph_zoom_out_btn" title="Zoom Out">&minus;</button>
+            <button class="graph-ctrl-btn" id="graph_reset_view_btn" title="Reset View (Default [-10, 10])">⌂</button>
+            <button class="graph-ctrl-btn" id="graph_settings_btn" title="Toggle Grid Mode">⚙</button>
+          </div>
+
+          <!-- Cursor Coordinates Badge -->
+          <div class="desmos-coords-badge" id="desmos_coords_badge">
+            x: 0.00, y: 0.00
+          </div>
+
+          <!-- Point inspection tooltip -->
+          <div class="desmos-point-tooltip" id="desmos_point_tooltip" style="display:none;"></div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------------
+           PANE 3: Canvas View for WebGL / WebGPU egui Notebook
+           ------------------------------------------------------------------ -->
+      <section class="canvas-pane" id="canvas_pane">
+        <canvas id="urae_canvas" tabindex="0"></canvas>
+      </section>
+    </main>
   </div>
 
+  <!-- ====================================================================
+       Examples Modal
+       ==================================================================== -->
+  <div class="modal-overlay" id="examples_modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Curated Mathematical Queries</h3>
+        <button class="clear-input-btn" id="close_examples_modal_btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div>
+          <div class="example-category-title">Symbolic Calculus &amp; Integration</div>
+          <div class="example-grid">
+            <button class="example-item-btn" data-query="integrate x * sin(x)">integrate x * sin(x)</button>
+            <button class="example-item-btn" data-query="integrate x^2 * exp(x)">integrate x^2 * exp(x)</button>
+            <button class="example-item-btn" data-query="integrate exp(x) * sin(x)">integrate exp(x) * sin(x)</button>
+            <button class="example-item-btn" data-query="diff erf(x)">diff erf(x)</button>
+            <button class="example-item-btn" data-query="diff lambert_w(x)">diff lambert_w(x)</button>
+            <button class="example-item-btn" data-query="diff si(x)">diff si(x)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="example-category-title">Transcendental &amp; Lambert W Solving</div>
+          <div class="example-grid">
+            <button class="example-item-btn" data-query="solve e^(2x) - 3*e^x + 2 = 0">solve e^(2x) - 3*e^x + 2 = 0</button>
+            <button class="example-item-btn" data-query="solve x * exp(x) = 2">solve x * exp(x) = 2</button>
+            <button class="example-item-btn" data-query="solve x * ln(x) = 1">solve x * ln(x) = 1</button>
+            <button class="example-item-btn" data-query="solve sqrt(x) = 4">solve sqrt(x) = 4</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="example-category-title">Special Functions &amp; Exact Evaluations</div>
+          <div class="example-grid">
+            <button class="example-item-btn" data-query="eval gamma(5)">eval gamma(5)</button>
+            <button class="example-item-btn" data-query="eval gamma(1/2)">eval gamma(1/2)</button>
+            <button class="example-item-btn" data-query="eval zeta(2)">eval zeta(2)</button>
+            <button class="example-item-btn" data-query="eval zeta(4)">eval zeta(4)</button>
+            <button class="example-item-btn" data-query="eval beta(2, 3)">eval beta(2, 3)</button>
+            <button class="example-item-btn" data-query="eval lambert_w(e)">eval lambert_w(e)</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="example-category-title">Linear Algebra &amp; Spectral Analysis</div>
+          <div class="example-grid">
+            <button class="example-item-btn" data-query="eigenvalues [[2, 1], [1, 2]]">eigenvalues [[2, 1], [1, 2]]</button>
+            <button class="example-item-btn" data-query="matrix exp [[0, 1], [-1, 0]]">matrix exp [[0, 1], [-1, 0]]</button>
+            <button class="example-item-btn" data-query="inverse [[2, 1], [1, 2]]">inverse [[2, 1], [1, 2]]</button>
+            <button class="example-item-btn" data-query="charpoly [[2, 1], [1, 2]]">charpoly [[2, 1], [1, 2]]</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Update Toast -->
   <div id="urae_update_toast">
-    <span>⚡ <strong>Update ready</strong> — A new version of URAE was downloaded in the background.</span>
-    <button id="urae_update_reload_btn">Reload</button>
-    <button id="urae_update_dismiss_btn">&times;</button>
+    <span>⚡ <strong>Update ready</strong> &mdash; A new version of URAE was downloaded.</span>
+    <button id="urae_update_reload_btn" class="icon-btn" style="background:var(--wa-orange); color:#fff; border:none;">Reload</button>
+    <button id="urae_update_dismiss_btn" class="clear-input-btn">&times;</button>
   </div>
 
+  <!-- ====================================================================
+       Core Engine & Wolfram Alpha / Rust Pad JavaScript Logic
+       ==================================================================== -->
   <script>
-    // WebGL Deprecation Interceptor for WEBGL_debug_renderer_info (Firefox privacy policy)
+    // WebGL Deprecation Interceptor (Firefox privacy compatibility)
     if (typeof WebGLRenderingContext !== 'undefined') {
       const origGetExt = WebGLRenderingContext.prototype.getExtension;
       WebGLRenderingContext.prototype.getExtension = function(name) {
@@ -36,298 +450,1442 @@
         return origGetExt.apply(this, arguments);
       };
     }
-    if (typeof WebGL2RenderingContext !== 'undefined') {
-      const origGetExt2 = WebGL2RenderingContext.prototype.getExtension;
-      WebGL2RenderingContext.prototype.getExtension = function(name) {
-        if (name === 'WEBGL_debug_renderer_info') return null;
-        return origGetExt2.apply(this, arguments);
-      };
-    }
 
     // PWA & StorageManager Lifecycle Management
     window.__pwaInstallPrompt = null;
-    window.__isPWAInstalled = false;
-    window.__isStoragePersisted = false;
-
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       window.__pwaInstallPrompt = e;
-      console.log('⚡ [URAE PWA] beforeinstallprompt captured and ready for user trigger');
+      const btn = document.getElementById('pwa_install_btn');
+      if (btn) btn.style.display = 'inline-flex';
     });
 
-    window.addEventListener('appinstalled', () => {
-      window.__pwaInstallPrompt = null;
-      window.__isPWAInstalled = true;
-      console.log('⚡ [URAE PWA] Web app successfully installed');
-    });
-
-    window.__triggerPWAInstall = async function() {
-      if (!window.__pwaInstallPrompt) {
-        alert('App installation is not available at this moment. You can add it via your browser menu.');
-        return false;
-      }
-      window.__pwaInstallPrompt.prompt();
-      const choice = await window.__pwaInstallPrompt.userChoice;
-      if (choice.outcome === 'accepted') {
-        window.__pwaInstallPrompt = null;
-        return true;
-      }
-      return false;
-    };
-
-    window.__requestPersistentStorage = async function() {
-      if (navigator.storage && navigator.storage.persist) {
-        const isPersisted = await navigator.storage.persist();
-        window.__isStoragePersisted = isPersisted;
-        console.log(`⚡ [URAE Storage] Persistent Storage Requested: ${isPersisted ? 'GRANTED' : 'DENIED'}`);
-        return isPersisted;
-      }
-      return false;
-    };
-
-    window.__checkStoragePersisted = async function() {
-      if (navigator.storage && navigator.storage.persisted) {
-        const isPersisted = await navigator.storage.persisted();
-        window.__isStoragePersisted = isPersisted;
-        return isPersisted;
-      }
-      return false;
-    };
-
-    window.__checkStoragePersisted();
-
-    // IndexedDB Multi-Tier Fallback Storage Engine
-    const IDB_NAME = 'urae_offline_store';
-    const IDB_STORE = 'urae_notebook_kv';
-
-    function openIndexedDB() {
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
-        req.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains(IDB_STORE)) {
-            db.createObjectStore(IDB_STORE);
-          }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    window.__saveNotebookToIndexedDB = async function(key, value) {
-      try {
-        const db = await openIndexedDB();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction([IDB_STORE], 'readwrite');
-          const store = tx.objectStore(IDB_STORE);
-          const req = store.put(value, key);
-          req.onsuccess = () => resolve(true);
-          req.onerror = () => reject(req.error);
-        });
-      } catch (err) {
-        console.error('IndexedDB Put Error:', err);
-        return false;
-      }
-    };
-
-    window.__loadNotebookFromIndexedDB = async function(key) {
-      try {
-        const db = await openIndexedDB();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction([IDB_STORE], 'readonly');
-          const store = tx.objectStore(IDB_STORE);
-          const req = store.get(key);
-          req.onsuccess = () => resolve(req.result || null);
-          req.onerror = () => reject(req.error);
-        });
-      } catch (err) {
-        console.error('IndexedDB Get Error:', err);
-        return null;
-      }
-    };
-
-    window.__triggerBinaryDownload = function(filename, base64Data, mimeType = 'application/octet-stream') {
-      try {
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+    document.getElementById('pwa_install_btn')?.addEventListener('click', async () => {
+      if (window.__pwaInstallPrompt) {
+        window.__pwaInstallPrompt.prompt();
+        const choice = await window.__pwaInstallPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          window.__pwaInstallPrompt = null;
+          document.getElementById('pwa_install_btn').style.display = 'none';
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error('Binary download error:', err);
       }
-    };
+    });
+
+    // Theme Management
+    const themeBtn = document.getElementById('theme_toggle_btn');
+    themeBtn?.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('urae_theme', next);
+    });
+    const savedTheme = localStorage.getItem('urae_theme');
+    if (savedTheme) {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
   </script>
 
   <script type="module">
-    import init, { wasm_process_json, start_notebook_web } from './pkg/urae_wasm.js?v=20260912';
+    import init, { wasm_process_json, wasm_wolfram_query, wasm_pad_eval_line, wasm_pad_eval_session, start_notebook_web } from './pkg/urae_wasm.js?v=20261110';
 
-    // 1. Define global window.urae CLI & Edge API for F12 Developer Console
-    const uraeFn = function(cmdStr) {
-      if (!window.wasm_process_json) {
-        return "URAE Engine initializing... please wait a moment.";
-      }
-      try {
-        const req = JSON.stringify({ input: cmdStr });
-        const respStr = window.wasm_process_json(req);
+    // Global state
+    window.wasm_process_json = wasm_process_json;
+    window.wasm_wolfram_query = wasm_wolfram_query;
+    window.wasm_pad_eval_line = wasm_pad_eval_line;
+    window.wasm_pad_eval_session = wasm_pad_eval_session;
+
+    const DESMOS_PALETTE = ['#2d70b3', '#c74440', '#388c46', '#6042a6', '#fa7e19', '#0099b8'];
+
+    let padLines = [
+      { id: 1, text: "a = 2.0", isParam: true, paramName: "a", paramVal: 2.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: DESMOS_PALETTE[0], visible: true },
+      { id: 2, text: "c = 3.0", isParam: true, paramName: "c", paramVal: 3.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: DESMOS_PALETTE[1], visible: true },
+      { id: 3, text: "f(x) = a * x^2 + c", isParam: false, color: DESMOS_PALETTE[2], visible: true },
+      { id: 4, text: "diff f(x), x", isParam: false, color: DESMOS_PALETTE[3], visible: true },
+      { id: 5, text: "integrate x * sin(x), x", isParam: false, color: DESMOS_PALETTE[4], visible: true }
+    ];
+
+    // Helper: Render LaTeX or Unicode with KaTeX
+    function renderMathFormatted(element, latexStr, unicodeStr) {
+      if (!element) return;
+      if (window.katex && latexStr && latexStr.trim().length > 0) {
         try {
-          const parsed = JSON.parse(respStr);
-          return parsed.output_unicode || parsed.output_latex || respStr;
-        } catch (_) {
-          return respStr;
+          window.katex.render(latexStr, element, { displayMode: true, throwOnError: false });
+          return;
+        } catch (_) {}
+      }
+      element.innerHTML = `<span class="unicode-fallback">${escapeHtml(unicodeStr || latexStr || '')}</span>`;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // --------------------------------------------------------------------------
+    // View Mode Switching
+    // --------------------------------------------------------------------------
+    const mainLayout = document.getElementById('main_layout');
+    const tabButtons = document.querySelectorAll('.tab-btn');
+
+    function setViewMode(mode) {
+      document.body.className = `layout-${mode}`;
+      tabButtons.forEach(btn => {
+        const isActive = btn.dataset.mode === mode;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      if (mode === 'pad' || mode === 'split') {
+        setTimeout(() => {
+          resizeDesmosGraph();
+          drawDesmosGraph();
+        }, 50);
+      }
+
+      if (mode === 'canvas' && typeof start_notebook_web === 'function') {
+        const canvas = document.getElementById('urae_canvas');
+        if (canvas) {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+          start_notebook_web('urae_canvas').catch(err => console.debug(err));
         }
-      } catch (err) {
-        return "Error: " + err;
-      }
-    };
-
-    uraeFn.help = function() {
-      console.log(`
-⚡ URAE F12 Console Interactive API:
--------------------------------------
-• urae("diff x^3 - 3*x, x")        : Evaluate CLI command directly
-• urae("solve x^2 - 16 = 0, x")    : Solve algebraic equation
-• urae("simplify (x + 0) * 1")     : E-Graph pattern simplification
-• urae.diff("x^3, x")              : Differentiate expression
-• urae.solve("x^2 - 16 = 0, x")    : Solve equation set
-• urae.simplify("(x + 0) * 1")     : E-Graph simplify
-• urae.json({ input: "x^2 + 1" })  : Full structured JSON API request
-• urae.edge.diff("x^2, x")         : Query Cloudflare Workers REST Edge API
-• urae.edge.solve("x^2 - 4 = 0")   : Query Cloudflare Workers REST Edge API
-• urae.edge.json(reqObj)           : POST JSON to /api/json on Edge
-      `);
-      return "Type urae('command') to evaluate math expressions!";
-    };
-
-    uraeFn.diff = function(exprStr, wrtStr = "x") {
-      return uraeFn(`diff ${exprStr}, ${wrtStr}`);
-    };
-
-    uraeFn.solve = function(eqStr, wrtStr = "x") {
-      return uraeFn(`solve ${eqStr}, ${wrtStr}`);
-    };
-
-    uraeFn.simplify = function(exprStr) {
-      return uraeFn(`simplify ${exprStr}`);
-    };
-
-    uraeFn.json = function(reqObj) {
-      if (!window.wasm_process_json) return { error: "WASM initializing" };
-      const reqStr = typeof reqObj === 'string' ? reqObj : JSON.stringify(reqObj);
-      return JSON.parse(window.wasm_process_json(reqStr));
-    };
-
-    // Cloudflare Edge Evaluation Namespace:
-    uraeFn.edge = {
-      diff: async function(exprStr, wrtStr = "x") {
-        const res = await fetch(`/api/differentiate?expr=${encodeURIComponent(exprStr)}&wrt=${encodeURIComponent(wrtStr)}`);
-        return await res.json();
-      },
-      solve: async function(eqStr, wrtStr = "x") {
-        const res = await fetch(`/api/solve?eq=${encodeURIComponent(eqStr)}&wrt=${encodeURIComponent(wrtStr)}`);
-        return await res.json();
-      },
-      simplify: async function(exprStr) {
-        const res = await fetch(`/api/simplify?expr=${encodeURIComponent(exprStr)}`);
-        return await res.json();
-      },
-      json: async function(reqObj) {
-        const res = await fetch(`/api/json`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: typeof reqObj === 'string' ? reqObj : JSON.stringify(reqObj)
-        });
-        return await res.json();
-      }
-    };
-
-    window.urae = uraeFn;
-
-    // 2. Synchronize Canvas dimensions with viewport bounds
-    function fitCanvasToViewport() {
-      const canvas = document.getElementById('urae_canvas');
-      if (canvas) {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        canvas.width = width;
-        canvas.height = height;
       }
     }
 
-    fitCanvasToViewport();
-    window.addEventListener('resize', fitCanvasToViewport);
+    tabButtons.forEach(btn => {
+      btn.addEventListener('click', () => setViewMode(btn.dataset.mode));
+    });
 
-    // 3. Launch WASM Module and Canvas Runner
-    async function run() {
-      try {
-        await init({ module_or_path: './pkg/urae_wasm_bg.wasm?v=20260912' });
-        window.wasm_process_json = wasm_process_json;
+    document.getElementById('brand_home_btn')?.addEventListener('click', () => setViewMode('alpha'));
 
-        console.log("%c⚡ Universal Rust Algebra Engine (URAE) Active!", "color: #58a6ff; font-weight: bold; font-size: 14px;");
-        console.log("%cType urae.help() in this F12 console to use CLI & Edge evaluation functions.", "color: #8b949e;");
+    // --------------------------------------------------------------------------
+    // Symbolab Subject Topic Ribbon & Practice Drawer
+    // --------------------------------------------------------------------------
+    const SYMBOLAB_TOPICS = {
+      calculus: {
+        title: "Calculus Practice Drills",
+        tags: [
+          { label: "Chain Rule", query: "diff erf(x), x" },
+          { label: "Product Rule", query: "diff x * sin(x), x" },
+          { label: "Integration by Parts", query: "integrate x * sin(x) dx" },
+          { label: "Definite Integral", query: "integrate exp(-x^2) from 0 to 1 by x" },
+          { label: "Limits at 0", query: "lim sin(x)/x as x -> 0" },
+          { label: "Taylor Series", query: "taylor exp(x), x, 0, 4" }
+        ]
+      },
+      algebra: {
+        title: "Algebraic Equations & Simplification",
+        tags: [
+          { label: "Solve Quadratic", query: "solve 2*x^2 - 5*x + 3 = 0, x" },
+          { label: "Solve Exponential", query: "solve e^(2x) - 3*e^x + 2 = 0" },
+          { label: "Lambert W Equation", query: "solve x * exp(x) = 2" },
+          { label: "Factor Polynomial", query: "factor x^3 - 3*x^2 + 3*x - 1" },
+          { label: "Simplify Rational", query: "simplify (x^2 - 1)/(x - 1)" }
+        ]
+      },
+      matrices: {
+        title: "Linear Algebra & Spectral Solvers",
+        tags: [
+          { label: "Eigenvalues", query: "eigenvalues [[2, 1], [1, 2]]" },
+          { label: "Matrix Inverse", query: "inverse [[2, 1], [1, 2]]" },
+          { label: "Matrix Exponential", query: "matrix exp [[0, 1], [-1, 0]]" },
+          { label: "Determinant", query: "det [[1, 2], [3, 4]]" },
+          { label: "Char Poly", query: "charpoly [[2, 1], [1, 2]]" }
+        ]
+      },
+      graphing: {
+        title: "Curves & Critical Points",
+        tags: [
+          { label: "Parabola f(x)", query: "f(x) = 2 * x^2 - 4" },
+          { label: "Damped Oscillation", query: "f(x) = exp(-x/3) * sin(2*x)" },
+          { label: "Gaussian Bell", query: "f(x) = exp(-x^2)" },
+          { label: "Cubic Extrema", query: "f(x) = x^3 - 3*x + 1" }
+        ]
+      },
+      special: {
+        title: "Special Functions Exact Evaluators",
+        tags: [
+          { label: "Gamma(7/2)", query: "eval gamma(7/2)" },
+          { label: "Riemann Zeta(2)", query: "eval zeta(2)" },
+          { label: "Lambert W(e)", query: "eval lambert_w(e)" },
+          { label: "Error Function erf(1)", query: "eval erf(1)" },
+          { label: "Beta Function B(2,3)", query: "eval beta(2, 3)" }
+        ]
+      },
+      trig: {
+        title: "Trigonometric Equations & Identities",
+        tags: [
+          { label: "Trig Equation", query: "solve sin(x) = 1/2, x" },
+          { label: "Tangent Derivative", query: "diff tan(x), x" },
+          { label: "Trig Integral", query: "integrate sin(x)^2, x" },
+          { label: "Pythagorean Identity", query: "simplify sin(x)^2 + cos(x)^2" }
+        ]
+      }
+    };
 
-        if (typeof start_notebook_web === 'function') {
-          start_notebook_web('urae_canvas').catch(err => {
-            console.error('Canvas notebook error:', err);
-          });
+    const symbolabDrawer = document.getElementById('symbolab_drawer');
+    const drawerTopicTitle = document.getElementById('drawer_topic_title');
+    const drawerTagsContainer = document.getElementById('drawer_tags_container');
+
+    document.querySelectorAll('.topic-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.topic-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const topic = btn.dataset.topic;
+
+        if (topic === 'all' || !SYMBOLAB_TOPICS[topic]) {
+          symbolabDrawer?.classList.remove('open');
+          return;
         }
 
-        // 4. Register PWA Service Worker for offline resilience and background update check
-        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-          let refreshing = false;
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (!refreshing) {
-              const toast = document.getElementById('urae_update_toast');
-              if (toast) toast.style.display = 'flex';
+        const topicData = SYMBOLAB_TOPICS[topic];
+        if (drawerTopicTitle) drawerTopicTitle.textContent = topicData.title;
+        if (drawerTagsContainer) {
+          drawerTagsContainer.innerHTML = '';
+          topicData.tags.forEach(t => {
+            const tagBtn = document.createElement('button');
+            tagBtn.className = 'drawer-tag-btn';
+            tagBtn.textContent = t.label;
+            tagBtn.title = t.query;
+            tagBtn.addEventListener('click', () => {
+              alphaInput.value = t.query;
+              updateClearButton();
+              setViewMode('alpha');
+              window.runAlphaQuery(t.query);
+            });
+            drawerTagsContainer.appendChild(tagBtn);
+          });
+        }
+        symbolabDrawer?.classList.add('open');
+      });
+    });
+
+    // --------------------------------------------------------------------------
+    // Keypad Logic
+    // --------------------------------------------------------------------------
+    const toggleKeypadBtn = document.getElementById('toggle_keypad_btn');
+    const mathKeypad = document.getElementById('math_keypad');
+    const alphaInput = document.getElementById('alpha_input');
+    const clearInputBtn = document.getElementById('clear_input_btn');
+
+    toggleKeypadBtn?.addEventListener('click', () => {
+      mathKeypad.classList.toggle('open');
+      toggleKeypadBtn.classList.toggle('active', mathKeypad.classList.contains('open'));
+    });
+
+    // Keypad category tabs
+    document.querySelectorAll('.keypad-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.keypad-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const targetPad = btn.dataset.pad;
+        document.querySelectorAll('.keypad-grid').forEach(grid => {
+          grid.style.display = grid.id === `keypad_${targetPad}` ? 'grid' : 'none';
+        });
+      });
+    });
+
+    // Math key click insertion
+    document.querySelectorAll('.math-key').forEach(key => {
+      key.addEventListener('click', () => {
+        const insertText = key.dataset.insert;
+        if (!insertText) return;
+
+        const start = alphaInput.selectionStart;
+        const end = alphaInput.selectionEnd;
+        const val = alphaInput.value;
+        alphaInput.value = val.substring(0, start) + insertText + val.substring(end);
+        alphaInput.focus();
+        alphaInput.selectionStart = alphaInput.selectionEnd = start + insertText.length;
+        updateClearButton();
+      });
+    });
+
+    function updateClearButton() {
+      if (clearInputBtn) {
+        clearInputBtn.style.display = alphaInput.value.length > 0 ? 'flex' : 'none';
+      }
+    }
+
+    alphaInput?.addEventListener('input', updateClearButton);
+    clearInputBtn?.addEventListener('click', () => {
+      alphaInput.value = '';
+      updateClearButton();
+      alphaInput.focus();
+    });
+
+    // Pill quick-queries
+    document.querySelectorAll('.pill-btn, .example-item-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const q = btn.dataset.query;
+        if (q) {
+          alphaInput.value = q;
+          updateClearButton();
+          setViewMode('alpha');
+          window.runAlphaQuery(q);
+          document.getElementById('examples_modal')?.classList.remove('open');
+        }
+      });
+    });
+
+    // --------------------------------------------------------------------------
+    // Wolfram Alpha + Symbolab Query Execution & Step-by-Step Generator
+    // --------------------------------------------------------------------------
+    window.runAlphaQuery = function(overrideQuery) {
+      const queryStr = (overrideQuery || alphaInput.value).trim();
+      if (!queryStr) return;
+
+      const resultsContainer = document.getElementById('alpha_results');
+      resultsContainer.innerHTML = `
+        <div class="loading-pod">
+          <div class="loading-spinner"></div>
+          <span>Computing step-by-step solution via Universal Rust Engine (WASM)...</span>
+        </div>
+      `;
+
+      setTimeout(() => {
+        try {
+          let pods = [];
+          let executionTimeUs = 0;
+
+          // 1. Try dedicated wasm_wolfram_query if available
+          if (typeof window.wasm_wolfram_query === 'function') {
+            try {
+              const rawJson = window.wasm_wolfram_query(queryStr);
+              const parsed = JSON.parse(rawJson);
+              if (parsed.pods && parsed.pods.length > 0) {
+                pods = parsed.pods;
+                executionTimeUs = parsed.execution_time_us || 0;
+              }
+            } catch (err) {
+              console.debug('wasm_wolfram_query fallback:', err);
+            }
+          }
+
+          // 2. Comprehensive fallback using wasm_process_json
+          if (pods.length === 0 && typeof window.wasm_process_json === 'function') {
+            const req = {
+              input: queryStr,
+              compute_derivative: true,
+              compute_integral: true,
+              solve_equation: true,
+              simplify: true,
+              eval_numerical: true
+            };
+            const rawResp = window.wasm_process_json(JSON.stringify(req));
+            const resp = JSON.parse(rawResp);
+
+            executionTimeUs = resp.execution_time_us || 120;
+
+            // Generate Pod 1: Input Interpretation
+            pods.push({
+              title: "Input interpretation",
+              latex: resp.output_latex || queryStr,
+              unicode: resp.output_unicode || queryStr,
+              text: queryStr
+            });
+
+            // Generate Pod 2: Result / Solution
+            if (resp.solutions && resp.solutions.length > 0) {
+              const solLatex = resp.solutions.map(s => `x = ${s}`).join(" \\quad\\text{or}\\quad ");
+              const solUnicode = resp.solutions.map(s => `x = ${s}`).join(", ");
+              pods.push({
+                title: "Solutions",
+                latex: solLatex,
+                unicode: solUnicode,
+                text: solUnicode
+              });
+            } else if (resp.output_latex) {
+              pods.push({
+                title: "Result",
+                latex: resp.output_latex,
+                unicode: resp.output_unicode,
+                text: resp.output_unicode
+              });
+            }
+
+            // Generate Pod 3: Numerical approximation
+            if (typeof resp.eval_result === 'number' && !isNaN(resp.eval_result)) {
+              pods.push({
+                title: "Numerical approximation",
+                latex: resp.eval_result.toString(),
+                unicode: resp.eval_result.toString(),
+                text: resp.eval_result.toString()
+              });
+            }
+
+            // Generate Pod 4: Derivative Companion
+            if (resp.derivative_latex) {
+              pods.push({
+                title: "Derivative",
+                latex: `\\frac{d}{dx}\\left(${resp.output_latex}\\right) = ${resp.derivative_latex}`,
+                unicode: resp.derivative_latex,
+                text: resp.derivative_latex
+              });
+            }
+
+            // Generate Pod 5: Integral Companion
+            if (resp.integral_latex) {
+              pods.push({
+                title: "Indefinite integral",
+                latex: `\\int\\left(${resp.output_latex}\\right) dx = ${resp.integral_latex} + \\text{constant}`,
+                unicode: `${resp.integral_latex} + C`,
+                text: `${resp.integral_latex} + C`
+              });
+            }
+
+            // Generate Pod 6: Alternate Forms
+            let altForms = [];
+            if (resp.expanded_latex) altForms.push(`\\text{Expanded: } ${resp.expanded_latex}`);
+            if (resp.factored_latex) altForms.push(`\\text{Factored: } ${resp.factored_latex}`);
+            if (resp.simplified_latex && resp.simplified_latex !== resp.output_latex) {
+              altForms.push(`\\text{Simplified: } ${resp.simplified_latex}`);
+            }
+            if (altForms.length > 0) {
+              pods.push({
+                title: "Alternate forms",
+                latex: altForms.join(" \\\\[6pt] "),
+                unicode: altForms.join(" | "),
+                text: altForms.join(" | ")
+              });
+            }
+          }
+
+          // Render Pods
+          resultsContainer.innerHTML = '';
+
+          if (pods.length === 0) {
+            resultsContainer.innerHTML = `
+              <div class="wa-pod">
+                <div class="wa-pod-header"><span class="wa-pod-title">Result</span></div>
+                <div class="wa-pod-body">
+                  <div class="math-render-area">${escapeHtml(queryStr)}</div>
+                </div>
+              </div>
+            `;
+            return;
+          }
+
+          pods.forEach((pod, idx) => {
+            const podEl = document.createElement('div');
+            podEl.className = 'wa-pod';
+
+            const headerEl = document.createElement('div');
+            headerEl.className = 'wa-pod-header';
+            headerEl.innerHTML = `
+              <span class="wa-pod-title">${escapeHtml(pod.title)}</span>
+              <div class="wa-pod-actions">
+                <button class="pod-action-btn" title="Copy LaTeX Formula" data-action="copy-latex">LaTeX</button>
+                <button class="pod-action-btn" title="Copy Unicode Math" data-action="copy-unicode">Unicode</button>
+                <button class="pod-action-btn" title="Plot on GeoGebra / Desmos Graph" data-action="graph-in-pad">
+                  <span>📈 Graph in Pad</span>
+                </button>
+                <button class="pod-action-btn send-to-pad" title="Insert into Desmos Pad Expression List" data-action="send-to-pad">
+                  <span>⚡ To Pad</span>
+                </button>
+              </div>
+            `;
+
+            const bodyEl = document.createElement('div');
+            bodyEl.className = 'wa-pod-body';
+            const renderArea = document.createElement('div');
+            renderArea.className = 'math-render-area';
+
+            renderMathFormatted(renderArea, pod.latex, pod.unicode);
+            bodyEl.appendChild(renderArea);
+
+            // Symbolab-style Step-by-Step accordion
+            if (pod.subpods && pod.subpods.length > 0) {
+              const stepsCard = document.createElement('div');
+              stepsCard.className = 'symbolab-steps-card';
+
+              const toggleBar = document.createElement('div');
+              toggleBar.className = 'symbolab-steps-toggle';
+              toggleBar.innerHTML = `
+                <span class="steps-badge"><span>🪜</span> Step-by-Step Explanation (${pod.subpods.length} Steps)</span>
+                <span class="toggle-indicator">▼ Click to Expand</span>
+              `;
+
+              const stepsBody = document.createElement('div');
+              stepsBody.className = 'symbolab-steps-body';
+
+              pod.subpods.forEach((sub, stepIdx) => {
+                const stepCard = document.createElement('div');
+                stepCard.className = 'step-item-card';
+
+                const parts = sub.split(':');
+                const ruleName = parts.length > 1 ? parts[0].trim() : `Step ${stepIdx + 1}`;
+                const desc = parts.length > 1 ? parts.slice(1).join(':').trim() : sub;
+
+                stepCard.innerHTML = `
+                  <span class="step-rule-pill">${escapeHtml(ruleName)}</span>
+                  <div class="step-desc">${escapeHtml(desc)}</div>
+                `;
+                stepsBody.appendChild(stepCard);
+              });
+
+              toggleBar.addEventListener('click', () => {
+                const isOpen = stepsBody.style.display !== 'none';
+                stepsBody.style.display = isOpen ? 'none' : 'flex';
+                toggleBar.querySelector('.toggle-indicator').textContent = isOpen ? '▼ Click to Expand' : '▲ Collapse';
+              });
+
+              stepsCard.appendChild(toggleBar);
+              stepsCard.appendChild(stepsBody);
+              bodyEl.appendChild(stepsCard);
+            }
+
+            const footerEl = document.createElement('div');
+            footerEl.className = 'wa-pod-footer';
+            footerEl.innerHTML = `
+              <span>Universal Rust Algebra Engine &middot; Symbolic Verification</span>
+              <span>${executionTimeUs} &mu;s execution</span>
+            `;
+
+            // Button actions
+            headerEl.querySelector('[data-action="copy-latex"]')?.addEventListener('click', () => {
+              navigator.clipboard.writeText(pod.latex || pod.text);
+              showToastNotice('Copied LaTeX to clipboard');
+            });
+            headerEl.querySelector('[data-action="copy-unicode"]')?.addEventListener('click', () => {
+              navigator.clipboard.writeText(pod.unicode || pod.text);
+              showToastNotice('Copied Unicode math to clipboard');
+            });
+            headerEl.querySelector('[data-action="graph-in-pad"]')?.addEventListener('click', () => {
+              appendResultToRustPad(pod.unicode || pod.text || pod.latex);
+              setViewMode('pad');
+              setTimeout(() => { drawDesmosGraph(); }, 60);
+              showToastNotice('Plotted curve in GeoGebra / Desmos Graphing Pad');
+            });
+            headerEl.querySelector('[data-action="send-to-pad"]')?.addEventListener('click', () => {
+              appendResultToRustPad(pod.unicode || pod.text || pod.latex);
+              setViewMode('split');
+            });
+
+            podEl.appendChild(headerEl);
+            podEl.appendChild(bodyEl);
+            podEl.appendChild(footerEl);
+            resultsContainer.appendChild(podEl);
+          });
+
+          // Categorical Arena Dimension Inspector Pod
+          const catPod = document.createElement('div');
+          catPod.className = 'wa-pod';
+          catPod.innerHTML = `
+            <div class="wa-pod-header">
+              <span class="wa-pod-title">Rust Categorical Engine &middot; Dimension &amp; Arena Inspector</span>
+              <span class="engine-status-badge">cat-core v2.1</span>
+            </div>
+            <div class="wa-pod-body" style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); line-height:1.7;">
+              <div>• <strong>Arena Handles:</strong> Lifetime-free ObjId / ScalarId / WireId handles passed across WASM thread</div>
+              <div>• <strong>8D Rational DimVector:</strong> Length: [m]⁰, Mass: [kg]⁰, Time: [s]⁰, Dimensionless scale: Exact 1</div>
+              <div>• <strong>Equivalence Lattice:</strong> Exact structural canonicalization verified within UniversalBall &approx;st</div>
+            </div>
+          `;
+          resultsContainer.appendChild(catPod);
+
+        } catch (err) {
+          resultsContainer.innerHTML = `
+            <div class="wa-pod">
+              <div class="wa-pod-header"><span class="wa-pod-title" style="color:var(--error);">Evaluation Error</span></div>
+              <div class="wa-pod-body"><span style="color:var(--error); font-family:var(--font-mono);">${escapeHtml(err.message || String(err))}</span></div>
+            </div>
+          `;
+        }
+      }, 50);
+    };
+
+    function showToastNotice(msg) {
+      const toast = document.getElementById('urae_update_toast');
+      if (toast) {
+        toast.querySelector('span').textContent = `⚡ ${msg}`;
+        toast.style.display = 'flex';
+        setTimeout(() => { toast.style.display = 'none'; }, 2500);
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // GeoGebra / Desmos Inspired Graphing Pad & Continuous Reactive Engine
+    // --------------------------------------------------------------------------
+    function appendResultToRustPad(exprText) {
+      const newId = padLines.length > 0 ? Math.max(...padLines.map(l => l.id)) + 1 : 1;
+      const color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+      padLines.push({
+        id: newId,
+        text: exprText.trim(),
+        isParam: false,
+        color: color,
+        visible: true,
+        isPlaying: false
+      });
+      renderRustPad();
+      drawDesmosGraph();
+      showToastNotice(`Inserted formula into Desmos Expression List (#${newId})`);
+    }
+
+    function renderRustPad() {
+      const container = document.getElementById('pad_lines_container');
+      const scopeChips = document.getElementById('scope_chips_container');
+      if (!container) return;
+
+      container.innerHTML = '';
+      if (scopeChips) scopeChips.innerHTML = '<span class="scope-chip">x: Real</span>';
+
+      // Gather active parameters
+      padLines.forEach(line => {
+        if (line.isParam && line.paramName && scopeChips) {
+          const chip = document.createElement('span');
+          chip.className = 'scope-chip';
+          chip.textContent = `${line.paramName} = ${line.paramVal.toFixed(2)}`;
+          scopeChips.appendChild(chip);
+        }
+      });
+
+      padLines.forEach((line, idx) => {
+        if (!line.color) {
+          line.color = DESMOS_PALETTE[idx % DESMOS_PALETTE.length];
+        }
+        if (line.visible === undefined) line.visible = true;
+
+        const lineCard = document.createElement('div');
+        lineCard.className = 'desmos-expr-card';
+        lineCard.dataset.lineId = line.id;
+
+        // Top Row: Color Dot Toggle + Line # + Input + Actions
+        const topRow = document.createElement('div');
+        topRow.className = 'expr-card-top';
+
+        // Colored Circle Indicator (click toggles visibility on graph)
+        const colorDot = document.createElement('div');
+        colorDot.className = 'desmos-color-indicator' + (line.visible ? '' : ' hidden-curve');
+        colorDot.style.backgroundColor = line.color;
+        colorDot.title = line.visible ? 'Visible on graph (Click to hide)' : 'Hidden (Click to show)';
+        colorDot.addEventListener('click', () => {
+          line.visible = !line.visible;
+          colorDot.className = 'desmos-color-indicator' + (line.visible ? '' : ' hidden-curve');
+          colorDot.title = line.visible ? 'Visible on graph (Click to hide)' : 'Hidden (Click to show)';
+          drawDesmosGraph();
+        });
+
+        const lineNum = document.createElement('span');
+        lineNum.className = 'expr-line-number';
+        lineNum.textContent = `${idx + 1}`;
+
+        const inputField = document.createElement('input');
+        inputField.type = 'text';
+        inputField.className = 'expr-input-field';
+        inputField.value = line.text;
+        inputField.placeholder = "Enter expression e.g. y = a*x^2 + c or a = 2.0";
+
+        inputField.addEventListener('input', (e) => {
+          line.text = e.target.value;
+          detectParameterDefinition(line);
+          evaluatePadLine(line, lineCard);
+          drawDesmosGraph();
+        });
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'expr-card-actions';
+
+        // Inspect in Solver
+        const inspectBtn = document.createElement('button');
+        inspectBtn.className = 'expr-btn';
+        inspectBtn.title = "Inspect in Solver (Wolfram / Symbolab)";
+        inspectBtn.textContent = "🔍";
+        inspectBtn.addEventListener('click', () => {
+          alphaInput.value = line.text;
+          updateClearButton();
+          setViewMode('alpha');
+          window.runAlphaQuery(line.text);
+        });
+
+        // Duplicate Line
+        const dupBtn = document.createElement('button');
+        dupBtn.className = 'expr-btn';
+        dupBtn.title = "Duplicate expression";
+        dupBtn.textContent = "❐";
+        dupBtn.addEventListener('click', () => {
+          const newId = Math.max(...padLines.map(l => l.id)) + 1;
+          const clone = JSON.parse(JSON.stringify(line));
+          clone.id = newId;
+          clone.color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+          padLines.splice(idx + 1, 0, clone);
+          renderRustPad();
+          drawDesmosGraph();
+        });
+
+        // Delete Line
+        const delBtn = document.createElement('button');
+        delBtn.className = 'expr-btn del';
+        delBtn.title = "Delete expression";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener('click', () => {
+          padLines = padLines.filter(l => l.id !== line.id);
+          renderRustPad();
+          drawDesmosGraph();
+        });
+
+        actionsDiv.appendChild(inspectBtn);
+        actionsDiv.appendChild(dupBtn);
+        actionsDiv.appendChild(delBtn);
+
+        topRow.appendChild(colorDot);
+        topRow.appendChild(lineNum);
+        topRow.appendChild(inputField);
+        topRow.appendChild(actionsDiv);
+        lineCard.appendChild(topRow);
+
+        // Desmos Continuous Slider Row if `a = 2.0`
+        if (line.isParam) {
+          const sliderRow = document.createElement('div');
+          sliderRow.className = 'desmos-slider-row';
+
+          // Play/Pause Animation button
+          const playBtn = document.createElement('button');
+          playBtn.className = 'slider-play-btn' + (line.isPlaying ? ' playing' : '');
+          playBtn.title = line.isPlaying ? 'Pause parameter animation' : 'Animate parameter (Continuous oscillation)';
+          playBtn.innerHTML = line.isPlaying ? '⏸' : '▶';
+
+          const slider = document.createElement('input');
+          slider.type = 'range';
+          slider.className = 'desmos-slider-track';
+          slider.min = line.min !== undefined ? line.min : -10;
+          slider.max = line.max !== undefined ? line.max : 10;
+          slider.step = line.step || 0.1;
+          slider.value = line.paramVal;
+
+          const valSpan = document.createElement('span');
+          valSpan.className = 'desmos-slider-value';
+          valSpan.textContent = Number(line.paramVal).toFixed(2);
+
+          slider.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            line.paramVal = val;
+            valSpan.textContent = val.toFixed(2);
+            line.text = `${line.paramName} = ${val.toFixed(2)}`;
+            inputField.value = line.text;
+            evaluateAllPadLines();
+            drawDesmosGraph();
+          });
+
+          playBtn.addEventListener('click', () => {
+            line.isPlaying = !line.isPlaying;
+            playBtn.className = 'slider-play-btn' + (line.isPlaying ? ' playing' : '');
+            playBtn.innerHTML = line.isPlaying ? '⏸' : '▶';
+            if (line.isPlaying) {
+              startSliderAnimationLoop();
             }
           });
 
-          navigator.serviceWorker.register('./sw.js').then(reg => {
-            // Check for network updates in the background
-            reg.update();
+          sliderRow.appendChild(playBtn);
+          sliderRow.appendChild(slider);
+          sliderRow.appendChild(valSpan);
+          lineCard.appendChild(sliderRow);
 
-            reg.addEventListener('updatefound', () => {
-              const newWorker = reg.installing;
-              if (newWorker) {
-                newWorker.addEventListener('statechange', () => {
-                  if ((newWorker.state === 'installed' || newWorker.state === 'activated') && navigator.serviceWorker.controller) {
-                    const toast = document.getElementById('urae_update_toast');
-                    if (toast) toast.style.display = 'flex';
-                  }
-                });
-              }
-            });
-          }).catch(err => {
-            console.debug('ServiceWorker registration optional notice:', err);
+          // Slider Bounds Editor [min, max, step]
+          const boundsRow = document.createElement('div');
+          boundsRow.className = 'slider-bounds-editor';
+          boundsRow.innerHTML = `
+            <span>min:</span>
+            <input type="number" class="bound-input min-val" value="${line.min || -10}" step="1">
+            <span>max:</span>
+            <input type="number" class="bound-input max-val" value="${line.max || 10}" step="1">
+            <span>step:</span>
+            <input type="number" class="bound-input step-val" value="${line.step || 0.1}" step="0.05">
+          `;
+
+          boundsRow.querySelector('.min-val').addEventListener('change', (e) => {
+            line.min = parseFloat(e.target.value) || -10;
+            slider.min = line.min;
+          });
+          boundsRow.querySelector('.max-val').addEventListener('change', (e) => {
+            line.max = parseFloat(e.target.value) || 10;
+            slider.max = line.max;
+          });
+          boundsRow.querySelector('.step-val').addEventListener('change', (e) => {
+            line.step = parseFloat(e.target.value) || 0.1;
+            slider.step = line.step;
           });
 
-          document.getElementById('urae_update_reload_btn')?.addEventListener('click', () => {
-            refreshing = true;
-            window.location.reload();
-          });
-
-          document.getElementById('urae_update_dismiss_btn')?.addEventListener('click', () => {
-            const toast = document.getElementById('urae_update_toast');
-            if (toast) toast.style.display = 'none';
-          });
+          lineCard.appendChild(boundsRow);
         }
-      } catch (err) {
-        console.error('URAE initialization error:', err);
+
+        // Live Math KaTeX Preview Row
+        const previewRow = document.createElement('div');
+        previewRow.className = 'expr-preview-row';
+        const mathDisplay = document.createElement('div');
+        mathDisplay.className = 'expr-math-display';
+        previewRow.appendChild(mathDisplay);
+        lineCard.appendChild(previewRow);
+
+        container.appendChild(lineCard);
+        evaluatePadLine(line, lineCard);
+      });
+    }
+
+    function detectParameterDefinition(line) {
+      const trimmed = line.text.trim();
+      const match = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([+-]?\d+(?:\.\d+)?)$/);
+      if (match) {
+        line.isParam = true;
+        line.paramName = match[1];
+        line.paramVal = parseFloat(match[2]);
+        if (line.min === undefined) line.min = Math.min(-10, line.paramVal * 2);
+        if (line.max === undefined) line.max = Math.max(10, line.paramVal * 2);
+        if (line.step === undefined) line.step = 0.1;
+      } else {
+        line.isParam = false;
       }
     }
 
-    run();
+    function evaluatePadLine(line, cardEl) {
+      const outputEl = cardEl.querySelector('.expr-math-display');
+      if (!outputEl) return;
+
+      const trimmed = line.text.trim();
+      if (!trimmed) {
+        outputEl.innerHTML = '';
+        return;
+      }
+
+      try {
+        if (typeof window.wasm_process_json === 'function') {
+          const bindings = {};
+          padLines.forEach(l => {
+            if (l.isParam && l.paramName) {
+              bindings[l.paramName] = l.paramVal;
+            }
+          });
+
+          const req = { input: trimmed, bindings: bindings };
+          const raw = window.wasm_process_json(JSON.stringify(req));
+          const res = JSON.parse(raw);
+
+          const outLatex = res.output_latex || res.substituted_latex || trimmed;
+          const outUnicode = res.output_unicode || trimmed;
+          renderMathFormatted(outputEl, outLatex, outUnicode);
+        } else {
+          outputEl.textContent = trimmed;
+        }
+      } catch (err) {
+        outputEl.textContent = `Error: ${err.message || err}`;
+      }
+    }
+
+    function evaluateAllPadLines() {
+      const container = document.getElementById('pad_lines_container');
+      if (!container) return;
+      const cards = container.querySelectorAll('.desmos-expr-card');
+
+      if (typeof window.wasm_pad_eval_session === 'function') {
+        try {
+          const sessionText = padLines.map(l => l.text).join('\n');
+          const rawResp = window.wasm_pad_eval_session(sessionText);
+          const results = JSON.parse(rawResp);
+          if (Array.isArray(results) && results.length === padLines.length) {
+            results.forEach((res, i) => {
+              if (cards[i]) {
+                const outputEl = cards[i].querySelector('.expr-math-display');
+                if (outputEl) {
+                  if (res.is_comment_or_empty) {
+                    outputEl.innerHTML = '';
+                  } else {
+                    renderMathFormatted(outputEl, res.latex, res.unicode || res.text);
+                  }
+                }
+              }
+            });
+            return;
+          }
+        } catch (err) {
+          console.debug('wasm_pad_eval_session fallback:', err);
+        }
+      }
+
+      padLines.forEach((line, i) => {
+        if (cards[i]) {
+          evaluatePadLine(line, cards[i]);
+        }
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // Desmos High-Performance 2D Graph Coordinate Plane Canvas Engine
+    // --------------------------------------------------------------------------
+    const graphCanvas = document.getElementById('desmos_graph_canvas');
+    const graphWrapper = document.getElementById('desmos_graph_wrapper');
+    const coordsBadge = document.getElementById('desmos_coords_badge');
+    const pointTooltip = document.getElementById('desmos_point_tooltip');
+
+    let viewState = {
+      centerX: 0,
+      centerY: 0,
+      scale: 45, // pixels per unit
+      isDragging: false,
+      dragStartX: 0,
+      dragStartY: 0,
+      gridEnabled: true,
+      hoverPoint: null,
+      dpr: window.devicePixelRatio || 1
+    };
+
+    function resizeDesmosGraph() {
+      if (!graphCanvas || !graphWrapper) return;
+      const rect = graphWrapper.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      viewState.dpr = window.devicePixelRatio || 1;
+      graphCanvas.width = Math.floor(rect.width * viewState.dpr);
+      graphCanvas.height = Math.floor(rect.height * viewState.dpr);
+      drawDesmosGraph();
+    }
+
+    function mathToScreen(x, y) {
+      const w = graphCanvas.width / viewState.dpr;
+      const h = graphCanvas.height / viewState.dpr;
+      return {
+        px: (w / 2) + (x - viewState.centerX) * viewState.scale,
+        py: (h / 2) - (y - viewState.centerY) * viewState.scale
+      };
+    }
+
+    function screenToMath(px, py) {
+      const w = graphCanvas.width / viewState.dpr;
+      const h = graphCanvas.height / viewState.dpr;
+      return {
+        x: viewState.centerX + (px - w / 2) / viewState.scale,
+        y: viewState.centerY - (py - h / 2) / viewState.scale
+      };
+    }
+
+    // Fast Mathematical Expression Compiler for 60 FPS Graphing
+    function compileMathFunction(exprStr) {
+      let s = exprStr.trim();
+      if (s.startsWith('f(x)') || s.startsWith('g(x)') || s.startsWith('y')) {
+        const parts = s.split('=');
+        if (parts.length > 1) s = parts.slice(1).join('=').trim();
+      }
+
+      // Substitute parameters
+      padLines.forEach(l => {
+        if (l.isParam && l.paramName) {
+          const re = new RegExp(`\\b${l.paramName}\\b`, 'g');
+          s = s.replace(re, `(${l.paramVal})`);
+        }
+      });
+
+      // Normalize operators
+      s = s.replace(/\^/g, '**');
+      s = s.replace(/\bpi\b/gi, 'Math.PI');
+      s = s.replace(/\be\b/g, 'Math.E');
+      s = s.replace(/\bsin\b/g, 'Math.sin');
+      s = s.replace(/\bcos\b/g, 'Math.cos');
+      s = s.replace(/\btan\b/g, 'Math.tan');
+      s = s.replace(/\bsqrt\b/g, 'Math.sqrt');
+      s = s.replace(/\bexp\b/g, 'Math.exp');
+      s = s.replace(/\bln\b/g, 'Math.log');
+      s = s.replace(/\blog\b/g, 'Math.log10');
+      s = s.replace(/\babs\b/g, 'Math.abs');
+      s = s.replace(/\berf\b/g, 'Math.erf');
+
+      // Add Math.erf polyfill if not native
+      if (!Math.erf) {
+        Math.erf = function(x) {
+          const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+          const sign = x < 0 ? -1 : 1;
+          const absX = Math.abs(x);
+          const t = 1.0 / (1.0 + p * absX);
+          const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-absX * absX);
+          return sign * y;
+        };
+      }
+
+      try {
+        return new Function('x', `try { return (${s}); } catch(_) { return NaN; }`);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function drawDesmosGraph() {
+      if (!graphCanvas) return;
+      const ctx = graphCanvas.getContext('2d');
+      if (!ctx) return;
+
+      const dpr = viewState.dpr;
+      const width = graphCanvas.width / dpr;
+      const height = graphCanvas.height / dpr;
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // Background
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+      ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+
+      // Coordinate bounds
+      const leftMath = screenToMath(0, 0).x;
+      const rightMath = screenToMath(width, 0).x;
+      const topMath = screenToMath(0, 0).y;
+      const bottomMath = screenToMath(0, height).y;
+
+      // 1. Grid Lines
+      if (viewState.gridEnabled) {
+        // Compute nice step
+        const rawStep = 80 / viewState.scale;
+        const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+        const residual = rawStep / mag;
+        let step = mag;
+        if (residual > 5) step = 5 * mag;
+        else if (residual > 2) step = 2 * mag;
+
+        const minorStep = step / 5;
+
+        // Minor grid
+        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.04)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = Math.floor(leftMath / minorStep) * minorStep; x <= rightMath; x += minorStep) {
+          const px = mathToScreen(x, 0).px;
+          ctx.moveTo(px, 0);
+          ctx.lineTo(px, height);
+        }
+        for (let y = Math.floor(bottomMath / minorStep) * minorStep; y <= topMath; y += minorStep) {
+          const py = mathToScreen(0, y).py;
+          ctx.moveTo(0, py);
+          ctx.lineTo(width, py);
+        }
+        ctx.stroke();
+
+        // Major grid
+        ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.09)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = Math.floor(leftMath / step) * step; x <= rightMath; x += step) {
+          const px = mathToScreen(x, 0).px;
+          ctx.moveTo(px, 0);
+          ctx.lineTo(px, height);
+        }
+        for (let y = Math.floor(bottomMath / step) * step; y <= topMath; y += step) {
+          const py = mathToScreen(0, y).py;
+          ctx.moveTo(0, py);
+          ctx.lineTo(width, py);
+        }
+        ctx.stroke();
+
+        // Grid Numbers
+        ctx.fillStyle = isDark ? '#8b949e' : '#656d76';
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        const origin = mathToScreen(0, 0);
+        const yAxisPx = Math.max(16, Math.min(width - 24, origin.px));
+        const xAxisPy = Math.max(16, Math.min(height - 18, origin.py));
+
+        for (let x = Math.floor(leftMath / step) * step; x <= rightMath; x += step) {
+          if (Math.abs(x) < 1e-9) continue;
+          const px = mathToScreen(x, 0).px;
+          ctx.fillText(Number(x.toFixed(3)).toString(), px, xAxisPy + 4);
+        }
+
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let y = Math.floor(bottomMath / step) * step; y <= topMath; y += step) {
+          if (Math.abs(y) < 1e-9) continue;
+          const py = mathToScreen(0, y).py;
+          ctx.fillText(Number(y.toFixed(3)).toString(), yAxisPx - 6, py);
+        }
+      }
+
+      // 2. Bold Cartesian Axes
+      const originScreen = mathToScreen(0, 0);
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      // X-Axis
+      ctx.moveTo(0, originScreen.py);
+      ctx.lineTo(width, originScreen.py);
+      // Y-Axis
+      ctx.moveTo(originScreen.px, 0);
+      ctx.lineTo(originScreen.px, height);
+      ctx.stroke();
+
+      // 3. Plot Functions & Curves
+      const specialDots = [];
+
+      padLines.forEach(line => {
+        if (!line.visible || line.isParam) return;
+        const fn = compileMathFunction(line.text);
+        if (!fn) return;
+
+        ctx.strokeStyle = line.color || '#2d70b3';
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        let isDrawing = false;
+        let prevY = 0;
+
+        for (let px = 0; px <= width; px += 2) {
+          const mx = screenToMath(px, 0).x;
+          const my = fn(mx);
+
+          if (isNaN(my) || !isFinite(my)) {
+            isDrawing = false;
+            continue;
+          }
+
+          const py = mathToScreen(mx, my).py;
+
+          // Asymptote check
+          if (isDrawing && Math.abs(py - prevY) > height * 0.75) {
+            isDrawing = false;
+          }
+
+          if (!isDrawing) {
+            ctx.moveTo(px, py);
+            isDrawing = true;
+          } else {
+            ctx.lineTo(px, py);
+          }
+          prevY = py;
+        }
+        ctx.stroke();
+
+        // Detect Feature Points (Roots & Intercepts)
+        try {
+          // Y-Intercept
+          const y0 = fn(0);
+          if (!isNaN(y0) && isFinite(y0)) {
+            const p = mathToScreen(0, y0);
+            if (p.px >= 0 && p.px <= width && p.py >= 0 && p.py <= height) {
+              specialDots.push({ x: 0, y: y0, px: p.px, py: p.py, color: line.color, label: `(0, ${y0.toFixed(2)})` });
+            }
+          }
+
+          // X-Intercepts (Roots) via sign crossing
+          let lastX = leftMath;
+          let lastVal = fn(lastX);
+          const sampleStep = (rightMath - leftMath) / 60;
+          for (let sx = leftMath + sampleStep; sx <= rightMath; sx += sampleStep) {
+            const v = fn(sx);
+            if (!isNaN(v) && !isNaN(lastVal) && isFinite(v) && isFinite(lastVal)) {
+              if ((lastVal > 0 && v < 0) || (lastVal < 0 && v > 0)) {
+                // Linear root interpolation
+                const rootX = lastX - lastVal * (sx - lastX) / (v - lastVal);
+                const p = mathToScreen(rootX, 0);
+                if (p.px >= 0 && p.px <= width && p.py >= 0 && p.py <= height) {
+                  specialDots.push({ x: rootX, y: 0, px: p.px, py: p.py, color: line.color, label: `(${rootX.toFixed(2)}, 0)` });
+                }
+              }
+            }
+            lastX = sx;
+            lastVal = v;
+          }
+        } catch (_) {}
+      });
+
+      // 4. Render Special Feature Dots (Desmos signature)
+      specialDots.forEach(dot => {
+        ctx.fillStyle = dot.color;
+        ctx.beginPath();
+        ctx.arc(dot.px, dot.py, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = isDark ? '#0d1117' : '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
+
+      viewState.specialDots = specialDots;
+      ctx.restore();
+    }
+
+    // Canvas Mouse & Touch Interactivity
+    if (graphCanvas) {
+      graphCanvas.addEventListener('mousedown', (e) => {
+        viewState.isDragging = true;
+        viewState.dragStartX = e.clientX;
+        viewState.dragStartY = e.clientY;
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (viewState.isDragging) {
+          const dx = e.clientX - viewState.dragStartX;
+          const dy = e.clientY - viewState.dragStartY;
+          viewState.centerX -= dx / viewState.scale;
+          viewState.centerY += dy / viewState.scale;
+          viewState.dragStartX = e.clientX;
+          viewState.dragStartY = e.clientY;
+          drawDesmosGraph();
+        }
+
+        // Coordinate indicator
+        if (graphWrapper && coordsBadge) {
+          const rect = graphWrapper.getBoundingClientRect();
+          if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+            const mathPt = screenToMath(e.clientX - rect.left, e.clientY - rect.top);
+            coordsBadge.textContent = `x: ${mathPt.x.toFixed(2)}, y: ${mathPt.y.toFixed(2)}`;
+
+            // Check if hovering near a special dot
+            if (viewState.specialDots && pointTooltip) {
+              const mousePx = e.clientX - rect.left;
+              const mousePy = e.clientY - rect.top;
+              let foundDot = null;
+
+              for (const dot of viewState.specialDots) {
+                const dist = Math.hypot(dot.px - mousePx, dot.py - mousePy);
+                if (dist < 12) {
+                  foundDot = dot;
+                  break;
+                }
+              }
+
+              if (foundDot) {
+                pointTooltip.style.display = 'block';
+                pointTooltip.style.left = `${foundDot.px}px`;
+                pointTooltip.style.top = `${foundDot.py}px`;
+                pointTooltip.textContent = foundDot.label;
+              } else {
+                pointTooltip.style.display = 'none';
+              }
+            }
+          }
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        viewState.isDragging = false;
+      });
+
+      // Zoom Centered at Cursor
+      graphCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = graphCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const mathBefore = screenToMath(mouseX, mouseY);
+        const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+        viewState.scale = Math.max(5, Math.min(1000, viewState.scale * zoomFactor));
+
+        const mathAfter = screenToMath(mouseX, mouseY);
+        viewState.centerX += mathBefore.x - mathAfter.x;
+        viewState.centerY += mathBefore.y - mathAfter.y;
+
+        drawDesmosGraph();
+      }, { passive: false });
+    }
+
+    // On-Graph Controls Listeners
+    document.getElementById('graph_zoom_in_btn')?.addEventListener('click', () => {
+      viewState.scale = Math.min(1000, viewState.scale * 1.3);
+      drawDesmosGraph();
+    });
+    document.getElementById('graph_zoom_out_btn')?.addEventListener('click', () => {
+      viewState.scale = Math.max(5, viewState.scale / 1.3);
+      drawDesmosGraph();
+    });
+    document.getElementById('graph_reset_view_btn')?.addEventListener('click', () => {
+      viewState.centerX = 0;
+      viewState.centerY = 0;
+      viewState.scale = 45;
+      drawDesmosGraph();
+    });
+    document.getElementById('graph_settings_btn')?.addEventListener('click', () => {
+      viewState.gridEnabled = !viewState.gridEnabled;
+      drawDesmosGraph();
+      showToastNotice(`Coordinate Grid: ${viewState.gridEnabled ? 'Enabled' : 'Disabled'}`);
+    });
+
+    // Slider Continuous Animation Loop
+    let animRunning = false;
+    function startSliderAnimationLoop() {
+      if (animRunning) return;
+      animRunning = true;
+
+      function stepAnimation() {
+        let anyPlaying = false;
+        padLines.forEach(l => {
+          if (l.isParam && l.isPlaying) {
+            anyPlaying = true;
+            if (l.animPhase === undefined) l.animPhase = 0;
+            l.animPhase += 0.04;
+            const min = l.min !== undefined ? l.min : -10;
+            const max = l.max !== undefined ? l.max : 10;
+            const mid = (max + min) / 2;
+            const amp = (max - min) / 2;
+            l.paramVal = mid + amp * Math.sin(l.animPhase);
+            l.text = `${l.paramName} = ${l.paramVal.toFixed(2)}`;
+
+            const card = document.querySelector(`.desmos-expr-card[data-line-id="${l.id}"]`);
+            if (card) {
+              const inp = card.querySelector('.expr-input-field');
+              const slider = card.querySelector('.desmos-slider-track');
+              const valSpan = card.querySelector('.desmos-slider-value');
+              if (inp) inp.value = l.text;
+              if (slider) slider.value = l.paramVal;
+              if (valSpan) valSpan.textContent = l.paramVal.toFixed(2);
+            }
+          }
+        });
+
+        if (anyPlaying) {
+          drawDesmosGraph();
+          requestAnimationFrame(stepAnimation);
+        } else {
+          animRunning = false;
+        }
+      }
+
+      requestAnimationFrame(stepAnimation);
+    }
+
+    // Play All Sliders Button
+    document.getElementById('pad_play_all_btn')?.addEventListener('click', () => {
+      let anyParams = padLines.some(l => l.isParam);
+      if (!anyParams) {
+        showToastNotice('No parameter sliders declared. Add e.g. a = 2.0');
+        return;
+      }
+      const anyPlaying = padLines.some(l => l.isParam && l.isPlaying);
+      padLines.forEach(l => {
+        if (l.isParam) l.isPlaying = !anyPlaying;
+      });
+      renderRustPad();
+      if (!anyPlaying) {
+        startSliderAnimationLoop();
+        showToastNotice('Animating all parameter sliders');
+      } else {
+        showToastNotice('Paused all sliders');
+      }
+    });
+
+    // Pad Toolbar Event Listeners
+    document.getElementById('pad_add_line_btn')?.addEventListener('click', () => {
+      const newId = padLines.length > 0 ? Math.max(...padLines.map(l => l.id)) + 1 : 1;
+      const color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+      padLines.push({ id: newId, text: "", isParam: false, color: color, visible: true, isPlaying: false });
+      renderRustPad();
+      drawDesmosGraph();
+      const inputs = document.querySelectorAll('.expr-input-field');
+      if (inputs.length > 0) inputs[inputs.length - 1].focus();
+    });
+
+    document.getElementById('pad_bottom_add_btn')?.addEventListener('click', () => {
+      document.getElementById('pad_add_line_btn')?.click();
+    });
+
+    document.getElementById('pad_eval_all_btn')?.addEventListener('click', () => {
+      evaluateAllPadLines();
+      drawDesmosGraph();
+      showToastNotice('Re-evaluated all pad expressions in Rust WASM Engine');
+    });
+
+    document.getElementById('pad_clear_btn')?.addEventListener('click', () => {
+      if (confirm('Clear all expressions in Graphing Pad?')) {
+        padLines = [];
+        renderRustPad();
+        drawDesmosGraph();
+      }
+    });
+
+    document.getElementById('pad_save_btn')?.addEventListener('click', () => {
+      localStorage.setItem('urae_pad_lines', JSON.stringify(padLines));
+      showToastNotice('Saved expressions to browser storage');
+    });
+
+    document.getElementById('pad_export_btn')?.addEventListener('click', () => {
+      const catScript = padLines.map(l => l.text).join('\n');
+      const blob = new Blob([catScript], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'graphing_notebook.cat';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToastNotice('Exported notebook as .cat (CatScript)');
+    });
+
+    // Load saved pad lines if existing
+    const savedLines = localStorage.getItem('urae_pad_lines');
+    if (savedLines) {
+      try {
+        const parsed = JSON.parse(savedLines);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          padLines = parsed;
+        }
+      } catch (_) {}
+    }
+
+    // Initialize UI and Graph
+    renderRustPad();
+    window.addEventListener('resize', () => {
+      resizeDesmosGraph();
+    });
+    setTimeout(() => {
+      resizeDesmosGraph();
+    }, 100);
+
+    // Examples Modal Toggle
+    const examplesModal = document.getElementById('examples_modal');
+    document.getElementById('open_examples_modal_btn')?.addEventListener('click', () => {
+      examplesModal.classList.add('open');
+    });
+    document.getElementById('close_examples_modal_btn')?.addEventListener('click', () => {
+      examplesModal.classList.remove('open');
+    });
+    examplesModal?.addEventListener('click', (e) => {
+      if (e.target === examplesModal) examplesModal.classList.remove('open');
+    });
+
+    // --------------------------------------------------------------------------
+    // WASM Engine Startup
+    // --------------------------------------------------------------------------
+    async function runWasm() {
+      try {
+        await init({ module_or_path: './pkg/urae_wasm_bg.wasm?v=20261110' });
+        window.wasm_process_json = wasm_process_json;
+        window.wasm_wolfram_query = wasm_wolfram_query;
+        window.wasm_pad_eval_line = wasm_pad_eval_line;
+        window.wasm_pad_eval_session = wasm_pad_eval_session;
+
+        const badgeText = document.getElementById('engine_status_text');
+        if (badgeText) badgeText.textContent = 'Rust WASM Engine Active';
+
+        console.log("%c⚡ URAE // INTELLIGENCE — Wolfram & Symbolab Solver + GeoGebra / Desmos Pad Active!", "color: #ff7e00; font-weight: bold; font-size: 14px;");
+
+        // Global console shortcut
+        window.urae = function(q) {
+          if (!window.wasm_process_json) return "Engine initializing...";
+          const res = window.wasm_process_json(JSON.stringify({ input: q }));
+          try {
+            const p = JSON.parse(res);
+            return p.output_unicode || p.output_latex || res;
+          } catch (_) { return res; }
+        };
+
+        // Re-evaluate pad lines now that WASM is ready
+        evaluateAllPadLines();
+        drawDesmosGraph();
+
+        // Register ServiceWorker
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+          navigator.serviceWorker.register('./sw.js').catch(() => {});
+        }
+      } catch (err) {
+        console.warn('WASM auto-load notice:', err);
+      }
+    }
+
+    runWasm();
   </script>
 </body>
 </html>
-

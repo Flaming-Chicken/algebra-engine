@@ -31,6 +31,7 @@ pub use algebra_core::{
 };
 
 pub use auto_promoters::uint::Uint;
+pub use cat_numbers::Magnitude;
 
 pub use algebra_engine::{
     analysis::{
@@ -65,6 +66,7 @@ pub use algebra_engine::{
     geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer},
     geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder},
     gpu::{GpuKernelDescriptor, WgslShaderGenerator},
+    hecs::Hecs,
     heuristic::{HeuristicSearchEngine, SearchCandidate},
     html_export::StandaloneHtmlExporter,
     hyperop::{ackermann, hyperoperation, knuth_up_arrow, pentation, super_log, tetration},
@@ -114,7 +116,7 @@ pub use algebra_engine::{
         SchwartzZippel, Simplifier,
     },
     smt::{ProofCertificate, SmtExpr, SmtLogic, SmtProblem, SmtSort},
-    solver::SymbolicSolver,
+    solver::{SolveOutcome, SymbolicSolver},
     sparse::CsrMatrix,
     special::SpecialFunctions,
     symplectic::{
@@ -133,6 +135,7 @@ pub use algebra_engine::{
     topology::SimplicialComplex,
     transforms::SymbolicTransforms,
     tropical::{MaxPlus, MinPlus, TropicalMatrix, log_sum_exp},
+    urscript_pose::Pose,
     weyl_dmodules::{
         AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
         ZeilbergerAlgorithm, ZeilbergerResult,

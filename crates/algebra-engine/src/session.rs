@@ -352,6 +352,12 @@ impl UraeSession {
         OperationExecutor::execute(&self.graph, op, &ctx)
     }
 
+    /// Execute a Wolfram Alpha style natural language query, returning a structured multi-pod response.
+    pub fn wolfram_query(&self, query: &str) -> crate::wolfram::WolframAlphaResponse {
+        let ctx = self.execution_context();
+        crate::wolfram::WolframAlphaEngine::query(&self.graph, query, &ctx)
+    }
+
     /// Extract all unique variable symbol names contained in an expression tree.
     pub fn extract_symbols(&self, root: ExprId) -> Vec<String> {
         let mut symbols = HashSet::new();

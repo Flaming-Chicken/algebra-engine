@@ -29,6 +29,9 @@ pub enum NumericalOdeMethod {
     GaussLegendre4,
     /// Symplectic Velocity Verlet / Leapfrog (for Hamiltonian systems d^2 q / dt^2 = F(q))
     VelocityVerlet,
+    /// Autonomous information-theoretic meta-integrator (`sml_runtime::SelfOptimizingMetaIntegrator`)
+    /// with online curvature/stiffness fingerprinting, predictive PID control, and multi-regime routing.
+    SelfOptimizingMeta,
     /// Custom User-Supplied Butcher Tableau
     CustomTableau(ButcherTableau),
 }
@@ -159,6 +162,81 @@ impl ButcherTableau {
         }
     }
 
+    /// Tsitouras 5(4) explicit Runge-Kutta tableau with embedded 4th-order error estimator (Tsitouras, 2011).
+    pub fn tsit5() -> Self {
+        Self {
+            a: vec![
+                vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                vec![0.161, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                vec![
+                    -0.008480655492356989,
+                    0.335480655492357,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+                vec![
+                    2.897153057105493,
+                    -6.359448489975075,
+                    4.362295432869581,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+                vec![
+                    5.325864828439257,
+                    -11.74888356406283,
+                    7.495539342889836,
+                    -0.09249506636175525,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+                vec![
+                    5.86145544294642,
+                    -12.92096931784711,
+                    8.159367898576159,
+                    -0.071584973281401,
+                    -0.02826905039406838,
+                    0.0,
+                    0.0,
+                ],
+                vec![
+                    0.09646076681806523,
+                    0.01,
+                    0.4798896504144996,
+                    1.379008574103742,
+                    -3.290069515436081,
+                    2.324710524099774,
+                    0.0,
+                ],
+            ],
+            b: vec![
+                0.09646076681806523,
+                0.01,
+                0.4798896504144996,
+                1.379008574103742,
+                -3.290069515436081,
+                2.324710524099774,
+                0.0,
+            ],
+            c: vec![0.0, 0.161, 0.327, 0.9, 0.9800255409045097, 1.0, 1.0],
+            b_hat: Some(vec![
+                0.09468075576583946,
+                0.009183565540343253,
+                0.4877705284247616,
+                1.234297566930479,
+                -2.707712349983525,
+                1.866628418170587,
+                0.01515151515151515,
+            ]),
+            is_implicit: false,
+        }
+    }
+
     /// Radau IIA 3-stage 5th-order Implicit Tableau ($A$-stable and $L$-stable).
     pub fn radau_iia5() -> Self {
         let sqrt6 = 6.0_f64.sqrt();
@@ -263,7 +341,24 @@ impl NumericalOdeSolver {
 
         // 2. Dispatch to specific algorithm
         match chosen_method {
-            NumericalOdeMethod::DormandPrince54 => Self::solve_dopri5(&f, t0, tend, y0, config),
+            NumericalOdeMethod::DormandPrince54 => Self::solve_adaptive_explicit_rk(
+                &f,
+                t0,
+                tend,
+                y0,
+                config,
+                &ButcherTableau::dopri5(),
+                "Dormand-Prince 5(4)",
+            ),
+            NumericalOdeMethod::Tsitouras54 => Self::solve_adaptive_explicit_rk(
+                &f,
+                t0,
+                tend,
+                y0,
+                config,
+                &ButcherTableau::tsit5(),
+                "Tsitouras 5(4)",
+            ),
             NumericalOdeMethod::Rk4 => {
                 Self::solve_fixed_rk(&f, t0, tend, y0, config, &ButcherTableau::rk4(), "RK4")
             }
@@ -274,14 +369,35 @@ impl NumericalOdeSolver {
             NumericalOdeMethod::VelocityVerlet => {
                 Self::solve_velocity_verlet(&f, t0, tend, y0, config)
             }
+            NumericalOdeMethod::SelfOptimizingMeta => {
+                Self::solve_self_optimizing_meta(&f, t0, tend, y0, config)
+            }
             NumericalOdeMethod::CustomTableau(tab) => {
                 if tab.is_implicit {
                     Self::solve_implicit_general(&f, t0, tend, y0, config, &tab)
+                } else if tab.b_hat.is_some() {
+                    Self::solve_adaptive_explicit_rk(
+                        &f,
+                        t0,
+                        tend,
+                        y0,
+                        config,
+                        &tab,
+                        "CustomAdaptiveExplicitRK",
+                    )
                 } else {
                     Self::solve_fixed_rk(&f, t0, tend, y0, config, &tab, "CustomExplicitRK")
                 }
             }
-            _ => Self::solve_dopri5(&f, t0, tend, y0, config),
+            NumericalOdeMethod::Auto => Self::solve_adaptive_explicit_rk(
+                &f,
+                t0,
+                tend,
+                y0,
+                config,
+                &ButcherTableau::dopri5(),
+                "Dormand-Prince 5(4)",
+            ),
         }
     }
 
@@ -311,23 +427,32 @@ impl NumericalOdeSolver {
         jac_norm > 500.0
     }
 
-    /// Adaptive Dormand-Prince 5(4) solver with PI step size control.
-    fn solve_dopri5<F>(
+    /// Adaptive explicit Runge-Kutta solver with PI step size control for any embedded tableau
+    /// (Dormand-Prince 5(4), Tsitouras 5(4), or custom adaptive tableaus).
+    fn solve_adaptive_explicit_rk<F>(
         f: &F,
         t0: f64,
         tend: f64,
         y0: &[f64],
         config: &NumericalOdeConfig,
+        tableau: &ButcherTableau,
+        method_name: &str,
     ) -> AlgebraResult<OdeTrajectory>
     where
         F: Fn(f64, &[f64]) -> Vec<f64>,
     {
-        let tableau = ButcherTableau::dopri5();
         let dim = y0.len();
+        let stages = tableau.c.len();
 
         let mut t = t0;
         let mut y = y0.to_vec();
-        let mut h = config.initial_step.unwrap_or(0.01).min(config.max_step);
+        let dir = if tend >= t0 { 1.0 } else { -1.0 };
+        let mut h = config
+            .initial_step
+            .unwrap_or(0.01)
+            .abs()
+            .min(config.max_step)
+            * dir;
 
         let mut t_vec = vec![t];
         let mut y_vec = vec![y.clone()];
@@ -338,17 +463,16 @@ impl NumericalOdeSolver {
         let facmin = 0.2;
         let facmax = 5.0;
 
-        while (t < tend && h > 0.0) || (t > tend && h < 0.0) {
+        while (dir > 0.0 && t < tend) || (dir < 0.0 && t > tend) {
             if (t + h - tend).abs() < 1e-12
-                || (h > 0.0 && t + h > tend)
-                || (h < 0.0 && t + h < tend)
+                || (dir > 0.0 && t + h > tend)
+                || (dir < 0.0 && t + h < tend)
             {
                 h = tend - t;
             }
 
-            // Compute 7 stages
-            let mut k: Vec<Vec<f64>> = Vec::with_capacity(7);
-            for s in 0..7 {
+            let mut k: Vec<Vec<f64>> = Vec::with_capacity(stages);
+            for s in 0..stages {
                 let mut y_stage = y.clone();
                 for j in 0..s {
                     let a_sj = tableau.a[s][j];
@@ -362,9 +486,8 @@ impl NumericalOdeSolver {
                 k.push(f(t_stage, &y_stage));
             }
 
-            // 5th order solution
             let mut y_next = y.clone();
-            for s in 0..7 {
+            for s in 0..stages {
                 let b_s = tableau.b[s];
                 if b_s != 0.0 {
                     for d in 0..dim {
@@ -378,7 +501,7 @@ impl NumericalOdeSolver {
             if let Some(b_hat) = &tableau.b_hat {
                 for d in 0..dim {
                     let mut diff = 0.0;
-                    for s in 0..7 {
+                    for s in 0..stages {
                         diff += h * (tableau.b[s] - b_hat[s]) * k[s][d];
                     }
                     let sc = config.atol + config.rtol * y[d].abs().max(y_next[d].abs());
@@ -389,7 +512,6 @@ impl NumericalOdeSolver {
             }
 
             if error <= 1.0 || h.abs() <= config.min_step {
-                // Step accepted
                 t += h;
                 y = y_next;
                 t_vec.push(t);
@@ -403,13 +525,12 @@ impl NumericalOdeSolver {
                 rejected += 1;
             }
 
-            // Compute optimal next step size
             let factor = if error == 0.0 {
                 facmax
             } else {
                 (safety * (1.0 / error).powf(0.2)).max(facmin).min(facmax)
             };
-            h = (h * factor).max(config.min_step).min(config.max_step);
+            h = (h.abs() * factor).max(config.min_step).min(config.max_step) * dir;
 
             if accepted + rejected > config.max_steps {
                 return Err(AlgebraError::EvaluationError(
@@ -421,9 +542,109 @@ impl NumericalOdeSolver {
         Ok(OdeTrajectory {
             t: t_vec,
             y: y_vec,
-            method_used: "Dormand-Prince 5(4)".to_string(),
+            method_used: method_name.to_string(),
             steps_accepted: accepted,
             steps_rejected: rejected,
+        })
+    }
+
+    /// Autonomous adaptive ODE integration powered by `sml_runtime::SelfOptimizingMetaIntegrator`.
+    ///
+    /// Rescales `[t0, tend]` onto normalized time `tau in [0, 1]` and samples continuous segments
+    /// while fingerprinting curvature/stiffness regimes (`ABM5`, `PECE`, Padé conformal damping,
+    /// Filippov sliding mode, and Gustafsson-Söderlind predictive PID step-size control).
+    fn solve_self_optimizing_meta<F>(
+        f: &F,
+        t0: f64,
+        tend: f64,
+        y0: &[f64],
+        config: &NumericalOdeConfig,
+    ) -> AlgebraResult<OdeTrajectory>
+    where
+        F: Fn(f64, &[f64]) -> Vec<f64>,
+    {
+        let span = tend - t0;
+        if span.abs() < 1e-15 {
+            return Ok(OdeTrajectory {
+                t: vec![t0],
+                y: vec![y0.to_vec()],
+                method_used: "SelfOptimizingMeta (sml-runtime)".to_string(),
+                steps_accepted: 0,
+                steps_rejected: 0,
+            });
+        }
+
+        let tol = (config.rtol.max(config.atol) as f32).clamp(1e-6, 1e-1);
+        let abs_span = span.abs().max(1e-12);
+        let min_step = ((config.min_step / abs_span) as f32).clamp(1e-6, 1e-3);
+        let max_step = ((config.max_step / abs_span) as f32).clamp(min_step, 0.005);
+
+        let num_segments = if config.max_steps <= 32 { 1 } else { 8 };
+        let steps_per_seg = (config.max_steps / num_segments).max(64);
+
+        let mut integrator = sml_runtime::SelfOptimizingMetaIntegrator::new(tol)
+            .with_step_bounds(min_step, max_step)
+            .with_max_steps(steps_per_seg)
+            .with_super_smooth_routing(false)
+            .with_order_5_abm(false)
+            .with_rate_distortion_quantization(false)
+            .with_record_diagnostics(true);
+        if let Some(h0) = config.initial_step {
+            let norm_h0 = ((h0.abs() / abs_span) as f32).clamp(min_step, max_step);
+            integrator = integrator.with_initial_step(norm_h0);
+        }
+
+        let mut t_vec = Vec::with_capacity(num_segments + 1);
+        let mut y_vec = Vec::with_capacity(num_segments + 1);
+        let mut curr_y_f64 = y0.to_vec();
+        t_vec.push(t0);
+        y_vec.push(curr_y_f64.clone());
+
+        let mut total_steps = 0usize;
+        let mut last_regime = "SelfOptimizingMeta";
+
+        for seg_idx in 0..num_segments {
+            let tau_start = (seg_idx as f64) / (num_segments as f64);
+            let tau_end = ((seg_idx + 1) as f64) / (num_segments as f64);
+            let y_seg_start: Vec<f32> = curr_y_f64.iter().map(|&v| v as f32).collect();
+
+            let (y_seg_end, diags, _nfe) = integrator.solve_interval(
+                &y_seg_start,
+                tau_start as f32,
+                tau_end as f32,
+                |state, tau| {
+                    let t_real = t0 + (tau as f64) * span;
+                    let state_f64: Vec<f64> = state.iter().map(|&v| v as f64).collect();
+                    let dy = f(t_real, &state_f64);
+                    dy.into_iter().map(|d| (d * span) as f32).collect()
+                },
+            );
+
+            total_steps += diags.len().max(1);
+            if let Some(last) = diags.last() {
+                last_regime = last.detected_regime;
+            }
+            if y_seg_end.iter().any(|v| !v.is_finite()) {
+                return Err(AlgebraError::EvaluationError(
+                    "SelfOptimizingMeta encountered non-finite state".into(),
+                ));
+            }
+            curr_y_f64 = y_seg_end.into_iter().map(|v| v as f64).collect();
+            let t_real_end = if seg_idx + 1 == num_segments {
+                tend
+            } else {
+                t0 + tau_end * span
+            };
+            t_vec.push(t_real_end);
+            y_vec.push(curr_y_f64.clone());
+        }
+
+        Ok(OdeTrajectory {
+            t: t_vec,
+            y: y_vec,
+            method_used: format!("SelfOptimizingMeta (sml-runtime: {last_regime})"),
+            steps_accepted: total_steps,
+            steps_rejected: 0,
         })
     }
 
@@ -693,5 +914,120 @@ impl NumericalOdeSolver {
             steps_accepted: steps,
             steps_rejected: 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tsit5_tableau_and_adaptive_accuracy() {
+        let tab = ButcherTableau::tsit5();
+        let b_hat = tab.b_hat.as_ref().expect("embedded weights");
+
+        // Row sums sum_j a_ij == c_i
+        for (i, row) in tab.a.iter().enumerate() {
+            let row_sum: f64 = row.iter().sum();
+            assert!(
+                (row_sum - tab.c[i]).abs() < 1e-12,
+                "row {i} sum {row_sum} != c[{i}] {}",
+                tab.c[i]
+            );
+        }
+
+        // Order 1..=5 quadrature conditions sum_i b_i * c_i^(k-1) == 1/k
+        for k in 1..=5 {
+            let lhs: f64 = tab
+                .b
+                .iter()
+                .zip(tab.c.iter())
+                .map(|(&b, &c)| b * c.powi(k - 1))
+                .sum();
+            let rhs = 1.0 / (k as f64);
+            assert!(
+                (lhs - rhs).abs() < 1e-12,
+                "Tsit5 order {k} condition failed: {lhs} != {rhs}"
+            );
+        }
+        let b_hat_sum: f64 = b_hat.iter().sum();
+        assert!((b_hat_sum - 1.0).abs() < 1e-12);
+
+        // Harmonic oscillator y'' = -y over [0, 2*pi]
+        let cfg = NumericalOdeConfig {
+            method: NumericalOdeMethod::Tsitouras54,
+            rtol: 1e-7,
+            atol: 1e-9,
+            ..Default::default()
+        };
+        let traj = NumericalOdeSolver::solve(
+            |_t, y| vec![y[1], -y[0]],
+            (0.0, std::f64::consts::TAU),
+            &[1.0, 0.0],
+            &cfg,
+        )
+        .expect("Tsit5 solve");
+
+        assert_eq!(traj.method_used, "Tsitouras 5(4)");
+        assert!(traj.steps_accepted > 0);
+        let final_y = traj.y.last().expect("final state");
+        assert!((final_y[0] - 1.0).abs() < 1e-5, "got {}", final_y[0]);
+        assert!(final_y[1].abs() < 1e-5, "got {}", final_y[1]);
+    }
+
+    #[test]
+    fn test_self_optimizing_meta_integrator_regimes() {
+        let meta_cfg = NumericalOdeConfig {
+            method: NumericalOdeMethod::SelfOptimizingMeta,
+            rtol: 1e-4,
+            atol: 1e-6,
+            ..Default::default()
+        };
+
+        // 1. Smooth exponential decay y' = -y on [0, 1]
+        let decay = NumericalOdeSolver::solve(|_t, y| vec![-y[0]], (0.0, 1.0), &[1.0], &meta_cfg)
+            .expect("meta decay solve");
+        assert!(decay.method_used.starts_with("SelfOptimizingMeta"));
+        assert!(decay.steps_accepted > 0);
+        let expected_decay = (-1.0_f64).exp();
+        assert!(
+            (decay.y.last().unwrap()[0] - expected_decay).abs() < 1e-2,
+            "decay got {} expected {expected_decay}",
+            decay.y.last().unwrap()[0]
+        );
+
+        // 2. Oscillatory harmonic oscillator on [0, 2*pi]
+        let osc = NumericalOdeSolver::solve(
+            |_t, y| vec![y[1], -y[0]],
+            (0.0, std::f64::consts::TAU),
+            &[1.0, 0.0],
+            &meta_cfg,
+        )
+        .expect("meta oscillator solve");
+        let end_osc = osc.y.last().unwrap();
+        assert!(
+            (end_osc[0] - 1.0).abs() < 2e-2 && end_osc[1].abs() < 2e-2,
+            "oscillator got {:?}",
+            end_osc
+        );
+
+        // 3. Stiff exponential boundary layer y' = -100 * y on [0, 0.2]
+        let stiff =
+            NumericalOdeSolver::solve(|_t, y| vec![-100.0 * y[0]], (0.0, 0.2), &[1.0], &meta_cfg)
+                .expect("meta stiff solve");
+        assert!(
+            stiff.y.last().unwrap()[0].abs() < 1e-4,
+            "stiff decay got {}",
+            stiff.y.last().unwrap()[0]
+        );
+
+        // 4. Backward time integration [1, 0] for y' = -y -> y(0) = e
+        let back = NumericalOdeSolver::solve(|_t, y| vec![-y[0]], (1.0, 0.0), &[1.0], &meta_cfg)
+            .expect("meta backward solve");
+        assert!(
+            (back.y.last().unwrap()[0] - std::f64::consts::E).abs() < 5e-3,
+            "backward got {}",
+            back.y.last().unwrap()[0]
+        );
     }
 }

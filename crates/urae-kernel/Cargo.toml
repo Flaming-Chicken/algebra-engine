@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Native Zero-Latency Jupyter Kernel for the Universal Rust Algebra Engine (URAE)"
  
 [lib]
-test = false
+test = true
 doctest = false
 
 [lints]

@@ -385,6 +385,20 @@ impl OperationExecutor {
                     let mut res = OperationResult::success(unicode.clone(), latex, unicode.clone());
                     res.root_expr = Some(transformed_id);
                     res.simplified_unicode = Some(unicode);
+                    #[cfg(any(test, feature = "shadow-verify"))]
+                    if let Ok(legacy) = cat_bridge::LegacyAstTree::from_graph(transformed_id, graph)
+                    {
+                        let mut cat_ctx = cat_core::CatRuntimeContext::default();
+                        let mut bridge_ctx = cat_bridge::LegacyBridgeContext::default();
+                        if let Ok(status) = cat_bridge::ShadowVerifyHarness::verify_roundtrip(
+                            &legacy,
+                            &mut cat_ctx,
+                            &mut bridge_ctx,
+                        ) {
+                            res.metadata
+                                .insert("cat_bridge_status".to_string(), format!("{status:?}"));
+                        }
+                    }
                     res
                 }
                 Err(e) => OperationResult::error(e.to_string()),

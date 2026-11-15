@@ -598,3 +598,79 @@ impl HolonomicFunction for ErrorFunctionErf {
         op
     }
 }
+
+/// Airy function $\operatorname{Ai}(x)$ / $\operatorname{Bi}(x)$.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AiryAi;
+
+impl HolonomicFunction for AiryAi {
+    /// Annihilating ODE: $\partial_x^2 - x = 0$.
+    fn annihilator(&self) -> WeylOperator {
+        let mut op = WeylOperator::zero(1);
+        op.terms
+            .push(WeylTerm::new(1.0, WeylMonomial::new(vec![0], vec![2])));
+        op.terms
+            .push(WeylTerm::new(-1.0, WeylMonomial::new(vec![1], vec![0])));
+        op.normalize();
+        op
+    }
+}
+
+/// Laguerre polynomial $L_n(x)$.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaguerreL {
+    pub n: f64,
+}
+
+impl HolonomicFunction for LaguerreL {
+    /// Annihilating ODE: $x \partial_x^2 + (1 - x) \partial_x + n = 0$.
+    fn annihilator(&self) -> WeylOperator {
+        let mut op = WeylOperator::zero(1);
+        op.terms
+            .push(WeylTerm::new(1.0, WeylMonomial::new(vec![1], vec![2])));
+        op.terms
+            .push(WeylTerm::new(1.0, WeylMonomial::new(vec![0], vec![1])));
+        op.terms
+            .push(WeylTerm::new(-1.0, WeylMonomial::new(vec![1], vec![1])));
+        op.terms
+            .push(WeylTerm::new(self.n, WeylMonomial::new(vec![0], vec![0])));
+        op.normalize();
+        op
+    }
+}
+
+/// Unified lookup bridging special functions to their annihilating Weyl D-module ODEs.
+pub struct HolonomicDModuleClosure;
+
+impl HolonomicDModuleClosure {
+    pub fn annihilator_for_special(name: &str, param: f64) -> Option<WeylOperator> {
+        match name.to_ascii_lowercase().as_str() {
+            "bessel_j" | "besselj" => Some(BesselJ { nu: param }.annihilator()),
+            "hermite_h" | "hermiteh" => Some(HermiteH { n: param.round().max(0.0) as usize }.annihilator()),
+            "legendre_p" | "legendrep" => Some(LegendreP { n: param.round().max(0.0) as usize }.annihilator()),
+            "erf" => Some(ErrorFunctionErf.annihilator()),
+            "airy_ai" | "airyai" | "airy_bi" | "airybi" => Some(AiryAi.annihilator()),
+            "laguerre_l" | "laguerrel" => Some(LaguerreL { n: param }.annihilator()),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_holonomic_special_function_ode_closure() {
+        let airy = HolonomicDModuleClosure::annihilator_for_special("airy_ai", 0.0)
+            .expect("airy_ai annihilator");
+        assert_eq!(airy.terms.len(), 2);
+
+        let lag = HolonomicDModuleClosure::annihilator_for_special("laguerre_l", 3.0)
+            .expect("laguerre_l annihilator");
+        assert_eq!(lag.terms.len(), 4);
+
+        assert!(HolonomicDModuleClosure::annihilator_for_special("bessel_j", 0.0).is_some());
+        assert!(HolonomicDModuleClosure::annihilator_for_special("erf", 0.0).is_some());
+    }
+}

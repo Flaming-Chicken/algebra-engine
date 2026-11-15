@@ -182,3 +182,6 @@ mod diffeq_classification_tests;
 
 #[path = "engine/control_systems_tests.rs"]
 mod control_systems_tests;
+
+#[path = "engine/reference_oracle_tests.rs"]
+mod reference_oracle_tests;

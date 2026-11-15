@@ -286,6 +286,41 @@ impl NotebookState {
                 ]
                 .join("\n");
             }
+            "desmos_fourier_sliders" => {
+                self.session.raw_document_text = [
+                    "# Desmos-Style Reactive Fourier Series Sliders",
+                    "// Drag sliders A1, A3, w to see live wave superposition.",
+                    "",
+                    "A1: Parameter = 1.00",
+                    "A3: Parameter = 0.33",
+                    "w: Parameter = 1.00",
+                    "x: Variable",
+                    "{ x in Reals | -6.28 <= x <= 6.28 }",
+                    "f(x) = A1 * sin(w * x) + A3 * sin(3 * w * x)",
+                ]
+                .join("\n");
+                self.session.slider_values.insert("A1".to_string(), 1.0);
+                self.session.slider_values.insert("A3".to_string(), 0.33);
+                self.session.slider_values.insert("w".to_string(), 1.0);
+            }
+            "geogebra_conic_locus" => {
+                self.session.raw_document_text = [
+                    "# GeoGebra-Style Reactive Conic & Tangent Locus",
+                    "// Modulate semi-axes a, b and tangent point x0.",
+                    "",
+                    "a: Parameter = 3.00",
+                    "b: Parameter = 2.00",
+                    "x0: Parameter = 1.50",
+                    "x: Variable",
+                    "{ x in Reals | -3 <= x <= 3 }",
+                    "y(x) = b * sqrt(1 - (x / a)^2)",
+                    "d(x^2 / a^2 + y^2 / b^2 - 1) / dx",
+                ]
+                .join("\n");
+                self.session.slider_values.insert("a".to_string(), 3.0);
+                self.session.slider_values.insert("b".to_string(), 2.0);
+                self.session.slider_values.insert("x0".to_string(), 1.5);
+            }
             _ => {
                 self.session.raw_document_text = "# Blank Notepad\nx^2 + 1".to_string();
             }

@@ -126,4 +126,50 @@ impl ProofTrace {
         out.push_str("  trivial.\nQed.\n");
         out
     }
+
+    /// Internally verify every step `(before, after)` in the trace for algebraic equivalence
+    /// using deterministic/Schwartz-Zippel verification before exporting Lean 4 / Coq certificates.
+    pub fn verify_steps(&self, graph: &ExprGraph) -> Result<usize, String> {
+        for (idx, step) in self.steps.iter().enumerate() {
+            if step.before == step.after {
+                continue;
+            }
+            let verif = algebra_core::probabilistic::ProbabilisticVerifier::verify_equivalence(
+                graph,
+                step.before,
+                step.after,
+                1e-12,
+            );
+            if !*verif.as_ref() {
+                return Err(format!(
+                    "Proof step {} ('{}') failed internal equivalence verification",
+                    idx, step.rule_name
+                ));
+            }
+        }
+        Ok(self.steps.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use algebra_core::ExprParser;
+
+    #[test]
+    fn test_proof_trace_internal_step_verification() {
+        let graph = ExprGraph::new();
+        let parser = ExprParser::new(&graph);
+        let a = parser.parse("(x + 1)^2").expect("parse a");
+        let b = parser.parse("x^2 + 2*x + 1").expect("parse b");
+        let bad = parser.parse("x^2 + 3*x + 1").expect("parse bad");
+
+        let mut ok_trace = ProofTrace::new();
+        ok_trace.add_step("expand_square", a, b);
+        assert_eq!(ok_trace.verify_steps(&graph), Ok(1));
+
+        let mut bad_trace = ProofTrace::new();
+        bad_trace.add_step("bogus_rule", a, bad);
+        assert!(bad_trace.verify_steps(&graph).is_err());
+    }
 }

@@ -7,6 +7,6 @@ pub mod se3_rotor;
 pub mod wavefront;
 
 pub use amitsur_levitzki::{AmitsurLevitzki, Matrix2Fp};
-pub use scheduler::AnytimeHandle;
+pub use scheduler::{AnytimeBudget, AnytimeHandle, FidelityStream, MultiFidelityOp, tier0_ball_result};
 pub use se3_rotor::Se3Rotor;
 pub use wavefront::{WavefrontLevel, WavefrontSchedule};

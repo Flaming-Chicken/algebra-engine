@@ -273,7 +273,7 @@ impl Simplifier {
 
         let (rules, _features) = DynamicRuleSelector::select_rules(graph, root, goal);
 
-        let runner = Runner::default().with_expr(&rec_expr).run(&rules);
+        let runner = Self::bounded_runner(&rec_expr).run(&rules);
 
         let extractor = egg::Extractor::new(&runner.egraph, AlgebraicCostFunction);
         let (best_cost, best_expr) = extractor.find_best(runner.roots[0]);
@@ -282,11 +282,16 @@ impl Simplifier {
         Self::egg_to_expr(graph, &best_expr)
     }
 
-    /// Extract simplified representation minimizing total AST node count (smallest tree depth/size).
-    pub fn min_tree(graph: &ExprGraph, root: ExprId) -> SimplifyResult<ExprId> {
-        let mut rec_expr = RecExpr::default();
-        let _egg_root = Self::expr_to_egg(graph, root, &mut rec_expr)?;
-        let rules: Vec<Rewrite<SymbolicLang, ()>> = vec![
+    fn bounded_runner(rec_expr: &RecExpr<SymbolicLang>) -> Runner<SymbolicLang, ()> {
+        Runner::default()
+            .with_node_limit(15_000)
+            .with_iter_limit(30)
+            .with_time_limit(std::time::Duration::from_millis(250))
+            .with_expr(rec_expr)
+    }
+
+    fn minimal_ring_rules() -> Vec<Rewrite<SymbolicLang, ()>> {
+        vec![
             egg::rewrite!("add-zero-r"; "(+ ?x 0)" => "?x"),
             egg::rewrite!("add-zero-l"; "(+ 0 ?x)" => "?x"),
             egg::rewrite!("mul-one-r";  "(* ?x 1)" => "?x"),
@@ -298,8 +303,15 @@ impl Simplifier {
             egg::rewrite!("mul-comm";   "(* ?x ?y)" => "(* ?y ?x)"),
             egg::rewrite!("add-assoc";  "(+ (+ ?a ?b) ?c)" => "(+ ?a (+ ?b ?c))"),
             egg::rewrite!("mul-assoc";  "(* (* ?a ?b) ?c)" => "(* ?a (* ?b ?c))"),
-        ];
-        let runner = Runner::default().with_expr(&rec_expr).run(&rules);
+        ]
+    }
+
+    /// Extract simplified representation minimizing total AST node count (smallest tree depth/size).
+    pub fn min_tree(graph: &ExprGraph, root: ExprId) -> SimplifyResult<ExprId> {
+        let mut rec_expr = RecExpr::default();
+        let _egg_root = Self::expr_to_egg(graph, root, &mut rec_expr)?;
+        let rules = Self::minimal_ring_rules();
+        let runner = Self::bounded_runner(&rec_expr).run(&rules);
         let extractor = egg::Extractor::new(&runner.egraph, NodeCountCostFunction);
         let (_, best_expr) = extractor.find_best(runner.roots[0]);
         Self::egg_to_expr(graph, &best_expr)
@@ -309,20 +321,8 @@ impl Simplifier {
     pub fn min_ops(graph: &ExprGraph, root: ExprId) -> SimplifyResult<ExprId> {
         let mut rec_expr = RecExpr::default();
         let _egg_root = Self::expr_to_egg(graph, root, &mut rec_expr)?;
-        let rules: Vec<Rewrite<SymbolicLang, ()>> = vec![
-            egg::rewrite!("add-zero-r"; "(+ ?x 0)" => "?x"),
-            egg::rewrite!("add-zero-l"; "(+ 0 ?x)" => "?x"),
-            egg::rewrite!("mul-one-r";  "(* ?x 1)" => "?x"),
-            egg::rewrite!("mul-one-l";  "(* 1 ?x)" => "?x"),
-            egg::rewrite!("mul-zero-r"; "(* ?x 0)" => "0"),
-            egg::rewrite!("mul-zero-l"; "(* 0 ?x)" => "0"),
-            egg::rewrite!("sub-self";   "(- ?x ?x)" => "0"),
-            egg::rewrite!("add-comm";   "(+ ?x ?y)" => "(+ ?y ?x)"),
-            egg::rewrite!("mul-comm";   "(* ?x ?y)" => "(* ?y ?x)"),
-            egg::rewrite!("add-assoc";  "(+ (+ ?a ?b) ?c)" => "(+ ?a (+ ?b ?c))"),
-            egg::rewrite!("mul-assoc";  "(* (* ?a ?b) ?c)" => "(* ?a (* ?b ?c))"),
-        ];
-        let runner = Runner::default().with_expr(&rec_expr).run(&rules);
+        let rules = Self::minimal_ring_rules();
+        let runner = Self::bounded_runner(&rec_expr).run(&rules);
         let extractor = egg::Extractor::new(&runner.egraph, OpCountCostFunction);
         let (_, best_expr) = extractor.find_best(runner.roots[0]);
         Self::egg_to_expr(graph, &best_expr)
@@ -332,20 +332,8 @@ impl Simplifier {
     pub fn min_leaf(graph: &ExprGraph, root: ExprId) -> SimplifyResult<ExprId> {
         let mut rec_expr = RecExpr::default();
         let _egg_root = Self::expr_to_egg(graph, root, &mut rec_expr)?;
-        let rules: Vec<Rewrite<SymbolicLang, ()>> = vec![
-            egg::rewrite!("add-zero-r"; "(+ ?x 0)" => "?x"),
-            egg::rewrite!("add-zero-l"; "(+ 0 ?x)" => "?x"),
-            egg::rewrite!("mul-one-r";  "(* ?x 1)" => "?x"),
-            egg::rewrite!("mul-one-l";  "(* 1 ?x)" => "?x"),
-            egg::rewrite!("mul-zero-r"; "(* ?x 0)" => "0"),
-            egg::rewrite!("mul-zero-l"; "(* 0 ?x)" => "0"),
-            egg::rewrite!("sub-self";   "(- ?x ?x)" => "0"),
-            egg::rewrite!("add-comm";   "(+ ?x ?y)" => "(+ ?y ?x)"),
-            egg::rewrite!("mul-comm";   "(* ?x ?y)" => "(* ?y ?x)"),
-            egg::rewrite!("add-assoc";  "(+ (+ ?a ?b) ?c)" => "(+ ?a (+ ?b ?c))"),
-            egg::rewrite!("mul-assoc";  "(* (* ?a ?b) ?c)" => "(* ?a (* ?b ?c))"),
-        ];
-        let runner = Runner::default().with_expr(&rec_expr).run(&rules);
+        let rules = Self::minimal_ring_rules();
+        let runner = Self::bounded_runner(&rec_expr).run(&rules);
         let extractor = egg::Extractor::new(&runner.egraph, LeafCountCostFunction);
         let (_, best_expr) = extractor.find_best(runner.roots[0]);
         Self::egg_to_expr(graph, &best_expr)

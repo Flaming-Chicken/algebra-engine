@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "lyndon_ab_len4": [
+    "a",
+    "aaab",
+    "aab",
+    "aabb",
+    "ab",
+    "abb",
+    "abbb",
+    "b"
+  ],
+  "stirling_second_kind": [
+    {
+      "n": 1,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 2,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 2,
+      "k": 2,
+      "value": 1
+    },
+    {
+      "n": 3,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 3,
+      "k": 2,
+      "value": 3
+    },
+    {
+      "n": 3,
+      "k": 3,
+      "value": 1
+    },
+    {
+      "n": 4,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 4,
+      "k": 2,
+      "value": 7
+    },
+    {
+      "n": 4,
+      "k": 3,
+      "value": 6
+    },
+    {
+      "n": 4,
+      "k": 4,
+      "value": 1
+    },
+    {
+      "n": 5,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 5,
+      "k": 2,
+      "value": 15
+    },
+    {
+      "n": 5,
+      "k": 3,
+      "value": 25
+    },
+    {
+      "n": 5,
+      "k": 4,
+      "value": 10
+    },
+    {
+      "n": 5,
+      "k": 5,
+      "value": 1
+    },
+    {
+      "n": 6,
+      "k": 1,
+      "value": 1
+    },
+    {
+      "n": 6,
+      "k": 2,
+      "value": 31
+    },
+    {
+      "n": 6,
+      "k": 3,
+      "value": 90
+    },
+    {
+      "n": 6,
+      "k": 4,
+      "value": 65
+    },
+    {
+      "n": 6,
+      "k": 5,
+      "value": 15
+    },
+    {
+      "n": 6,
+      "k": 6,
+      "value": 1
+    }
+  ],
+  "bell_numbers": [
+    {
+      "n": 0,
+      "value": 1
+    },
+    {
+      "n": 1,
+      "value": 1
+    },
+    {
+      "n": 2,
+      "value": 2
+    },
+    {
+      "n": 3,
+      "value": 5
+    },
+    {
+      "n": 4,
+      "value": 15
+    },
+    {
+      "n": 5,
+      "value": 52
+    },
+    {
+      "n": 6,
+      "value": 203
+    }
+  ],
+  "riemann_contractions": [
+    {
+      "name": "riemann_antisym_pair_01",
+      "perm": [
+        1,
+        0,
+        2,
+        3
+      ],
+      "expected_canonical": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "expected_sign": -1
+    },
+    {
+      "name": "riemann_pair_swap",
+      "perm": [
+        2,
+        3,
+        0,
+        1
+      ],
+      "expected_canonical": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "expected_sign": 1
+    },
+    {
+      "name": "riemann_both_pairs_antisym",
+      "perm": [
+        3,
+        2,
+        1,
+        0
+      ],
+      "expected_canonical": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "expected_sign": 1
+    }
+  ],
+  "transforms": [
+    {
+      "kind": "laplace",
+      "input": "exp(-2*t)",
+      "s_sample": 3.0,
+      "expected_value": 0.2
+    },
+    {
+      "kind": "z_transform",
+      "input": "0.5^n",
+      "z_sample": 2.0,
+      "expected_value": 1.3333333333333333
+    },
+    {
+      "kind": "fourier",
+      "input": "exp(-t^2)",
+      "omega_sample": 2.0,
+      "expected_value": 0.6520493321732922
+    }
+  ],
+  "ito_colombeau": {
+    "ito_brownian_square": {
+      "f": "W^2",
+      "drift_coeff": 1.0,
+      "diffusion_coeff_expr": "2*W"
+    },
+    "colombeau_heaviside_sq_deriv_at_half": {
+      "x": 0.5,
+      "expected_product_coeff": 1.0
+    }
+  }
+}

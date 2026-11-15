@@ -13,6 +13,12 @@ workspace = true
 
 [dependencies]
 algebra-core.workspace = true
+cat-core.workspace = true
+cat-bridge.workspace = true
+cat-anytime.workspace = true
+cat-numbers.workspace = true
+cat-egraph.workspace = true
+cat-tangent.workspace = true
 bnum.workspace = true
 num.workspace = true
 num-rational.workspace = true
@@ -39,6 +45,7 @@ sml-lake.workspace = true
 [features]
 default = ["serde"]
 serde = ["dep:serde", "algebra-core/serde"]
+shadow-verify = []
 
 [dev-dependencies]
 criterion.workspace = true

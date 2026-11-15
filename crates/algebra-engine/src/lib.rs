@@ -15,6 +15,7 @@ pub mod branch;
 pub mod cad;
 pub mod calculus;
 pub mod cartan;
+pub mod cat_eval;
 pub mod cft;
 pub mod combinatorics;
 pub mod control;
@@ -189,4 +190,5 @@ pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
 };
+pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};

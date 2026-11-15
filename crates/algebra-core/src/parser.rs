@@ -252,16 +252,23 @@ impl<'a> ExprParser<'a> {
     fn parse_term<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
         let (input, lhs) = self.parse_factor(input)?;
         let (input, ops) = nom::multi::many0(tuple((
-            delimited(multispace0, alt((char('*'), char('/'))), multispace0),
+            delimited(
+                multispace0,
+                alt((tag(".*"), tag("./"), tag("*"), tag("/"), tag("\\"))),
+                multispace0,
+            ),
             |i| self.parse_factor(i),
         )))(input)?;
 
         let mut current = lhs;
         for (op, rhs) in ops {
-            if op == '*' {
-                current = self.graph.mul([current, rhs]);
-            } else {
-                current = self.graph.div(current, rhs);
+            match op {
+                "*" => current = self.graph.mul([current, rhs]),
+                "/" => current = self.graph.div(current, rhs),
+                ".*" => current = self.graph.function("elem_mul", [current, rhs]),
+                "./" => current = self.graph.function("elem_div", [current, rhs]),
+                "\\" => current = self.graph.function("mldivide", [current, rhs]),
+                _ => {}
             }
         }
 
@@ -279,12 +286,16 @@ impl<'a> ExprParser<'a> {
         }
         let (input, base) = self.parse_primary(input)?;
         let (input, exp_opt) = opt(tuple((
-            delimited(multispace0, char('^'), multispace0),
+            delimited(multispace0, alt((tag(".^"), tag("^"))), multispace0),
             |i| self.parse_factor(i),
         )))(input)?;
 
-        if let Some((_, exp)) = exp_opt {
-            Ok((input, self.graph.pow(base, exp)))
+        if let Some((op, exp)) = exp_opt {
+            if op == ".^" {
+                Ok((input, self.graph.function("elem_pow", [base, exp])))
+            } else {
+                Ok((input, self.graph.pow(base, exp)))
+            }
         } else {
             Ok((input, base))
         }
@@ -294,12 +305,60 @@ impl<'a> ExprParser<'a> {
         delimited(
             multispace0,
             alt((
+                |i| self.parse_matlab_matrix(i),
                 |i| self.parse_number(i),
                 |i| self.parse_symbol_or_fn(i),
                 delimited(char('('), |i| self.parse_expr(i), char(')')),
             )),
             multispace0,
         )(input)
+    }
+
+    fn parse_matlab_matrix<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
+        let (mut rest, _) = char('[')(input)?;
+        let mut rows = Vec::new();
+        loop {
+            let (r, _) = multispace0(rest)?;
+            rest = r;
+            if let Some(after) = rest.strip_prefix(']') {
+                rest = after;
+                break;
+            }
+            let mut cols = Vec::new();
+            loop {
+                let (r, _) = multispace0(rest)?;
+                rest = r;
+                if rest.starts_with(';') || rest.starts_with(']') {
+                    break;
+                }
+                let (r, elem) = self.parse_expr(rest)?;
+                cols.push(elem);
+                let (r, _) = multispace0(r)?;
+                rest = r.strip_prefix(',').unwrap_or(r);
+            }
+            if cols.is_empty() {
+                return Err(nom::Err::Error(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::SeparatedList,
+                )));
+            }
+            rows.push(cols);
+            if let Some(after_semi) = rest.strip_prefix(';') {
+                rest = after_semi;
+            }
+        }
+        if rows.is_empty() {
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::SeparatedList,
+            )));
+        }
+
+        let row_exprs: Vec<ExprId> = rows
+            .into_iter()
+            .map(|cols| self.graph.function("row", cols))
+            .collect();
+        Ok((rest, self.graph.function("matrix", row_exprs)))
     }
 
     fn parse_number<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
@@ -2328,5 +2387,45 @@ pub fn parse_operation(input: &str) -> MathOperation {
     // Fallback: Default Expression/Equation
     MathOperation::Expression {
         raw: input.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod matlab_syntax_tests {
+    use super::*;
+    use crate::ExprKind;
+
+    #[test]
+    fn test_matlab_matrix_and_elementwise_syntax() {
+        let graph = ExprGraph::new();
+        let parser = ExprParser::new(&graph);
+
+        let mat = parser.parse("[1 2; 3 4]").expect("parse matrix");
+        assert!(matches!(graph.get(mat).kind, ExprKind::Function { .. }));
+
+        let mldiv = parser.parse("A \\ b").expect("parse backslash");
+        if let ExprKind::Function { name, args } = &graph.get(mldiv).kind {
+            assert_eq!(graph.symbols.resolve(*name).as_deref(), Some("mldivide"));
+            assert_eq!(args.len(), 2);
+        } else {
+            panic!("expected mldivide");
+        }
+
+        let elem_mul = parser.parse("x .* y").expect("parse elem_mul");
+        if let ExprKind::Function { name, .. } = &graph.get(elem_mul).kind {
+            assert_eq!(graph.symbols.resolve(*name).as_deref(), Some("elem_mul"));
+        } else {
+            panic!("expected elem_mul");
+        }
+
+        let elem_pow = parser.parse("x .^ 2").expect("parse elem_pow");
+        if let ExprKind::Function { name, .. } = &graph.get(elem_pow).kind {
+            assert_eq!(graph.symbols.resolve(*name).as_deref(), Some("elem_pow"));
+        } else {
+            panic!("expected elem_pow");
+        }
+
+        let held = parser.parse("hold(x + 0)").expect("parse hold");
+        assert!(matches!(graph.get(held).kind, ExprKind::Function { .. }));
     }
 }

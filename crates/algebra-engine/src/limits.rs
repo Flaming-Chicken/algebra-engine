@@ -68,16 +68,19 @@ impl LimitEngine {
             return Ok(simplified_sub);
         }
 
-        // 2. Multi-Order L'Hôpital rule for rational fractions f(x)/g(x)
+        // 2. Gruntz MRV first for exponential / logarithmic limits at infinity
+        //    (avoids endless L'Hopital cycling on e^x / e^{x + e^{-x}} etc.)
+        if direction == LimitDirection::PositiveInfinity || Self::is_infinity_node(graph, point) {
+            if let Ok(res) = Self::eval_gruntz_infinity(graph, expr, wrt) {
+                return Ok(res);
+            }
+        }
+
+        // 3. Swell- and cycle-guarded Multi-Order L'Hopital rule for rational fractions f(x)/g(x)
         if let ExprKind::Div(num, den) = graph.get(expr).kind
             && let Some(res) = Self::eval_lhopital(graph, num, den, wrt, point, 10)?
         {
             return Ok(res);
-        }
-
-        // 3. Gruntz MRV heuristic for exponential / logarithmic limits at infinity
-        if direction == LimitDirection::PositiveInfinity || Self::is_infinity_node(graph, point) {
-            return Self::eval_gruntz_infinity(graph, expr, wrt);
         }
 
         // 4. Fallback Taylor series expansion around point
@@ -91,7 +94,8 @@ impl LimitEngine {
         Ok(simplified_sub)
     }
 
-    /// Successive L'Hôpital rule evaluation up to `max_order`.
+    /// Successive L'Hôpital rule evaluation up to `max_order` with cycle detection
+    /// and derivative-swell growth caps to prevent infinite/exponential blowup.
     pub fn eval_lhopital(
         graph: &ExprGraph,
         mut num: ExprId,
@@ -100,6 +104,11 @@ impl LimitEngine {
         point: ExprId,
         max_order: usize,
     ) -> AlgebraResult<Option<ExprId>> {
+        let mut seen = std::collections::HashSet::with_capacity(max_order + 1);
+        seen.insert((num, den));
+        let mut prev_nodes = Self::expr_node_count(graph, num) + Self::expr_node_count(graph, den);
+        let mut consecutive_growth = 0usize;
+
         for _ in 0..max_order {
             let d_num = graph.diff(num, wrt);
             let d_den = graph.diff(den, wrt);
@@ -108,6 +117,24 @@ impl LimitEngine {
                 // Denominator derivative vanished
                 return Ok(None);
             }
+
+            // Cycle guard: repeated (num, den) pair -> abort L'Hopital
+            if !seen.insert((d_num, d_den)) {
+                return Ok(None);
+            }
+
+            // Swell guard: abort if total AST/DAG footprint more than doubles for 2 consecutive steps
+            let cur_nodes =
+                Self::expr_node_count(graph, d_num) + Self::expr_node_count(graph, d_den);
+            if cur_nodes > prev_nodes.saturating_mul(2).max(16) {
+                consecutive_growth += 1;
+                if consecutive_growth >= 2 {
+                    return Ok(None);
+                }
+            } else {
+                consecutive_growth = 0;
+            }
+            prev_nodes = cur_nodes;
 
             let sub_num = graph.substitute(d_num, wrt, point);
             let sub_den = graph.substitute(d_den, wrt, point);
@@ -144,6 +171,31 @@ impl LimitEngine {
         }
 
         Ok(None)
+    }
+
+    /// Count unique DAG nodes reachable from `root` in O(|V|) using a visited set.
+    fn expr_node_count(graph: &ExprGraph, root: ExprId) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            match &graph.get(id).kind {
+                ExprKind::Add(ts) | ExprKind::Mul(ts) => stack.extend(ts.iter().copied()),
+                ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
+                    stack.push(*a);
+                    stack.push(*b);
+                }
+                ExprKind::Neg(a) => stack.push(*a),
+                ExprKind::Function { args, .. } => stack.extend(args.iter().copied()),
+                _ => {}
+            }
+            if seen.len() >= 4096 {
+                break;
+            }
+        }
+        seen.len()
     }
 
     /// Constant expression reduction helper (e.g. cos(0)->1, sin(0)->0, exp(0)->1, 1-1->0).

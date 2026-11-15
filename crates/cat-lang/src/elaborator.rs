@@ -57,4 +57,54 @@ impl Elaborator {
             CatExpr::Call { .. } => Ok(DimVector::DIMENSIONLESS),
         }
     }
+
+    /// Lower a [`CatExpr`] directly into a `cat-core` [`CatTerm`] inside [`CatRuntimeContext`]
+    /// using `cat-bridge` (`Lift ⊣ Lower`) after dimensional elaboration.
+    pub fn lower_to_cat_term(
+        &self,
+        expr: &CatExpr,
+        ctx: &mut cat_core::CatRuntimeContext,
+    ) -> Result<cat_core::CatTerm, ElaboratorError> {
+        let _dim = self.infer_dimension(expr)?;
+        let legacy = Self::to_legacy_ast(expr);
+        let mut bridge = cat_bridge::LegacyBridgeContext::default();
+        use cat_bridge::RetrofittableAst;
+        legacy
+            .lift_to_cat(ctx, &mut bridge)
+            .map_err(|_| ElaboratorError::UnknownVariable("cat_bridge_lift".to_string()))
+    }
+
+    fn to_legacy_ast(expr: &CatExpr) -> cat_bridge::LegacyAstTree {
+        match expr {
+            CatExpr::Number(v) => {
+                cat_bridge::LegacyAstTree::Number(algebra_core::Number::from_f64_lossless(*v))
+            }
+            CatExpr::Complex { re, .. } => {
+                cat_bridge::LegacyAstTree::Number(algebra_core::Number::from_f64_lossless(*re))
+            }
+            CatExpr::Variable(name) => cat_bridge::LegacyAstTree::Symbol(name.clone()),
+            CatExpr::BinaryOp { op, lhs, rhs } => {
+                let l = Self::to_legacy_ast(lhs);
+                let r = Self::to_legacy_ast(rhs);
+                match op.as_str() {
+                    "+" => cat_bridge::LegacyAstTree::Add(vec![l, r]),
+                    "*" => cat_bridge::LegacyAstTree::Mul(vec![l, r]),
+                    "-" => cat_bridge::LegacyAstTree::Add(vec![
+                        l,
+                        cat_bridge::LegacyAstTree::Neg(Box::new(r)),
+                    ]),
+                    "/" => cat_bridge::LegacyAstTree::Div(Box::new(l), Box::new(r)),
+                    "^" => cat_bridge::LegacyAstTree::Pow(Box::new(l), Box::new(r)),
+                    other => cat_bridge::LegacyAstTree::Function {
+                        name: other.to_string(),
+                        args: vec![l, r],
+                    },
+                }
+            }
+            CatExpr::Call { func, args } => cat_bridge::LegacyAstTree::Function {
+                name: func.clone(),
+                args: args.iter().map(Self::to_legacy_ast).collect(),
+            },
+        }
+    }
 }

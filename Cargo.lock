@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "algebra-advanced"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "algebra-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "auto-promoters",
@@ -208,11 +208,17 @@ dependencies = [
 
 [[package]]
 name = "algebra-engine"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
  "bnum",
+ "cat-anytime",
+ "cat-bridge",
+ "cat-core",
+ "cat-egraph",
+ "cat-numbers",
+ "cat-tangent",
  "criterion",
  "dashmap",
  "dashu",
@@ -611,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "auto-promoters"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bnum",
  "criterion",
@@ -902,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "cat-anytime"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -917,7 +923,7 @@ dependencies = [
 
 [[package]]
 name = "cat-bridge"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -932,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "cat-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "dashmap",
@@ -949,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "cat-egraph"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -962,9 +968,11 @@ dependencies = [
 
 [[package]]
 name = "cat-lang"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
+ "algebra-core",
+ "cat-bridge",
  "cat-core",
  "serde",
  "serde_json",
@@ -975,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "cat-numbers"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -991,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "cat-tangent"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -5778,7 +5786,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "urae"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "algebra-advanced",
  "algebra-core",
@@ -5791,7 +5799,7 @@ dependencies = [
 
 [[package]]
 name = "urae-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "algebra-advanced",
  "algebra-core",
@@ -5806,7 +5814,7 @@ dependencies = [
 
 [[package]]
 name = "urae-ffi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "algebra-core",
  "algebra-engine",
@@ -5815,7 +5823,7 @@ dependencies = [
 
 [[package]]
 name = "urae-kernel"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -5825,7 +5833,7 @@ dependencies = [
 
 [[package]]
 name = "urae-lsp"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "mimalloc",
  "serde",
@@ -5836,7 +5844,7 @@ dependencies = [
 
 [[package]]
 name = "urae-notebook"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -5870,7 +5878,7 @@ dependencies = [
 
 [[package]]
 name = "urae-py"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -5880,13 +5888,15 @@ dependencies = [
 
 [[package]]
 name = "urae-tests"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ahash 0.8.12",
  "algebra-advanced",
  "algebra-core",
  "algebra-engine",
  "bnum",
+ "cat-core",
+ "cat-numbers",
  "dashmap",
  "num-bigint",
  "num-rational",
@@ -5907,7 +5917,7 @@ dependencies = [
 
 [[package]]
 name = "urae-wasm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "algebra-core",
  "algebra-engine",

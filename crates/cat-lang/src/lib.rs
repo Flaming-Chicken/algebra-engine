@@ -4,7 +4,9 @@
 pub mod ast;
 pub mod binary;
 pub mod elaborator;
+pub mod parser;
 
 pub use ast::{CatExpr, CatPadNotebook, CatScriptAst, CatStatement, CatTypeAnnotation, PadCell};
 pub use binary::CatBinary;
 pub use elaborator::{Elaborator, ElaboratorError};
+pub use parser::{CatParseError, CatScriptParser};

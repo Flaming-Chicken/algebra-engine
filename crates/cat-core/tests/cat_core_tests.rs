@@ -185,3 +185,31 @@ fn test_matrix_exponentiation_dimensional_validity() {
         "Inconsistent graded matrix exp must fail"
     );
 }
+
+#[test]
+fn test_moderated_uncertainty_lattice_pac_join() {
+    use cat_core::{SpreadKind, UncertaintyKind};
+
+    let ball = UncertaintyKind::WorstCaseBall(UniversalBall::real_with_radius(10.0, 0.5));
+    let gaussian = UncertaintyKind::ProbabilisticSpread {
+        mean: 2.0,
+        std_dev: 0.25,
+        dist: SpreadKind::Gaussian,
+        pac_delta: None,
+    };
+
+    let joined = ball.join_additive(&gaussian);
+    match joined {
+        UncertaintyKind::ProbabilisticSpread {
+            mean,
+            std_dev,
+            pac_delta,
+            ..
+        } => {
+            assert!((mean - 12.0).abs() < 1e-12);
+            assert!((std_dev - 0.75).abs() < 1e-12);
+            assert!(pac_delta.is_some());
+        }
+        other => panic!("Expected ProbabilisticSpread PAC join, got {other:?}"),
+    }
+}

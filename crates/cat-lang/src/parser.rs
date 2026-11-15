@@ -83,7 +83,10 @@ impl CatScriptParser {
             },
             ExprKind::Function { name, args } => CatExpr::Call {
                 func: graph.symbols.resolve(*name).unwrap_or_default(),
-                args: args.iter().map(|&a| Self::expr_id_to_cat(graph, a)).collect(),
+                args: args
+                    .iter()
+                    .map(|&a| Self::expr_id_to_cat(graph, a))
+                    .collect(),
             },
             _ => CatExpr::Call {
                 func: "opaque".to_string(),

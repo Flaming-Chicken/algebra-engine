@@ -307,11 +307,8 @@ impl SchreierSims {
             .collect();
 
         let mut strong_gens: Vec<Vec<(Vec<u8>, i8)>> = vec![Vec::new(); n];
-        let mut worklist: Vec<(Vec<u8>, i8)> = gens
-            .iter()
-            .filter(|(g, _)| g.len() == n)
-            .cloned()
-            .collect();
+        let mut worklist: Vec<(Vec<u8>, i8)> =
+            gens.iter().filter(|(g, _)| g.len() == n).cloned().collect();
 
         while let Some((mut g, mut s)) = worklist.pop() {
             // Sift g through levels 0..n

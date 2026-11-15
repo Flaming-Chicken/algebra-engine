@@ -117,7 +117,11 @@ impl<O: Clone> FidelityStream<O> {
 }
 
 /// Convenience constructor for a Tier-0 `ApproxResult`.
-pub fn tier0_ball_result<O>(value: O, ball: UniversalBall, method: &'static str) -> ApproxResult<O> {
+pub fn tier0_ball_result<O>(
+    value: O,
+    ball: UniversalBall,
+    method: &'static str,
+) -> ApproxResult<O> {
     ApproxResult {
         value,
         mode_used: FidelityMode::NumericalApprox,

@@ -387,7 +387,10 @@ pub enum SmtCheckStatus {
 }
 
 impl SmtExpr {
-    fn eval_interval(&self, env: &std::collections::HashMap<String, (f64, f64)>) -> Option<(f64, f64)> {
+    fn eval_interval(
+        &self,
+        env: &std::collections::HashMap<String, (f64, f64)>,
+    ) -> Option<(f64, f64)> {
         match self {
             SmtExpr::Int(i) => Some((*i as f64, *i as f64)),
             SmtExpr::Real(r) => Some((*r, *r)),
@@ -472,7 +475,11 @@ impl SmtExpr {
                         SmtCheckStatus::Sat => {}
                     }
                 }
-                if all_sat { SmtCheckStatus::Sat } else { SmtCheckStatus::Unknown }
+                if all_sat {
+                    SmtCheckStatus::Sat
+                } else {
+                    SmtCheckStatus::Unknown
+                }
             }
             SmtExpr::Or(parts) => {
                 let mut any_unknown = false;
@@ -483,21 +490,33 @@ impl SmtExpr {
                         SmtCheckStatus::Unsat => {}
                     }
                 }
-                if any_unknown { SmtCheckStatus::Unknown } else { SmtCheckStatus::Unsat }
+                if any_unknown {
+                    SmtCheckStatus::Unknown
+                } else {
+                    SmtCheckStatus::Unsat
+                }
             }
             SmtExpr::Lt(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
                 (Some(ia), Some(ib)) => {
-                    if ia.1 < ib.0 { SmtCheckStatus::Sat }
-                    else if ia.0 >= ib.1 { SmtCheckStatus::Unsat }
-                    else { SmtCheckStatus::Unknown }
+                    if ia.1 < ib.0 {
+                        SmtCheckStatus::Sat
+                    } else if ia.0 >= ib.1 {
+                        SmtCheckStatus::Unsat
+                    } else {
+                        SmtCheckStatus::Unknown
+                    }
                 }
                 _ => SmtCheckStatus::Unknown,
             },
             SmtExpr::Le(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
                 (Some(ia), Some(ib)) => {
-                    if ia.1 <= ib.0 { SmtCheckStatus::Sat }
-                    else if ia.0 > ib.1 { SmtCheckStatus::Unsat }
-                    else { SmtCheckStatus::Unknown }
+                    if ia.1 <= ib.0 {
+                        SmtCheckStatus::Sat
+                    } else if ia.0 > ib.1 {
+                        SmtCheckStatus::Unsat
+                    } else {
+                        SmtCheckStatus::Unknown
+                    }
                 }
                 _ => SmtCheckStatus::Unknown,
             },
@@ -505,8 +524,9 @@ impl SmtExpr {
             SmtExpr::Ge(a, b) => SmtExpr::Le(b.clone(), a.clone()).check_assertion_interval(env),
             SmtExpr::Eq(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
                 (Some(ia), Some(ib)) => {
-                    if ia.1 < ib.0 || ib.1 < ia.0 { SmtCheckStatus::Unsat }
-                    else if ia.0 == ia.1 && ib.0 == ib.1 && (ia.0 - ib.0).abs() < 1e-12 {
+                    if ia.1 < ib.0 || ib.1 < ia.0 {
+                        SmtCheckStatus::Unsat
+                    } else if ia.0 == ia.1 && ib.0 == ib.1 && (ia.0 - ib.0).abs() < 1e-12 {
                         SmtCheckStatus::Sat
                     } else {
                         SmtCheckStatus::Unknown

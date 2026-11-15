@@ -225,7 +225,10 @@ fn c_div(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
     if denom == 0.0 {
         return (f64::NAN, f64::NAN);
     }
-    ((a.0 * b.0 + a.1 * b.1) / denom, (a.1 * b.0 - a.0 * b.1) / denom)
+    (
+        (a.0 * b.0 + a.1 * b.1) / denom,
+        (a.1 * b.0 - a.0 * b.1) / denom,
+    )
 }
 
 /// Generalized symbolic and non-uniform transform engine unifying:
@@ -249,22 +252,34 @@ impl GeneralizedTransformEngine {
         match &graph.get(expr).kind {
             ExprKind::Number(algebra_core::Number::Integer(1)) => {
                 let denom = graph.sub(z_sym, one);
-                Ok((graph.div(z_sym, denom), RocSpec::ExteriorDisk { r_min: 1.0 }))
+                Ok((
+                    graph.div(z_sym, denom),
+                    RocSpec::ExteriorDisk { r_min: 1.0 },
+                ))
             }
             ExprKind::Symbol(sym) if *sym == n => {
                 let z_minus_1 = graph.sub(z_sym, one);
                 let two = graph.integer(2);
                 let denom = graph.pow(z_minus_1, two);
-                Ok((graph.div(z_sym, denom), RocSpec::ExteriorDisk { r_min: 1.0 }))
+                Ok((
+                    graph.div(z_sym, denom),
+                    RocSpec::ExteriorDisk { r_min: 1.0 },
+                ))
             }
             ExprKind::Pow(base, exp) => {
                 if let ExprKind::Symbol(sym) = &graph.get(*exp).kind {
                     if *sym == n {
                         let denom = graph.sub(z_sym, *base);
-                        return Ok((graph.div(z_sym, denom), RocSpec::ExteriorDisk { r_min: 1.0 }));
+                        return Ok((
+                            graph.div(z_sym, denom),
+                            RocSpec::ExteriorDisk { r_min: 1.0 },
+                        ));
                     }
                 }
-                Ok((Self::z_sum_fallback(graph, expr, n, z_sym), RocSpec::ExteriorDisk { r_min: 1.0 }))
+                Ok((
+                    Self::z_sum_fallback(graph, expr, n, z_sym),
+                    RocSpec::ExteriorDisk { r_min: 1.0 },
+                ))
             }
             _ => Ok((
                 Self::z_sum_fallback(graph, expr, n, z_sym),
@@ -416,12 +431,7 @@ impl GeneralizedTransformEngine {
     }
 
     /// Symbolic Mellin transform $\mathcal{M}\{f(t)\}(s) = \int_0^\infty t^{s-1} f(t)\,dt$.
-    pub fn mellin_transform(
-        graph: &ExprGraph,
-        expr: ExprId,
-        t: SymbolId,
-        s: SymbolId,
-    ) -> ExprId {
+    pub fn mellin_transform(graph: &ExprGraph, expr: ExprId, t: SymbolId, s: SymbolId) -> ExprId {
         let t_name = graph.symbols.resolve(t).unwrap_or_default();
         let s_name = graph.symbols.resolve(s).unwrap_or_default();
         let t_sym = graph.symbol(&t_name);
@@ -545,7 +555,10 @@ mod tests {
         let (z_one, roc) = GeneralizedTransformEngine::z_transform(&graph, graph.integer(1), n, z)
             .expect("z_transform");
         assert_eq!(roc, RocSpec::ExteriorDisk { r_min: 1.0 });
-        assert!(matches!(graph.get(z_one).kind, ExprKind::Mul(_) | ExprKind::Pow { .. } | ExprKind::Div { .. }));
+        assert!(matches!(
+            graph.get(z_one).kind,
+            ExprKind::Mul(_) | ExprKind::Pow { .. } | ExprKind::Div { .. }
+        ));
 
         // Non-uniform Z-transform at z = 2.0 for t = [0.0, 0.5, 1.0], x = [1.0, 2.0, 4.0]
         let nuz = GeneralizedTransformEngine::non_uniform_z_transform(
@@ -557,7 +570,8 @@ mod tests {
         assert!(nuz.1.abs() < 1e-12);
 
         // Chirp-Z at A=(1,0), W=(0.5,0) -> z_0=1, z_1=2
-        let czt = GeneralizedTransformEngine::chirp_z_transform(&[1.0, 2.0], 2, (0.5, 0.0), (1.0, 0.0));
+        let czt =
+            GeneralizedTransformEngine::chirp_z_transform(&[1.0, 2.0], 2, (0.5, 0.0), (1.0, 0.0));
         assert!((czt[0].0 - 3.0).abs() < 1e-12);
         assert!((czt[1].0 - 2.0).abs() < 1e-12);
 

@@ -646,8 +646,18 @@ impl HolonomicDModuleClosure {
     pub fn annihilator_for_special(name: &str, param: f64) -> Option<WeylOperator> {
         match name.to_ascii_lowercase().as_str() {
             "bessel_j" | "besselj" => Some(BesselJ { nu: param }.annihilator()),
-            "hermite_h" | "hermiteh" => Some(HermiteH { n: param.round().max(0.0) as usize }.annihilator()),
-            "legendre_p" | "legendrep" => Some(LegendreP { n: param.round().max(0.0) as usize }.annihilator()),
+            "hermite_h" | "hermiteh" => Some(
+                HermiteH {
+                    n: param.round().max(0.0) as usize,
+                }
+                .annihilator(),
+            ),
+            "legendre_p" | "legendrep" => Some(
+                LegendreP {
+                    n: param.round().max(0.0) as usize,
+                }
+                .annihilator(),
+            ),
             "erf" => Some(ErrorFunctionErf.annihilator()),
             "airy_ai" | "airyai" | "airy_bi" | "airybi" => Some(AiryAi.annihilator()),
             "laguerre_l" | "laguerrel" => Some(LaguerreL { n: param }.annihilator()),

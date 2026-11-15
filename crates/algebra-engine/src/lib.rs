@@ -93,6 +93,7 @@ pub use cad::{
 };
 pub use calculus::{FractionalCalculus, SymbolicCalculus, VariationalCalculus};
 pub use cartan::{DifferentialForm, FormBasis, VectorField};
+pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use cft::{KacMoodyAlgebra, OperatorProductExpansion, VirasoroAlgebra};
 pub use combinatorics::{
     bell_number, catalan_number, combinations, derangements, factorial, integer_partitions,
@@ -190,5 +191,4 @@ pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
 };
-pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};

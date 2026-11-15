@@ -67,12 +67,12 @@ fn test_zeta_and_eta_exact_values() {
     // zeta(2) = pi^2 / 6
     let z2 = graph.zeta(graph.integer(2));
     let eval_z2 = graph.evaluate_special(z2).unwrap();
-    assert_eq!(fmt.format(&graph, eval_z2).unwrap(), "(π^2) / (6)");
+    assert_eq!(fmt.format(&graph, eval_z2).unwrap(), "π^2 / 6");
 
     // zeta(4) = pi^4 / 90
     let z4 = graph.zeta(graph.integer(4));
     let eval_z4 = graph.evaluate_special(z4).unwrap();
-    assert_eq!(fmt.format(&graph, eval_z4).unwrap(), "(π^4) / (90)");
+    assert_eq!(fmt.format(&graph, eval_z4).unwrap(), "π^4 / 90");
 
     // zeta(-1) = -1/12
     let z_neg1 = graph.zeta(graph.integer(-1));
@@ -210,13 +210,13 @@ fn test_special_function_derivatives() {
     let si_x = graph.sine_integral(x);
     let d_si = graph.diff(si_x, x_sym);
     let d_si_str = fmt.format(&graph, d_si).unwrap();
-    assert_eq!(d_si_str, "(sin(x)) / (x)");
+    assert_eq!(d_si_str, "sin(x) / x");
 
     // d/dx [atan(x)] = 1 / (1 + x^2)
     let atan_x = graph.function("atan", [x]);
     let d_atan = graph.diff(atan_x, x_sym);
     let d_atan_str = fmt.format(&graph, d_atan).unwrap();
-    assert_eq!(d_atan_str, "(1) / (x^2 + 1)");
+    assert_eq!(d_atan_str, "1 / (x^2 + 1)");
 }
 
 // =========================================================================

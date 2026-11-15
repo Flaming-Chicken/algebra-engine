@@ -16,6 +16,168 @@ pub trait Formatter {
     fn format(&self, graph: &ExprGraph, root: ExprId) -> FormatResult<String>;
 }
 
+/// How tightly an expression's outermost operator binds, lowest first.
+///
+/// A child is parenthesised when its precedence is lower than its position
+/// requires: `(a + b) · c`, `(x^a)^b`, `a - (b + c)`, `x^(1/2)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Prec {
+    /// Relations and set operations.
+    Relation,
+    /// Sums, differences, and operators printed with trailing text (∫, Σ, d/dx).
+    Sum,
+    /// A leading minus sign: unary negation or a negative literal.
+    Negative,
+    /// Products, quotients and fractions.
+    Product,
+    /// Powers.
+    Power,
+    /// Symbols, non-negative integers, function calls, matrices.
+    Atom,
+}
+
+/// Precedence of the outermost operator of `id`, independent of output syntax.
+fn precedence(graph: &ExprGraph, id: ExprId) -> Prec {
+    use num_bigint::Sign;
+    match &graph.get(id).kind {
+        ExprKind::Number(num) => match num {
+            Number::Integer(i) if *i < 0 => Prec::Negative,
+            Number::BigInteger(b) if b.sign() == Sign::Minus => Prec::Negative,
+            Number::Rational(n, d) if (*n < 0) != (*d < 0) => Prec::Negative,
+            Number::Rational(..) => Prec::Product,
+            Number::BigRational(r) if r.numer().sign() == Sign::Minus => Prec::Negative,
+            Number::BigRational(_) => Prec::Product,
+            Number::Scientific { mantissa, .. } if *mantissa < 0 => Prec::Negative,
+            Number::Scientific { exponent, .. } if *exponent != 0 => Prec::Product,
+            Number::Float(bits) if f64::from_bits(*bits).is_sign_negative() => Prec::Negative,
+            Number::Constant(Constant::NegInfinity) => Prec::Negative,
+            _ => Prec::Atom,
+        },
+        ExprKind::Symbol(_) | ExprKind::Function { .. } | ExprKind::Matrix { .. } => Prec::Atom,
+        ExprKind::Add(_) | ExprKind::Sub(..) => Prec::Sum,
+        ExprKind::Neg(_) => Prec::Negative,
+        ExprKind::Mul(_) | ExprKind::Div(..) => Prec::Product,
+        ExprKind::Pow(..) => Prec::Power,
+        ExprKind::Relational { .. } | ExprKind::SetOperation { .. } => Prec::Relation,
+        _ => Prec::Sum,
+    }
+}
+
+/// The strings one output syntax uses for grouping and infix operators.
+struct Syntax {
+    open: &'static str,
+    close: &'static str,
+    plus: &'static str,
+    minus: &'static str,
+    times: &'static str,
+    /// Prefix of a formatted negative term (`-`), if the syntax has one that
+    /// can be turned into a subtraction.
+    neg_prefix: Option<&'static str>,
+}
+
+/// Format `id`, parenthesised if it binds more loosely than `min`.
+fn child<F: Formatter + ?Sized>(
+    f: &F,
+    syn: &Syntax,
+    graph: &ExprGraph,
+    id: ExprId,
+    min: Prec,
+) -> FormatResult<String> {
+    let text = f.format(graph, id)?;
+    if precedence(graph, id) < min {
+        Ok(format!("{}{}{}", syn.open, text, syn.close))
+    } else {
+        Ok(text)
+    }
+}
+
+/// `a + b - c`: terms that print with a leading minus become subtractions.
+fn format_sum<F: Formatter + ?Sized>(
+    f: &F,
+    syn: &Syntax,
+    graph: &ExprGraph,
+    terms: &[ExprId],
+) -> FormatResult<String> {
+    let mut out = String::new();
+    for (i, &t) in terms.iter().enumerate() {
+        let text = child(f, syn, graph, t, Prec::Sum)?;
+        if i == 0 {
+            out.push_str(&text);
+            continue;
+        }
+        match syn.neg_prefix.and_then(|neg| text.strip_prefix(neg)) {
+            Some(rest) => {
+                out.push_str(syn.minus);
+                out.push_str(rest);
+            }
+            None => {
+                out.push_str(syn.plus);
+                out.push_str(&text);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// `a · (b + c)`: sums are grouped; only the first factor may carry a minus.
+fn format_product<F: Formatter + ?Sized>(
+    f: &F,
+    syn: &Syntax,
+    graph: &ExprGraph,
+    factors: &[ExprId],
+) -> FormatResult<String> {
+    let mut parts = Vec::with_capacity(factors.len());
+    for (i, &factor) in factors.iter().enumerate() {
+        let min = if i == 0 {
+            Prec::Negative
+        } else {
+            Prec::Product
+        };
+        parts.push(child(f, syn, graph, factor, min)?);
+    }
+    Ok(parts.join(syn.times))
+}
+
+/// `a - (b + c)` and `a - (-b)`.
+fn format_difference<F: Formatter + ?Sized>(
+    f: &F,
+    syn: &Syntax,
+    graph: &ExprGraph,
+    lhs: ExprId,
+    rhs: ExprId,
+) -> FormatResult<String> {
+    let l = child(f, syn, graph, lhs, Prec::Sum)?;
+    let r = child(f, syn, graph, rhs, Prec::Product)?;
+    Ok(format!("{}{}{}", l, syn.minus, r))
+}
+
+const LATEX: Syntax = Syntax {
+    open: "\\left(",
+    close: "\\right)",
+    plus: " + ",
+    minus: " - ",
+    times: " \\cdot ",
+    neg_prefix: Some("-"),
+};
+
+const UNICODE: Syntax = Syntax {
+    open: "(",
+    close: ")",
+    plus: " + ",
+    minus: " - ",
+    times: " · ",
+    neg_prefix: Some("-"),
+};
+
+const MATHML: Syntax = Syntax {
+    open: "<mo>(</mo>",
+    close: "<mo>)</mo>",
+    plus: "<mo>+</mo>",
+    minus: "<mo>-</mo>",
+    times: "<mo>&middot;</mo>",
+    neg_prefix: None,
+};
+
 /// Formatter generating LaTeX string output.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LatexFormatter;
@@ -57,22 +219,11 @@ impl Formatter for LatexFormatter {
                     .unwrap_or_else(|| "x".to_string());
                 Ok(name)
             }
-            ExprKind::Add(terms) => {
-                let mut parts = Vec::new();
-                for &t in terms {
-                    parts.push(self.format(graph, t)?);
-                }
-                Ok(parts.join(" + "))
-            }
-            ExprKind::Mul(factors) => {
-                let mut parts = Vec::new();
-                for &f in factors {
-                    parts.push(self.format(graph, f)?);
-                }
-                Ok(parts.join(" \\cdot "))
-            }
+            ExprKind::Add(terms) => format_sum(self, &LATEX, graph, terms),
+            ExprKind::Mul(factors) => format_product(self, &LATEX, graph, factors),
             ExprKind::Pow(base, exp) => {
-                let b_str = self.format(graph, *base)?;
+                // The exponent sits in braces, so only the base needs grouping.
+                let b_str = child(self, &LATEX, graph, *base, Prec::Atom)?;
                 let e_str = self.format(graph, *exp)?;
                 Ok(format!("{{{}}}^{{{}}}", b_str, e_str))
             }
@@ -81,13 +232,9 @@ impl Formatter for LatexFormatter {
                 let d_str = self.format(graph, *den)?;
                 Ok(format!("\\frac{{{}}}{{{}}}", n_str, d_str))
             }
-            ExprKind::Sub(lhs, rhs) => {
-                let l_str = self.format(graph, *lhs)?;
-                let r_str = self.format(graph, *rhs)?;
-                Ok(format!("{} - {}", l_str, r_str))
-            }
+            ExprKind::Sub(lhs, rhs) => format_difference(self, &LATEX, graph, *lhs, *rhs),
             ExprKind::Neg(inner) => {
-                let i_str = self.format(graph, *inner)?;
+                let i_str = child(self, &LATEX, graph, *inner, Prec::Product)?;
                 Ok(format!("-{}", i_str))
             }
             ExprKind::Function { name, args } => {
@@ -321,37 +468,24 @@ impl Formatter for UnicodeFormatter {
                     .unwrap_or_else(|| "x".to_string());
                 Ok(name)
             }
-            ExprKind::Add(terms) => {
-                let mut parts = Vec::new();
-                for &t in terms {
-                    parts.push(self.format(graph, t)?);
-                }
-                Ok(parts.join(" + "))
-            }
-            ExprKind::Mul(factors) => {
-                let mut parts = Vec::new();
-                for &f in factors {
-                    parts.push(self.format(graph, f)?);
-                }
-                Ok(parts.join(" · "))
-            }
+            ExprKind::Add(terms) => format_sum(self, &UNICODE, graph, terms),
+            ExprKind::Mul(factors) => format_product(self, &UNICODE, graph, factors),
             ExprKind::Pow(base, exp) => {
-                let b_str = self.format(graph, *base)?;
-                let e_str = self.format(graph, *exp)?;
+                // `^` is right-associative, so a power in the exponent needs no
+                // grouping, but one in the base does: (x^a)^b.
+                let b_str = child(self, &UNICODE, graph, *base, Prec::Atom)?;
+                let e_str = child(self, &UNICODE, graph, *exp, Prec::Power)?;
                 Ok(format!("{}^{}", b_str, e_str))
             }
             ExprKind::Div(num, den) => {
-                let n_str = self.format(graph, *num)?;
-                let d_str = self.format(graph, *den)?;
-                Ok(format!("({}) / ({})", n_str, d_str))
+                // a / (b · c): the denominator must bind tighter than a product.
+                let n_str = child(self, &UNICODE, graph, *num, Prec::Negative)?;
+                let d_str = child(self, &UNICODE, graph, *den, Prec::Power)?;
+                Ok(format!("{} / {}", n_str, d_str))
             }
-            ExprKind::Sub(lhs, rhs) => {
-                let l_str = self.format(graph, *lhs)?;
-                let r_str = self.format(graph, *rhs)?;
-                Ok(format!("{} - {}", l_str, r_str))
-            }
+            ExprKind::Sub(lhs, rhs) => format_difference(self, &UNICODE, graph, *lhs, *rhs),
             ExprKind::Neg(inner) => {
-                let i_str = self.format(graph, *inner)?;
+                let i_str = child(self, &UNICODE, graph, *inner, Prec::Product)?;
                 Ok(format!("-{}", i_str))
             }
             ExprKind::Function { name, args } => {
@@ -540,24 +674,16 @@ impl Formatter for MathMLFormatter {
                     .unwrap_or_else(|| "x".to_string());
                 Ok(format!("<mi>{}</mi>", name))
             }
-            ExprKind::Add(terms) => {
-                let mut parts = Vec::new();
-                for &t in terms {
-                    parts.push(self.format(graph, t)?);
-                }
-                Ok(parts.join("<mo>+</mo>"))
-            }
-            ExprKind::Mul(factors) => {
-                let mut parts = Vec::new();
-                for &f in factors {
-                    parts.push(self.format(graph, f)?);
-                }
-                Ok(parts.join("<mo>&middot;</mo>"))
-            }
+            ExprKind::Add(terms) => format_sum(self, &MATHML, graph, terms),
+            ExprKind::Mul(factors) => format_product(self, &MATHML, graph, factors),
             ExprKind::Pow(base, exp) => {
-                let b_str = self.format(graph, *base)?;
+                // <msup> takes exactly two children, so each side is one <mrow>.
+                let b_str = child(self, &MATHML, graph, *base, Prec::Atom)?;
                 let e_str = self.format(graph, *exp)?;
-                Ok(format!("<msup>{}{}</msup>", b_str, e_str))
+                Ok(format!(
+                    "<msup><mrow>{}</mrow><mrow>{}</mrow></msup>",
+                    b_str, e_str
+                ))
             }
             _ => Ok(format!("<mi>{:?}</mi>", node.kind)),
         }

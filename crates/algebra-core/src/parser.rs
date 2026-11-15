@@ -76,27 +76,21 @@ pub fn normalize_latex_input(input: &str) -> String {
         .replace('ℤ', "Integers")
         .replace('ℍ', "Quaternion");
 
-    // Convert Unicode square root: √(arg) -> sqrt(arg)
+    // Convert Unicode square root: √(arg) -> sqrt(arg), every occurrence.
+    s = s.replace("√(", "sqrt(");
+    // A bare √x (no parentheses) takes the identifier or number that follows.
     while let Some(idx) = s.find('√') {
         let after_sqrt = &s[idx + '√'.len_utf8()..];
-        if after_sqrt.starts_with('(') {
-            let replacement = format!("sqrt{}", after_sqrt);
-            let full_str = &s[idx..];
-            s = s.replace(full_str, &replacement);
+        let symbol_end = after_sqrt
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(after_sqrt.len());
+        let target_var = &after_sqrt[..symbol_end];
+        if target_var.is_empty() {
             break;
-        } else {
-            let symbol_end = after_sqrt
-                .find(|c: char| !c.is_alphanumeric() && c != '_')
-                .unwrap_or(after_sqrt.len());
-            let target_var = &after_sqrt[..symbol_end];
-            if !target_var.is_empty() {
-                let replacement = format!("sqrt({})", target_var);
-                let full_term = &s[idx..idx + '√'.len_utf8() + symbol_end];
-                s = s.replace(full_term, &replacement);
-                continue;
-            }
         }
-        break;
+        let replacement = format!("sqrt({})", target_var);
+        let full_term = &s[idx..idx + '√'.len_utf8() + symbol_end];
+        s = s.replace(full_term, &replacement);
     }
 
     // Replace LaTeX fraction: \frac{a}{b} -> ((a) / (b)) using balanced brace parsing

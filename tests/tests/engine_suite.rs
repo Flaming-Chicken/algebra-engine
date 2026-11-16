@@ -191,3 +191,9 @@ mod audit_regression_tests;
 
 #[path = "engine/uncertainty_multivalued_tests.rs"]
 mod uncertainty_multivalued_tests;
+
+#[path = "engine/unification_robustness_tests.rs"]
+mod unification_robustness_tests;
+
+#[path = "engine/api_stream_workbench_tests.rs"]
+mod api_stream_workbench_tests;

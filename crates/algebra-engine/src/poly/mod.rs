@@ -7,6 +7,12 @@
 //! - Multi-Variate Monomial Orderings & Division (`MultiPoly`, `MonomialOrder`, `Monomial`, `Term`).
 //! - Gröbner Bases & Ideals (`GrobnerBasis`, Buchberger with Gebauer-Möller criteria).
 //! - Analytical & Algebraic Root Solvers (`CardanoSolver`, `FerrariSolver`, `BringRadical`, `SturmSequence`, `DurandKernerSolver`).
+//!
+//! ## References
+//! - Yun, D. Y. Y. (1976). On square-free decomposition algorithms. *Proc. SYMSAC*, 26–35.
+//! - Cantor, D. G., & Zassenhaus, H. (1981). A new algorithm for factoring polynomials over finite fields. *Math. Comp.*, 36(154), 587–592.
+//! - Sturm, J. C. F. (1829). Mémoire sur la résolution des équations numériques. *Bulletin des Sciences de Férussac*, 11, 419–422.
+//! - Durand, E. (1960). *Solutions Numériques des Équations Algébriques*; Kerner, I. O. (1966). Ein Gesamtschrittverfahren zur Berechnung der Nullstellen von Polynomen. *Numer. Math.*, 8, 290–294.
 
 pub mod grobner;
 pub mod multivariate;
@@ -172,7 +178,7 @@ pub fn groebner_basis(mut basis: Vec<Polynomial>) -> Vec<Polynomial> {
     basis
 }
 
-/// Dense univariate polynomial over $\mathbb{Q}[x]$, stored as `[c_0, c_1, ..., c_d]`.
+/// Dense univariate polynomial over $\mathbb{Q}\[x\]$, stored as `[c_0, c_1, ..., c_d]`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UniPoly {
     pub coeffs: Vec<BigRational>,
@@ -295,7 +301,7 @@ impl UniPoly {
         Self::from_coeffs(out)
     }
 
-    /// Euclidean division `(quotient, remainder)` over $\mathbb{Q}[x]$.
+    /// Euclidean division `(quotient, remainder)` over $\mathbb{Q}\[x\]$.
     pub fn div_rem(&self, divisor: &Self) -> AlgebraResult<(Self, Self)> {
         if divisor.is_zero() {
             return Err(AlgebraError::DivisionByZero {
@@ -324,7 +330,7 @@ impl UniPoly {
         Ok((Self::from_coeffs(quot), Self::from_coeffs(rem)))
     }
 
-    /// Monic Euclidean greatest common divisor over $\mathbb{Q}[x]$.
+    /// Monic Euclidean greatest common divisor over $\mathbb{Q}\[x\]$.
     pub fn gcd(&self, other: &Self) -> AlgebraResult<Self> {
         let mut a = self.clone();
         let mut b = other.clone();

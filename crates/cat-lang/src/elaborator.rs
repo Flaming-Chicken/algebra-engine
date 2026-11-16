@@ -58,7 +58,7 @@ impl Elaborator {
         }
     }
 
-    /// Lower a [`CatExpr`] directly into a `cat-core` [`CatTerm`] inside [`CatRuntimeContext`]
+    /// Lower a [`CatExpr`] directly into a `cat-core` `CatTerm` inside `CatRuntimeContext`
     /// using `cat-bridge` (`Lift ⊣ Lower`) after dimensional elaboration.
     pub fn lower_to_cat_term(
         &self,

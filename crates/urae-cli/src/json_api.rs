@@ -1,7 +1,7 @@
 //! # JSON Request & Response Engine for URAE
 //!
 //! Provides structured JSON/TOML request and response payloads supporting nested LaTeX,
-//! SymPy, raw mathematical formulas, CLI commands, parameter bindings, code generation,
+//! Python `**` exponent notation, raw mathematical formulas, CLI commands, parameter bindings, code generation,
 //! formal proof trace exports, and AI copilot co-reasoning explanations.
 
 use algebra_advanced::agent::{AiConfig, AlgebraAgentInterface};
@@ -179,7 +179,7 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
             .map(|(k, &(lo, hi))| (k.clone(), algebra_core::RealInterval::new(lo, hi)))
             .collect();
 
-        match crate::process_input_with_full_context(
+        let exec_res = crate::execute_input_with_full_context(
             graph,
             &LatexFormatter,
             text_clean,
@@ -189,83 +189,83 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
             Some(&interval_map),
             req.branch_sheet,
             Some(&summary_vec),
-        ) {
-            Ok(cli_out) => {
-                let branch_values = if text_clean.starts_with("branches") {
-                    let body = cli_out
-                        .strip_prefix("Branches:")
-                        .unwrap_or(&cli_out)
-                        .trim()
-                        .trim_start_matches('[')
-                        .trim_end_matches(']');
-                    let vals: Vec<String> = body
-                        .split(", k=")
-                        .enumerate()
-                        .map(|(idx, part)| {
-                            let s = if idx == 0 {
-                                part.trim().to_string()
-                            } else {
-                                format!("k={}", part.trim())
-                            };
-                            s
-                        })
-                        .filter(|l| !l.is_empty())
-                        .collect();
-                    if vals.is_empty() { None } else { Some(vals) }
-                } else {
-                    None
-                };
-                return UraeJsonResponse {
-                    success: true,
-                    input_raw: raw_input.to_string(),
-                    output_latex: cli_out.clone(),
-                    output_unicode: cli_out,
-                    substituted_latex: None,
-                    derivative_latex: None,
-                    integral_latex: None,
-                    solutions: None,
-                    eval_result: None,
-                    domain_info: Some("CLI Command Processed".to_string()),
-                    physical_unit: unit_opt,
-                    rust_code: None,
-                    python_code: None,
-                    lean4_proof: None,
-                    coq_proof: None,
-                    ai_explanation: None,
-                    ast_search_depth: None,
-                    neural_embedding: None,
-                    eval_uncertainty: None,
-                    eval_interval: None,
-                    branch_values,
-                    error_msg: None,
-                };
-            }
-            Err(err) => {
-                return UraeJsonResponse {
-                    success: false,
-                    input_raw: raw_input.to_string(),
-                    output_latex: String::new(),
-                    output_unicode: String::new(),
-                    substituted_latex: None,
-                    derivative_latex: None,
-                    integral_latex: None,
-                    solutions: None,
-                    eval_result: None,
-                    domain_info: None,
-                    physical_unit: unit_opt,
-                    rust_code: None,
-                    python_code: None,
-                    lean4_proof: None,
-                    coq_proof: None,
-                    ai_explanation: None,
-                    ast_search_depth: None,
-                    neural_embedding: None,
-                    eval_uncertainty: None,
-                    eval_interval: None,
-                    branch_values: None,
-                    error_msg: Some(err),
-                };
-            }
+        );
+        if !exec_res.is_error {
+            let cli_out = exec_res.output_text.clone();
+            let branch_values = if text_clean.starts_with("branches") {
+                let body = cli_out
+                    .strip_prefix("Branches:")
+                    .unwrap_or(&cli_out)
+                    .trim()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']');
+                let vals: Vec<String> = body
+                    .split(", k=")
+                    .enumerate()
+                    .map(|(idx, part)| {
+                        if idx == 0 {
+                            part.trim().to_string()
+                        } else {
+                            format!("k={}", part.trim())
+                        }
+                    })
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                if vals.is_empty() { None } else { Some(vals) }
+            } else {
+                None
+            };
+            return UraeJsonResponse {
+                success: true,
+                input_raw: raw_input.to_string(),
+                output_latex: exec_res.output_latex,
+                output_unicode: exec_res.output_text,
+                substituted_latex: None,
+                derivative_latex: None,
+                integral_latex: None,
+                solutions: None,
+                eval_result: None,
+                domain_info: exec_res
+                    .domain_info
+                    .or_else(|| Some("CLI Command Processed".to_string())),
+                physical_unit: unit_opt,
+                rust_code: None,
+                python_code: None,
+                lean4_proof: None,
+                coq_proof: None,
+                ai_explanation: None,
+                ast_search_depth: None,
+                neural_embedding: None,
+                eval_uncertainty: None,
+                eval_interval: None,
+                branch_values,
+                error_msg: None,
+            };
+        } else {
+            return UraeJsonResponse {
+                success: false,
+                input_raw: raw_input.to_string(),
+                output_latex: String::new(),
+                output_unicode: String::new(),
+                substituted_latex: None,
+                derivative_latex: None,
+                integral_latex: None,
+                solutions: None,
+                eval_result: None,
+                domain_info: None,
+                physical_unit: unit_opt,
+                rust_code: None,
+                python_code: None,
+                lean4_proof: None,
+                coq_proof: None,
+                ai_explanation: None,
+                ast_search_depth: None,
+                neural_embedding: None,
+                eval_uncertainty: None,
+                eval_interval: None,
+                branch_values: None,
+                error_msg: Some(exec_res.error_msg.unwrap_or(exec_res.output_text)),
+            };
         }
     }
 

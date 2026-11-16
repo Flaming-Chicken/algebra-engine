@@ -2,6 +2,10 @@
 //!
 //! Provides non-greedy equivalence graph simplification over symbolic expressions,
 //! including associative-commutative rings, matrix identities, and hypercomplex (quaternion) identities.
+//!
+//! ## References
+//! - Willsey, M., Nandi, C., Wang, Y. R., Flatt, O., Tatlock, Z., & Panchekha, P. (2021). `egg`: Fast and extensible equality saturation. *Proc. ACM Program. Lang.*, 5(POPL), 1–29.
+//! - Nelson, G., & Oppen, D. C. (1980). Fast decision procedures based on congruence closure. *J. ACM*, 27(2), 356–364.
 
 use algebra_core::{ExprGraph, ExprId, ExprKind, Number, StepByStepResult};
 use egg::{CostFunction, Id, RecExpr, Rewrite, Runner, define_language};
@@ -769,14 +773,13 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                 for &f in fs {
                     if let Some(q) = as_rat(g, f) {
                         rat *= q;
-                    } else if let Some(qp) = extract_pi_rational(g, f) {
+                    } else {
+                        let qp = extract_pi_rational(g, f)?;
                         if seen_pi {
                             return None;
                         }
                         rat *= qp;
                         seen_pi = true;
-                    } else {
-                        return None;
                     }
                 }
                 if seen_pi { Some(rat) } else { None }

@@ -1,7 +1,12 @@
-//! # `algebra-solver`
+//! # `algebra_engine::solver`
 //!
 //! Algebraic equation root finding (`solveset`), Ordinary Differential Equation (ODE) solvers,
 //! Partial Differential Equation (PDE) solvers, and integer Diophantine equation solvers.
+//!
+//! ## References
+//! - Cardano, G. (1545). *Ars Magna*; Ferrari, L. (quartic resolvent cubic reduction).
+//! - Corless, R. M., et al. (1996). On the Lambert $W$ function (transcendental root inversion $x e^x = c$).
+//! - Schwetlick, H., & Tiller, V. (1985); Schwartz, J. T. (1980). Probabilistic identity & residual verification.
 
 use crate::calculus::SymbolicCalculus;
 use crate::numeric::NumericalEval;
@@ -86,7 +91,7 @@ impl DiophantineSolver {
     }
 }
 
-/// Structured outcome of a symbolic solve attempt (Symbolica-style explicit coverage tracking).
+/// Structured outcome of a symbolic solve attempt with explicit coverage tracking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SolveOutcome<T> {
     /// Complete closed-form solution set obtained.

@@ -1,8 +1,12 @@
-//! # `algebra-transforms`
+//! # `algebra_engine::transforms`
 //!
 //! Symbolic Integral Transforms & Signal Processing: Laplace transform $\mathcal{L}\{f(t)\}(s)$,
 //! Fourier transform $\mathcal{F}\{f(t)\}(\omega)$, Discrete Z-Transform $\mathcal{Z}\{x\[n\]\}(z)$,
 //! and Linear Time-Invariant (LTI) Transfer Functions $H(s), H(z)$.
+//!
+//! ## References
+//! - Bracewell, R. N. (2000). *The Fourier Transform and Its Applications* (3rd ed.). McGraw-Hill.
+//! - Oppenheim, A. V., & Schafer, R. W. (2009). *Discrete-Time Signal Processing* (3rd ed.). Prentice Hall.
 
 use algebra_core::{AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind, Number, SymbolId};
 use crate::numeric::NumericalEval;
@@ -887,7 +891,7 @@ fn c_div(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
 pub struct GeneralizedTransformEngine;
 
 impl GeneralizedTransformEngine {
-    /// Symbolic unilateral Z-transform $\mathcal{Z}\{x[n]\}(z) = \sum_{n=0}^\infty x[n] z^{-n}$.
+    /// Symbolic unilateral Z-transform $\mathcal{Z}\{x\[n\]\}(z) = \sum_{n=0}^\infty x\[n\] z^{-n}$.
     pub fn z_transform(
         graph: &ExprGraph,
         expr: ExprId,
@@ -1163,7 +1167,7 @@ impl GeneralizedTransformEngine {
         graph.integral(integrand, &tau_name, Some(neg_inf), Some(pos_inf))
     }
 
-    /// Exact discrete linear convolution $(a * b)[n] = \sum_k a[k] b[n - k]$.
+    /// Exact discrete linear convolution $(a * b)\[n\] = \sum_k a\[k\] b\[n - k\]$.
     pub fn discrete_convolution(a: &[f64], b: &[f64]) -> Vec<f64> {
         if a.is_empty() || b.is_empty() {
             return Vec::new();

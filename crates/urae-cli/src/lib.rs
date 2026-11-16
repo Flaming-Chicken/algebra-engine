@@ -255,6 +255,37 @@ pub fn process_input_with_full_context(
     branch_sheet: Option<i64>,
     symbol_summary: Option<&[(String, String, f64, String)]>,
 ) -> Result<String, String> {
+    let result = execute_input_with_full_context(
+        graph,
+        formatter,
+        input,
+        ai_config,
+        bindings,
+        uncertainties,
+        intervals,
+        branch_sheet,
+        symbol_summary,
+    );
+    if result.is_error {
+        Err(result.error_msg.unwrap_or(result.output_text))
+    } else {
+        Ok(result.output_text)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_input_with_full_context(
+    graph: &ExprGraph,
+    formatter: &LatexFormatter,
+    input: &str,
+    ai_config: &mut AiConfig,
+    bindings: Option<&HashMap<String, f64>>,
+    uncertainties: Option<&HashMap<String, f64>>,
+    intervals: Option<&HashMap<String, algebra_core::RealInterval>>,
+    branch_sheet: Option<i64>,
+    symbol_summary: Option<&[(String, String, f64, String)]>,
+) -> algebra_engine::executor::OperationResult {
+    use algebra_engine::executor::OperationResult;
     let input = input.trim();
     let _ = formatter;
 
@@ -266,18 +297,21 @@ pub fn process_input_with_full_context(
         let prompt = agent_cmd.trim();
 
         if prompt.eq_ignore_ascii_case("status") {
-            return Ok(ai_config.status_summary());
+            let s = ai_config.status_summary();
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
         if prompt.eq_ignore_ascii_case("enable") {
             ai_config.enabled = true;
-            return Ok(format!(
+            let s = format!(
                 "AI Copilot Enabled. Status: {}",
                 ai_config.status_summary()
-            ));
+            );
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
         if prompt.eq_ignore_ascii_case("disable") {
             ai_config.enabled = false;
-            return Ok("AI Copilot Disabled.".to_string());
+            let s = "AI Copilot Disabled.".to_string();
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
 
         if let Some(cfg_cmd) = prompt.strip_prefix("config ") {
@@ -291,57 +325,65 @@ pub fn process_input_with_full_context(
                             "lmstudio" | "lm-studio" => ai_config.provider = AiProvider::LmStudio,
                             "opencode" => ai_config.provider = AiProvider::OpenCode,
                             "openrouter" => ai_config.provider = AiProvider::OpenRouter,
-                            _ => return Err("Supported providers: googleai, anthropic, lmstudio, opencode, openrouter".to_string()),
+                            _ => return OperationResult::error("Supported providers: googleai, anthropic, lmstudio, opencode, openrouter"),
                         }
-                        return Ok(format!(
+                        let s = format!(
                             "Provider set to {}. Status: {}",
                             ai_config.provider.name(),
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "key" => {
                         ai_config.api_key = Some(parts[1].to_string());
-                        return Ok(format!(
+                        let s = format!(
                             "API key updated. Status: {}",
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "url" => {
                         ai_config.access_url = Some(parts[1].to_string());
-                        return Ok(format!(
+                        let s = format!(
                             "Access URL updated to {}. Status: {}",
                             parts[1],
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "model" => {
                         ai_config.model_name = Some(parts[1].to_string());
-                        return Ok(format!(
+                        let s = format!(
                             "Model updated to {}. Status: {}",
                             parts[1],
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     _ => {
-                        return Err(
-                            "Usage: agent config <provider|key|url|model> <value>".to_string()
+                        return OperationResult::error(
+                            "Usage: agent config <provider|key|url|model> <value>",
                         );
                     }
                 }
             }
-            return Err("Usage: agent config <provider|key|url|model> <value>".to_string());
+            return OperationResult::error("Usage: agent config <provider|key|url|model> <value>");
         }
 
         let agent = AlgebraAgentInterface::new();
-        return agent.query(ai_config, prompt, graph);
+        return match agent.query(ai_config, prompt, graph) {
+            Ok(s) => OperationResult::success(s.clone(), s.clone(), s),
+            Err(e) => OperationResult::error(e),
+        };
     }
 
     // 2. Neural Expression Embedding & AST Proof-Search Depth Commands
     if let Some(expr_str) = input.strip_prefix("embed ") {
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id = parser
-            .parse(expr_str.trim())
-            .map_err(|e| format!("Parse error: {}", e))?;
+        let id = match parser.parse(expr_str.trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error: {}", e)),
+        };
         let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
         let vec = embedder.embed_expression(graph, id);
         let depth = algebra_engine::heuristic::compute_ast_depth(graph, id);
@@ -368,7 +410,7 @@ pub fn process_input_with_full_context(
         ));
         out.push_str(&format!("  * Vector Preview: [{preview}, ...]\n"));
         out.push_str(&format!("  * Embedding Hash: 0x{hex_sample}"));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     if let Some(args_str) = input
@@ -377,15 +419,17 @@ pub fn process_input_with_full_context(
     {
         let parts: Vec<&str> = args_str.split(',').collect();
         if parts.len() != 2 {
-            return Err("Usage: similarity <expr1>, <expr2>".to_string());
+            return OperationResult::error("Usage: similarity <expr1>, <expr2>");
         }
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id1 = parser
-            .parse(parts[0].trim())
-            .map_err(|e| format!("Parse error in expr1: {}", e))?;
-        let id2 = parser
-            .parse(parts[1].trim())
-            .map_err(|e| format!("Parse error in expr2: {}", e))?;
+        let id1 = match parser.parse(parts[0].trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error in expr1: {}", e)),
+        };
+        let id2 = match parser.parse(parts[1].trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error in expr2: {}", e)),
+        };
         let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
         let v1 = embedder.embed_expression(graph, id1);
         let v2 = embedder.embed_expression(graph, id2);
@@ -411,7 +455,7 @@ pub fn process_input_with_full_context(
             "  * Expr 2 AST Depth : {}",
             algebra_engine::heuristic::compute_ast_depth(graph, id2)
         ));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     if let Some(expr_str) = input
@@ -420,9 +464,10 @@ pub fn process_input_with_full_context(
         .or_else(|| input.strip_prefix("proof_depth "))
     {
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id = parser
-            .parse(expr_str.trim())
-            .map_err(|e| format!("Parse error: {}", e))?;
+        let id = match parser.parse(expr_str.trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error: {}", e)),
+        };
         let search_engine =
             algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
                 algebra_core::EngineConfig::default(),
@@ -464,7 +509,7 @@ pub fn process_input_with_full_context(
             "  * Neural Embedding [{}d]: [{emb_preview}, ...]",
             indicator.neural_embedding.len()
         ));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     // 3. Parse text into structured MathOperation
@@ -487,12 +532,7 @@ pub fn process_input_with_full_context(
     }
 
     // 5. Central execution via OperationExecutor
-    let result = OperationExecutor::execute(graph, &op, &exec_ctx);
-    if result.is_error {
-        Err(result.error_msg.unwrap_or(result.output_text))
-    } else {
-        Ok(result.output_text)
-    }
+    OperationExecutor::execute(graph, &op, &exec_ctx)
 }
 
 pub fn get_help_text() -> String {
@@ -531,7 +571,7 @@ pub fn get_help_text() -> String {
     help.push_str("  agent status / config      Configure AI copilot provider, key, and model\n");
     help.push_str("  preset <name>              Load preset math templates (quadratic, oscillator, calculus)\n");
     help.push_str(
-        "  export <tex|py|lean>       Export session to LaTeX, Python SymPy, or Lean 4\n",
+        "  export <tex|py|lean>       Export session to LaTeX, Python, or Lean 4\n",
     );
     help.push_str("  log <off|error|warn|info|debug|trace>  Adjust live logging verbosity level\n");
     help.push_str("  proof <expr>               Export formal Lean 4 and Coq proof trace\n");

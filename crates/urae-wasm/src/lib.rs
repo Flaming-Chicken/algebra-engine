@@ -12,22 +12,22 @@ use algebra_engine::executor::ExecutionContext;
 use algebra_engine::ode::{NumericalOdeConfig, NumericalOdeMethod, NumericalOdeSolver};
 use algebra_engine::simplify::Simplifier;
 use algebra_engine::solver::SymbolicSolver;
-use algebra_engine::wolfram::WolframAlphaEngine;
+use algebra_engine::query::QueryEngine;
 use wasm_bindgen::prelude::*;
 
-/// Natural Language Wolfram Alpha multi-pod query engine on WebAssembly edge.
-/// Returns JSON-encoded `WolframAlphaResponse` containing all structured pods (Input, Result,
+/// Natural-language multi-pod structured query engine on WebAssembly edge.
+/// Returns JSON-encoded `QueryResponse` containing all structured pods (Input, Result,
 /// Steps, Numerical, Alternate forms, Derivatives, Integrals, Roots).
 #[wasm_bindgen]
-pub fn wasm_wolfram_query(query_str: &str) -> String {
+pub fn wasm_structured_query(query_str: &str) -> String {
     let graph = ExprGraph::new();
     let ctx = ExecutionContext::new();
-    let resp = WolframAlphaEngine::query(&graph, query_str, &ctx);
+    let resp = QueryEngine::query(&graph, query_str, &ctx);
     serde_json::to_string(&resp).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
 }
 
 /// Evaluates a line in the Rust-extended Pad, returning rich formatted JSON with
-/// exact LaTeX, 2D Unicode, plain text, and any generated Wolfram pods.
+/// exact LaTeX, 2D Unicode, plain text, and any generated result pods.
 #[wasm_bindgen]
 pub fn wasm_pad_eval_line(line_str: &str) -> String {
     let graph = ExprGraph::new();
@@ -36,7 +36,7 @@ pub fn wasm_pad_eval_line(line_str: &str) -> String {
     if trimmed.is_empty() {
         return "{}".to_string();
     }
-    let resp = WolframAlphaEngine::query(&graph, trimmed, &ctx);
+    let resp = QueryEngine::query(&graph, trimmed, &ctx);
     serde_json::to_string(&resp).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
 }
 
@@ -44,8 +44,7 @@ pub fn wasm_pad_eval_line(line_str: &str) -> String {
 /// Takes raw pad text, processes each line, maintaining variable definitions and returning an array of evaluated lines.
 #[wasm_bindgen]
 pub fn wasm_pad_eval_session(session_text: &str) -> String {
-    let graph = ExprGraph::new();
-    let mut ctx = ExecutionContext::new();
+    let mut session = algebra_engine::UraeSession::new();
     let mut results = Vec::new();
 
     for line in session_text.lines() {
@@ -61,54 +60,25 @@ pub fn wasm_pad_eval_session(session_text: &str) -> String {
             continue;
         }
 
-        // Check if line is a variable or parameter assignment, e.g., a = 5.0 or x = 2
-        if let Some((lhs, rhs)) = trimmed.split_once('=') {
-            let var_name = lhs.trim();
-            let val_str = rhs.trim().trim_end_matches(';');
-            if !var_name.contains('(') && var_name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            {
-                if let Ok(val) = val_str.parse::<f64>() {
-                    ctx.bindings.insert(var_name.to_string(), val);
-                }
-            }
-        }
-
-        let resp = WolframAlphaEngine::query(&graph, trimmed, &ctx);
-        let result_pod = resp.pods.iter().find(|p| p.title == "Result");
-        let error_pod = resp.pods.iter().find(|p| p.title == "Error");
-
-        if let Some(res) = result_pod {
-            results.push(serde_json::json!({
-                "raw": line,
-                "is_error": false,
-                "text": res.text,
-                "latex": res.latex,
-                "unicode": res.unicode,
-                "pods": resp.pods,
-                "execution_time_us": resp.execution_time_us,
-            }));
-        } else if let Some(err) = error_pod {
-            results.push(serde_json::json!({
-                "raw": line,
-                "is_error": true,
-                "text": err.text,
-                "latex": err.latex,
-                "unicode": err.unicode,
-                "pods": resp.pods,
-                "execution_time_us": resp.execution_time_us,
-            }));
+        let expanded = if !trimmed.contains('=') {
+            Some(session.expand_definitions(trimmed))
         } else {
-            let first = resp.pods.first();
-            results.push(serde_json::json!({
-                "raw": line,
-                "is_error": false,
-                "text": first.map(|p| p.text.as_str()).unwrap_or_default(),
-                "latex": first.map(|p| p.latex.as_str()).unwrap_or_default(),
-                "unicode": first.map(|p| p.unicode.as_str()).unwrap_or_default(),
-                "pods": resp.pods,
-                "execution_time_us": resp.execution_time_us,
-            }));
-        }
+            None
+        };
+        let exec_res = session.execute_line(trimmed);
+        let ctx = session.execution_context();
+        let query_input = expanded.as_deref().unwrap_or(trimmed);
+        let resp = QueryEngine::query(&session.graph, query_input, &ctx);
+
+        results.push(serde_json::json!({
+            "raw": line,
+            "is_error": exec_res.is_error,
+            "text": exec_res.output_text,
+            "latex": exec_res.output_latex,
+            "unicode": exec_res.output_unicode,
+            "pods": resp.pods,
+            "execution_time_us": resp.execution_time_us,
+        }));
     }
 
     serde_json::to_string(&results).unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
@@ -141,7 +111,8 @@ pub fn wasm_differentiate(expr_str: &str, wrt_str: &str) -> String {
     match parser.parse(expr_str) {
         Ok(expr_id) => {
             let diff_id = graph.diff(expr_id, wrt_sym);
-            LatexFormatter.format(&graph, diff_id).unwrap_or_default()
+            let simp = Simplifier::simplify(&graph, diff_id).unwrap_or(diff_id);
+            LatexFormatter.format(&graph, simp).unwrap_or_default()
         }
         Err(err) => format!("Error: {}", err),
     }
@@ -156,7 +127,10 @@ pub fn wasm_integrate(expr_str: &str, wrt_str: &str) -> String {
 
     match parser.parse(expr_str) {
         Ok(expr_id) => match graph.integrate(expr_id, wrt_sym) {
-            Ok(int_id) => LatexFormatter.format(&graph, int_id).unwrap_or_default(),
+            Ok(int_id) => {
+                let simp = Simplifier::simplify(&graph, int_id).unwrap_or(int_id);
+                LatexFormatter.format(&graph, simp).unwrap_or_default()
+            }
             Err(err) => format!("Integration error: {}", err),
         },
         Err(err) => format!("Error: {}", err),
@@ -175,7 +149,8 @@ pub fn wasm_solve(eq_str: &str, wrt_str: &str) -> String {
             Ok(sols) => {
                 let mut sol_strs = Vec::new();
                 for s in sols {
-                    sol_strs.push(LatexFormatter.format(&graph, s).unwrap_or_default());
+                    let simp = Simplifier::simplify(&graph, s).unwrap_or(s);
+                    sol_strs.push(LatexFormatter.format(&graph, simp).unwrap_or_default());
                 }
                 format!("Solutions for {}: [{}]", wrt_str, sol_strs.join(", "))
             }
@@ -348,6 +323,55 @@ pub fn wasm_ode_solve_json(
     .to_string()
 }
 
+/// Analyze, solve, extract implicit contours, and compute Jacobian for an equation system JSON payload.
+#[wasm_bindgen]
+pub fn wasm_analyze_equation_system(spec_json: &str) -> String {
+    let spec: algebra_engine::EquationSystemSpec = match serde_json::from_str(spec_json) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string(),
+    };
+    let graph = ExprGraph::new();
+    let res = algebra_engine::WorkbenchEngine::analyze_equation_system(&graph, &spec);
+    serde_json::to_string(&res).unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
+}
+
+/// Solve, integrate, and analyze linearized Jacobian eigenvalues & phase quiver field for an ODE system.
+#[wasm_bindgen]
+pub fn wasm_analyze_differential_system(spec_json: &str) -> String {
+    let spec: algebra_engine::DifferentialSystemSpec = match serde_json::from_str(spec_json) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string(),
+    };
+    let graph = ExprGraph::new();
+    let res = algebra_engine::WorkbenchEngine::analyze_differential_system(&graph, &spec);
+    serde_json::to_string(&res).unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
+}
+
+/// Return built-in equation and differential system presets for the interactive Systems Workbench.
+#[wasm_bindgen]
+pub fn wasm_workbench_presets() -> String {
+    serde_json::json!({
+        "equations": algebra_engine::WorkbenchPresets::equation_presets(),
+        "differentials": algebra_engine::WorkbenchPresets::differential_presets(),
+    })
+    .to_string()
+}
+
+/// Process a batch NDJSON stream of math requests and return NDJSON responses.
+#[wasm_bindgen]
+pub fn wasm_process_ndjson_stream(ndjson_input: &str) -> String {
+    let graph = ExprGraph::new();
+    let mut out = Vec::new();
+    match algebra_engine::StreamProcessor::process_ndjson_stream(
+        &graph,
+        std::io::Cursor::new(ndjson_input.as_bytes()),
+        &mut out,
+    ) {
+        Ok(_) => String::from_utf8_lossy(&out).into_owned(),
+        Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
+    }
+}
+
 /// Web entry point for running URAE Notebook on a WebAssembly canvas (Cloudflare Pages / Workers).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -384,5 +408,23 @@ mod tests {
             );
             assert!(parsed["steps"].as_u64().unwrap_or(0) > 0);
         }
+    }
+
+    #[test]
+    fn test_wasm_pad_eval_session_and_solve() {
+        let script = "f(x, y) = x^2 + y^2\ng(x) = exp(x) + x\nf(3, 4)\ng(0)\ndiff x^3, x\nintegrate ans, x";
+        let json_str = wasm_pad_eval_session(script);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&json_str).expect("valid JSON");
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[2]["text"].as_str(), Some("25"));
+        assert!(!rows[3]["is_error"].as_bool().unwrap_or(true));
+        let last_latex = rows[5]["latex"].as_str().unwrap_or("");
+        assert!(
+            last_latex.contains("{x}^{3}") || last_latex.contains("x^{3}") || last_latex.contains("x^3"),
+            "expected x^3 from integrate ans, got {last_latex}"
+        );
+
+        let solved = wasm_solve("x^2 - 4 = 0", "x");
+        assert!(solved.contains('2') && solved.contains("-2"), "got {solved}");
     }
 }

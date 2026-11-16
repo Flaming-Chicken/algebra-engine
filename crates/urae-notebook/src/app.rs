@@ -59,6 +59,8 @@ pub enum ViewMode {
     #[default]
     SmartStream,
     FocusEditor,
+    QaSolver,
+    SystemsWorkbench,
     DependencyGraph,
     PresentationReport,
 }
@@ -220,6 +222,7 @@ pub struct UraeNotebookApp {
     pub viewport_3d_state: crate::ui::Viewport3DState,
     pub command_palette_state: crate::ui::CommandPaletteState,
     pub show_cad_machinery_palette: bool,
+    pub workbench_ui: crate::ui::WorkbenchUiState,
 
     // In-App Example Notebook Gallery & Interactive Tutorials
     pub show_example_gallery: bool,
@@ -414,6 +417,7 @@ impl Default for UraeNotebookApp {
             viewport_3d_state: crate::ui::Viewport3DState::default(),
             command_palette_state: crate::ui::CommandPaletteState::default(),
             show_cad_machinery_palette: false,
+            workbench_ui: crate::ui::WorkbenchUiState::default(),
 
             show_example_gallery: false,
             selected_example_category: None,
@@ -1524,6 +1528,12 @@ impl eframe::App for UraeNotebookApp {
 
                 ui.separator();
 
+                let _ = ui.selectable_value(&mut self.view_mode, ViewMode::SmartStream, "📝 Notepad");
+                let _ = ui.selectable_value(&mut self.view_mode, ViewMode::QaSolver, "❓ Q&A");
+                let _ = ui.selectable_value(&mut self.view_mode, ViewMode::SystemsWorkbench, "⚗ Systems & ODEs");
+
+                ui.separator();
+
                 if ui.button(egui::RichText::new("🔍 Palette (Cmd+K)").color(palette.accent_secondary)).on_hover_text("Open Command Palette").clicked() {
                     self.command_palette_state.is_open = true;
                 }
@@ -1783,11 +1793,48 @@ impl eframe::App for UraeNotebookApp {
             }
         }
 
-        // Main Central View (Unified Continuous Mathematical Notepad)
+        // Main Central View (Unified Continuous Mathematical Notepad, Q&A & Systems Workbench)
         egui::CentralPanel::default().show(ui, |ui| match self.view_mode {
             ViewMode::SmartStream | ViewMode::FocusEditor => {
                 if self.render_smart_stream_view(ui, &ctx) {
                     state_changed = true;
+                }
+            }
+            ViewMode::QaSolver => {
+                let palette = self.theme.palette();
+                match self.workbench_ui.render_qa_view(ui, &palette, &self.state) {
+                    crate::ui::WorkbenchAction::BackToNotepad => {
+                        self.view_mode = ViewMode::SmartStream;
+                    }
+                    crate::ui::WorkbenchAction::InsertToNotepad(snippet) => {
+                        self.state.insert_text_at_active_line(&snippet);
+                        self.view_mode = ViewMode::SmartStream;
+                        state_changed = true;
+                    }
+                    crate::ui::WorkbenchAction::SwitchToEquations(eqs) => {
+                        self.workbench_ui.sub_mode = crate::ui::WorkbenchSubMode::Equations;
+                        self.workbench_ui.eq_spec.equations = eqs;
+                        self.workbench_ui.eq_analysis = None;
+                        self.view_mode = ViewMode::SystemsWorkbench;
+                    }
+                    crate::ui::WorkbenchAction::None => {}
+                }
+            }
+            ViewMode::SystemsWorkbench => {
+                let palette = self.theme.palette();
+                match self
+                    .workbench_ui
+                    .render_systems_workbench(ui, &palette, &self.state.graph)
+                {
+                    crate::ui::WorkbenchAction::BackToNotepad => {
+                        self.view_mode = ViewMode::SmartStream;
+                    }
+                    crate::ui::WorkbenchAction::InsertToNotepad(snippet) => {
+                        self.state.insert_text_at_active_line(&snippet);
+                        self.view_mode = ViewMode::SmartStream;
+                        state_changed = true;
+                    }
+                    _ => {}
                 }
             }
             ViewMode::DependencyGraph => {

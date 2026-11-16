@@ -2,6 +2,10 @@
 //!
 //! Symbolic linear algebra, non-commutative operations, matrix decompositions (LU, QR, Cholesky),
 //! Lie algebra Cartan matrices, and Pauli/Gell-Mann generator matrices for the Universal Rust Algebra Engine (URAE).
+//!
+//! ## References
+//! - Bareiss, E. H. (1968). Sylvester's identity and multistep integer-preserving Gaussian elimination. *Math. Comp.*, 22(103), 565–578.
+//! - Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations* (4th ed.). Johns Hopkins University Press.
 
 use spodeian_parallel::prelude::*;
 
@@ -638,6 +642,11 @@ impl SymbolicMatrix {
         }
 
         if self.rows == 1 {
+            if Self::is_entry_zero(graph, self.elements[0]) {
+                return Err(AlgebraError::EvaluationError(
+                    "Singular matrix is not invertible (determinant is zero)".into(),
+                ));
+            }
             let inv = graph.div(graph.integer(1), self.elements[0]);
             return Self::new(1, 1, vec![inv]);
         }
@@ -649,6 +658,11 @@ impl SymbolicMatrix {
             let d = self.get(1, 1);
 
             let det = self.determinant(graph)?;
+            if Self::is_entry_zero(graph, det) {
+                return Err(AlgebraError::EvaluationError(
+                    "Singular matrix is not invertible (determinant is zero)".into(),
+                ));
+            }
             let inv_det = graph.div(graph.integer(1), det);
 
             let neg_b = graph.neg(b);
@@ -664,6 +678,11 @@ impl SymbolicMatrix {
 
         if self.rows <= 5 {
             let det = self.determinant(graph)?;
+            if Self::is_entry_zero(graph, det) {
+                return Err(AlgebraError::EvaluationError(
+                    "Singular matrix is not invertible (determinant is zero)".into(),
+                ));
+            }
             let mut inv_elems = Vec::with_capacity(self.rows * self.cols);
             // (i, j) entry of A^{-1} = (-1)^(i+j) * det(M_{j, i}) / det(A)
             for i in 0..self.rows {
@@ -733,31 +752,236 @@ impl SymbolicMatrix {
         ))
     }
 
-    /// Compute exact symbolic eigenvalues of a 2x2 matrix.
-    pub fn eigenvalues(&self, graph: &ExprGraph) -> AlgebraResult<Vec<ExprId>> {
-        if self.rows != 2 || self.cols != 2 {
-            return Err(AlgebraError::EvaluationError(
-                "Eigenvalue solver currently implemented for 2x2 matrices".into(),
-            ));
+    /// Returns `true` if a matrix entry symbolically simplifies and expands to zero.
+    pub(crate) fn is_entry_zero(graph: &ExprGraph, id: ExprId) -> bool {
+        let is_num_zero = |eid: ExprId| -> bool {
+            matches!(
+                &graph.get(eid).kind,
+                ExprKind::Number(n)
+                    if n.is_zero()
+                        || matches!(n, algebra_core::Number::Float(bits) if f64::from_bits(*bits).abs() <= 1e-12)
+            )
+        };
+        let simp = crate::simplify::Simplifier::simplify(graph, id).unwrap_or(id);
+        if is_num_zero(simp) {
+            return true;
+        }
+        let exp = crate::simplify::AlgebraicTransformations::expand(graph, simp);
+        let exp_simp = crate::simplify::Simplifier::simplify(graph, exp).unwrap_or(exp);
+        is_num_zero(exp_simp)
+    }
+
+    /// Returns `true` if an expression contains no free symbolic variables.
+    pub(crate) fn is_entry_numeric(graph: &ExprGraph, id: ExprId) -> bool {
+        let mut syms = std::collections::BTreeSet::new();
+        crate::poly::collect_expr_symbols(graph, id, &mut syms);
+        syms.is_empty()
+    }
+
+    /// Compute exact symbolic Reduced Row Echelon Form (RREF) via Gauss-Jordan elimination,
+    /// returning `(rref_matrix, pivot_columns)`.
+    #[allow(clippy::needless_range_loop)]
+    pub fn rref(&self, graph: &ExprGraph) -> AlgebraResult<(Self, Vec<usize>)> {
+        let zero = graph.integer(0);
+        let one = graph.integer(1);
+        let mut mat: Vec<ExprId> = self
+            .elements
+            .iter()
+            .map(|&e| {
+                if Self::is_entry_zero(graph, e) {
+                    zero
+                } else {
+                    crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e)
+                }
+            })
+            .collect();
+
+        let m = self.rows;
+        let n = self.cols;
+        let mut pivots = Vec::new();
+        let mut pivot_row = 0usize;
+
+        for col in 0..n {
+            if pivot_row >= m {
+                break;
+            }
+
+            let mut best_row = None;
+            for r in pivot_row..m {
+                let candidate = mat[r * n + col];
+                if Self::is_entry_zero(graph, candidate) {
+                    mat[r * n + col] = zero;
+                    continue;
+                }
+                if Self::is_entry_numeric(graph, candidate) {
+                    best_row = Some(r);
+                    break;
+                }
+                if best_row.is_none() {
+                    best_row = Some(r);
+                }
+            }
+
+            let Some(p_row) = best_row else {
+                continue;
+            };
+
+            if p_row != pivot_row {
+                for c in 0..n {
+                    mat.swap(pivot_row * n + c, p_row * n + c);
+                }
+            }
+
+            let pivot_val = mat[pivot_row * n + col];
+            mat[pivot_row * n + col] = one;
+            for c in (col + 1)..n {
+                let scaled = graph.div(mat[pivot_row * n + c], pivot_val);
+                mat[pivot_row * n + c] = if Self::is_entry_zero(graph, scaled) {
+                    zero
+                } else {
+                    crate::simplify::Simplifier::simplify(graph, scaled).unwrap_or(scaled)
+                };
+            }
+
+            for r in 0..m {
+                if r == pivot_row {
+                    continue;
+                }
+                let factor = mat[r * n + col];
+                mat[r * n + col] = zero;
+                if Self::is_entry_zero(graph, factor) {
+                    continue;
+                }
+                for c in (col + 1)..n {
+                    let sub_term = graph.mul([factor, mat[pivot_row * n + c]]);
+                    let diff = graph.sub(mat[r * n + c], sub_term);
+                    mat[r * n + c] = if Self::is_entry_zero(graph, diff) {
+                        zero
+                    } else {
+                        crate::simplify::Simplifier::simplify(graph, diff).unwrap_or(diff)
+                    };
+                }
+            }
+
+            pivots.push(col);
+            pivot_row += 1;
         }
 
-        let tr = self.trace(graph)?;
-        let det = self.determinant(graph)?;
+        let rref_mat = Self::new(m, n, mat)?;
+        Ok((rref_mat, pivots))
+    }
 
-        let half = graph.rational(1, 2);
-        let tr_over_2 = graph.mul([half, tr]);
+    /// Exact symbolic matrix rank via RREF pivot count.
+    pub fn rank(&self, graph: &ExprGraph) -> AlgebraResult<usize> {
+        Ok(self.rref(graph)?.1.len())
+    }
 
-        // Discriminant: tr^2 - 4*det
-        let tr_sq = graph.pow(tr, graph.integer(2));
-        let four_det = graph.mul([graph.integer(4), det]);
-        let disc = graph.sub(tr_sq, four_det);
-        let sqrt_disc = graph.pow(disc, half);
-        let half_sqrt_disc = graph.mul([half, sqrt_disc]);
+    /// Exact symbolic basis vectors for the right nullspace $\ker(A) = \{v : Av = 0\}$.
+    pub fn nullspace(&self, graph: &ExprGraph) -> AlgebraResult<Vec<Vec<ExprId>>> {
+        let (rref, pivots) = self.rref(graph)?;
+        let zero = graph.integer(0);
+        let one = graph.integer(1);
+        let mut basis = Vec::new();
+        for free_col in 0..self.cols {
+            if pivots.contains(&free_col) {
+                continue;
+            }
+            let mut vec = vec![zero; self.cols];
+            vec[free_col] = one;
+            for (row_idx, &piv_col) in pivots.iter().enumerate() {
+                let entry = rref.get(row_idx, free_col);
+                if !Self::is_entry_zero(graph, entry) {
+                    let neg_entry = graph.neg(entry);
+                    vec[piv_col] =
+                        crate::simplify::Simplifier::simplify(graph, neg_entry).unwrap_or(neg_entry);
+                }
+            }
+            basis.push(vec);
+        }
+        Ok(basis)
+    }
 
-        let lambda1 = graph.add([tr_over_2, half_sqrt_disc]);
-        let lambda2 = graph.sub(tr_over_2, half_sqrt_disc);
+    /// Compute exact symbolic eigenvalues for 1x1, triangular, 2x2, and up to 4x4 matrices.
+    pub fn eigenvalues(&self, graph: &ExprGraph) -> AlgebraResult<Vec<ExprId>> {
+        if self.rows != self.cols {
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Square matrix required for eigenvalues, got {}x{}",
+                self.rows, self.cols
+            )));
+        }
+        if self.rows == 0 {
+            return Ok(Vec::new());
+        }
+        if self.rows == 1 {
+            let e = self.get(0, 0);
+            return Ok(vec![
+                crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e),
+            ]);
+        }
 
-        Ok(vec![lambda1, lambda2])
+        // Exact fast path for upper or lower triangular matrices (including diagonal)
+        let mut upper_tri = true;
+        let mut lower_tri = true;
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                if r > c && !Self::is_entry_zero(graph, self.get(r, c)) {
+                    upper_tri = false;
+                }
+                if r < c && !Self::is_entry_zero(graph, self.get(r, c)) {
+                    lower_tri = false;
+                }
+            }
+        }
+        if upper_tri || lower_tri {
+            return Ok((0..self.rows)
+                .map(|i| {
+                    let e = self.get(i, i);
+                    crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e)
+                })
+                .collect());
+        }
+
+        if self.rows == 2 {
+            let tr = self.trace(graph)?;
+            let det = self.determinant(graph)?;
+
+            let half = graph.rational(1, 2);
+            let tr_over_2 = graph.mul([half, tr]);
+
+            // Discriminant: tr^2 - 4*det
+            let tr_sq = graph.pow(tr, graph.integer(2));
+            let four_det = graph.mul([graph.integer(4), det]);
+            let disc = graph.sub(tr_sq, four_det);
+            let sqrt_disc = graph.pow(disc, half);
+            let half_sqrt_disc = graph.mul([half, sqrt_disc]);
+
+            let l1_raw = graph.add([tr_over_2, half_sqrt_disc]);
+            let l2_raw = graph.sub(tr_over_2, half_sqrt_disc);
+            let l1 = crate::simplify::Simplifier::simplify(graph, l1_raw).unwrap_or(l1_raw);
+            let l2 = crate::simplify::Simplifier::simplify(graph, l2_raw).unwrap_or(l2_raw);
+
+            return Ok(vec![l1, l2]);
+        }
+
+        if self.rows <= 4 {
+            use crate::solver::SymbolicSolver;
+            let cp = self.charpoly(graph, "__eig_lambda")?;
+            let cp_exp = crate::simplify::AlgebraicTransformations::expand(graph, cp);
+            let cp_simp = crate::simplify::Simplifier::simplify(graph, cp_exp).unwrap_or(cp_exp);
+            let lambda_sym = graph.symbols.get_or_intern("__eig_lambda");
+            let roots = graph.solveset(cp_simp, lambda_sym)?;
+            if !roots.is_empty() {
+                return Ok(roots
+                    .into_iter()
+                    .map(|r| crate::simplify::Simplifier::simplify(graph, r).unwrap_or(r))
+                    .collect());
+            }
+        }
+
+        Err(AlgebraError::EvaluationError(format!(
+            "Symbolic eigenvalues currently support up to 4x4 matrices (got {}x{})",
+            self.rows, self.cols
+        )))
     }
 
     /// Compute exact symbolic eigenvectors of a 2x2 matrix.

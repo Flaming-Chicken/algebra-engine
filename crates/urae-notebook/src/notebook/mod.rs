@@ -286,9 +286,9 @@ impl NotebookState {
                 ]
                 .join("\n");
             }
-            "desmos_fourier_sliders" => {
+            "fourier_sliders" => {
                 self.session.raw_document_text = [
-                    "# Desmos-Style Reactive Fourier Series Sliders",
+                    "# Reactive Fourier Series Sliders",
                     "// Drag sliders A1, A3, w to see live wave superposition.",
                     "",
                     "A1: Parameter = 1.00",
@@ -303,9 +303,9 @@ impl NotebookState {
                 self.session.slider_values.insert("A3".to_string(), 0.33);
                 self.session.slider_values.insert("w".to_string(), 1.0);
             }
-            "geogebra_conic_locus" => {
+            "conic_tangent_locus" => {
                 self.session.raw_document_text = [
-                    "# GeoGebra-Style Reactive Conic & Tangent Locus",
+                    "# Reactive Conic & Tangent Locus",
                     "// Modulate semi-axes a, b and tangent point x0.",
                     "",
                     "a: Parameter = 3.00",

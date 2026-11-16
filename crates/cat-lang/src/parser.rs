@@ -1,5 +1,5 @@
 //! Unified Polyglot Parser for CatScript (`.cat`) and CatPad (`.pad`),
-//! backed by `algebra_core::ExprParser` so URAE math/LaTeX/MATLAB/Desmos syntax
+//! backed by `algebra_core::ExprParser` so URAE math, LaTeX, semicolon-matrix, and interactive pad syntax
 //! and CatScript share a single canonical frontend.
 
 use crate::ast::{CatExpr, CatScriptAst, CatStatement};

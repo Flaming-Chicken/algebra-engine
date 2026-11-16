@@ -262,7 +262,7 @@ impl AlgebraicTransformations {
         factor_multivariate_over_q(graph, expr, &syms).unwrap_or(expr)
     }
 
-    /// Exact partial fraction decomposition of rational functions $P(x)/Q(x)$ over $\mathbb{Q}[x]$.
+    /// Exact partial fraction decomposition of rational functions $P(x)/Q(x)$ over $\mathbb{Q}\[x\]$.
     /// Handles improper fractions (polynomial long division), arbitrary degree, repeated roots $(x-r)^k$,
     /// and irreducible quadratic/higher factors using exact `BigRational` linear algebra.
     pub fn partial_fractions(graph: &ExprGraph, expr: ExprId, target: SymbolId) -> ExprId {
@@ -1329,7 +1329,7 @@ fn mv_poly_to_expr(graph: &ExprGraph, poly: &MvPoly) -> ExprId {
         .iter()
         .map(|(m, c)| {
             let mut sm = m.clone();
-            sm.sort_by(|a, b| atom_sort_name(graph, a.0).cmp(&atom_sort_name(graph, b.0)));
+            sm.sort_by_key(|a| atom_sort_name(graph, a.0));
             (sm, c.clone())
         })
         .collect();
@@ -1819,7 +1819,7 @@ fn u64_divisors(v: u64, cap: usize) -> Vec<u64> {
         if d * d > v {
             break;
         }
-        if v % d == 0 {
+        if v.is_multiple_of(d) {
             small.push(d);
             if d * d != v {
                 large.push(v / d);
@@ -2312,8 +2312,7 @@ fn berlekamp_zassenhaus_split(f: &[num_bigint::BigInt]) -> Vec<Vec<num_bigint::B
         let mut cur_rem_factor = Vec::new();
         let mut comb = (0..s).collect::<Vec<usize>>();
 
-        loop {
-            let Some(cur_lc) = remaining_poly.last() else { break };
+        while let Some(cur_lc) = remaining_poly.last() {
             let mut prod = vec![cur_lc.clone()];
             for &idx in &comb {
                 prod = zp_mul(&prod, &active[idx], &mod_m);
@@ -2419,7 +2418,7 @@ fn factor_multivariate_over_q(
             }
         }
     }
-    var_ids.sort_by(|&a, &b| atom_sort_name(graph, a).cmp(&atom_sort_name(graph, b)));
+    var_ids.sort_by_key(|&a| atom_sort_name(graph, a));
 
     if var_ids.len() <= 1 {
         if syms.len() == 1 {
@@ -2474,7 +2473,7 @@ fn factor_multivariate_over_q(
             }
         }
     }
-    prim_vars.sort_by(|&a, &b| atom_sort_name(graph, a).cmp(&atom_sort_name(graph, b)));
+    prim_vars.sort_by_key(|&a| atom_sort_name(graph, a));
 
     let mut out_factors: Vec<ExprId> = Vec::new();
     if !content.is_one() {
@@ -2704,10 +2703,9 @@ fn try_group_four_terms(
 
     let (scale, swapped) = if let Some(r) = check(&v0, &v1, &t2.1, &t3.1) {
         (r, false)
-    } else if let Some(r) = check(&v1, &v0, &t3.1, &t2.1) {
-        (r, true)
     } else {
-        return None;
+        let r = check(&v1, &v0, &t3.1, &t2.1)?;
+        (r, true)
     };
     let _ = swapped;
 

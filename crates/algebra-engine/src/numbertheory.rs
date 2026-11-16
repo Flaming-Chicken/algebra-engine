@@ -6,6 +6,13 @@
 //! - Greatest Common Divisor (Extended Euclidean Algorithm)
 //! - Legendre and Jacobi Symbols $(a/p)$
 //! - Modular Exponentiation & Inverses
+//! - Elliptic Curve Method (Lenstra), Pollard Rho, & Tonelli-Shanks Quadratic Residues
+//!
+//! ## References
+//! - Rabin, M. O. (1980). Probabilistic algorithm for testing primality. *J. Number Theory*, 12(1), 128–138.
+//! - Pollard, J. M. (1975). A Monte Carlo method for factorization. *BIT Numer. Math.*, 15(3), 331–334.
+//! - Lenstra, H. W., Jr. (1987). Factoring integers with elliptic curves. *Annals of Mathematics*, 126(3), 649–673.
+//! - Cohen, H. (1993). *A Course in Computational Algebraic Number Theory*. Springer.
 
 use algebra_core::traits::ValuationProvider;
 use num_bigint::BigUint;

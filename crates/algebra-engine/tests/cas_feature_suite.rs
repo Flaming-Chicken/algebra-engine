@@ -1,4 +1,4 @@
-//! # SymPy & Wolfram Alpha Feature Parity Test Suite
+//! # Core CAS Feature & Integration Test Suite
 //!
 //! Validates:
 //! 1. Special Functions: Gamma, Beta, Zeta, Eta, Erf, Erfc, Lambert W, Bessel, Si, Ci, Polylog exact and numerical values.
@@ -6,7 +6,7 @@
 //! 3. Transcendental & Lambert W Equation Solving: e^x = 5, ln(x) = 3, x*e^x = 2, x*ln(x) = 1, e^(2x) - 3e^x + 2 = 0.
 //! 4. Advanced Symbolic Integration: x*sin(x), x*cos(x), x*ln(x), x^2*e^x, e^x*sin(x), asin(x), atan(x), erf(x), definite integrals.
 //! 5. Matrix Linear Algebra: determinant, trace, inverse, characteristic polynomial, eigenvalues, eigenvectors, matrix exponential e^(At).
-//! 6. Wolfram Alpha Multi-Pod Query Engine: natural language queries generating structured pods.
+//! 6. Multi-Pod Structured Query Engine: natural-language queries generating structured pods.
 
 use algebra_core::format::{Formatter, UnicodeFormatter};
 use algebra_core::{Constant, ExprGraph};
@@ -14,9 +14,9 @@ use algebra_engine::ExecutionContext;
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::matrix::SymbolicMatrix;
 use algebra_engine::numeric::{EvalContext, NumericalEval};
+use algebra_engine::query::QueryEngine;
 use algebra_engine::solver::SymbolicSolver;
 use algebra_engine::special::SpecialFunctions;
-use algebra_engine::wolfram::WolframAlphaEngine;
 
 // =========================================================================
 // 1. SPECIAL FUNCTIONS EXACT VALUES
@@ -381,16 +381,16 @@ fn test_symbolic_matrix_algebra() {
 }
 
 // =========================================================================
-// 7. WOLFRAM ALPHA MULTI-POD NATURAL LANGUAGE QUERY ENGINE
+// 7. MULTI-POD NATURAL LANGUAGE QUERY ENGINE
 // =========================================================================
 
 #[test]
-fn test_wolfram_alpha_multi_pod_queries() {
+fn test_structured_multi_pod_queries() {
     let graph = ExprGraph::new();
     let ctx = ExecutionContext::new();
 
     // Query 1: "integrate x * sin(x)"
-    let resp1 = WolframAlphaEngine::query(&graph, "integrate x * sin(x)", &ctx);
+    let resp1 = QueryEngine::query(&graph, "integrate x * sin(x)", &ctx);
     assert!(resp1.pods.len() >= 2);
     assert_eq!(resp1.pods[0].title, "Input interpretation");
     assert_eq!(resp1.pods[1].title, "Result");
@@ -398,28 +398,28 @@ fn test_wolfram_alpha_multi_pod_queries() {
     assert!(resp1.pods[1].unicode.contains("cos(x)"));
 
     // Query 2: "solve x^2 - 4 = 0"
-    let resp2 = WolframAlphaEngine::query(&graph, "solve x^2 - 4 = 0", &ctx);
+    let resp2 = QueryEngine::query(&graph, "solve x^2 - 4 = 0", &ctx);
     assert!(resp2.pods.iter().any(|p| p.title == "Result"));
     let res_pod = resp2.pods.iter().find(|p| p.title == "Result").unwrap();
     assert!(res_pod.unicode.contains("2") || res_pod.unicode.contains("-2"));
 
     // Query 3: "diff e^(-x^2) wrt x"
-    let resp3 = WolframAlphaEngine::query(&graph, "diff exp(-x^2), x", &ctx);
+    let resp3 = QueryEngine::query(&graph, "diff exp(-x^2), x", &ctx);
     assert!(resp3.pods.iter().any(|p| p.title == "Result"));
 
     // Query 4: "gamma(5)"
-    let resp4 = WolframAlphaEngine::query(&graph, "eval gamma(5)", &ctx);
+    let resp4 = QueryEngine::query(&graph, "eval gamma(5)", &ctx);
     let res_g5 = resp4.pods.iter().find(|p| p.title == "Result").unwrap();
     assert!(res_g5.unicode.contains("24"));
 
     // Query 5: "zeta(2)"
-    let resp5 = WolframAlphaEngine::query(&graph, "eval zeta(2)", &ctx);
+    let resp5 = QueryEngine::query(&graph, "eval zeta(2)", &ctx);
     let res_z2 = resp5.pods.iter().find(|p| p.title == "Result").unwrap();
     assert!(res_z2.unicode.contains("1.644934") || res_z2.unicode.contains("pi"));
 
     // Format terminal output
     let terminal_out = resp1.format_terminal();
-    assert!(terminal_out.contains("Wolfram Alpha Query Result"));
+    assert!(terminal_out.contains("URAE Structured Query"));
     assert!(terminal_out.contains("[ Input interpretation ]"));
     assert!(terminal_out.contains("[ Result ]"));
 }

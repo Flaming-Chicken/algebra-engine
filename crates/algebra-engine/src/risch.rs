@@ -24,6 +24,12 @@
 //! $$\int \frac{A_0}{D^*} \, \mathrm{d}\theta = \sum_{i=1}^m c_i \ln\left( \gcd\left(A_0 - c_i (D^*)', D^*\right) \right)$$
 //! where $c_i$ are the distinct roots of the resultant polynomial:
 //! $$R(z) = \operatorname{res}_\theta(A_0 - z (D^*)', D^*)$$
+//!
+//! ## References
+//! - Risch, R. H. (1969). The problem of integration in finite terms. *Trans. Amer. Math. Soc.*, 139, 167–189.
+//! - Bronstein, M. (2005). *Symbolic Integration I: Transcendental Functions* (2nd ed.). Springer.
+//! - Rothstein, M. (1976). *Aspects of Symbolic Integration and Simplification of Exponential and Primitive Functions*. PhD thesis, Univ. of Wisconsin–Madison.
+//! - Trager, B. M. (1976). Algebraic factoring and rational function integration. *Proc. SYMSAC*, 219–226.
 
 use crate::calculus::SymbolicCalculus;
 use algebra_core::{

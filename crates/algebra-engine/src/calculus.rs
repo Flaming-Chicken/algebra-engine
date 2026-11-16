@@ -944,13 +944,11 @@ fn collect_denominators(
         }
         ExprKind::Pow(b, e) => {
             if graph.has_symbol(*b, wrt)
-                && matches!(
+                && (matches!(
                     graph.get(*e).kind,
                     ExprKind::Number(algebra_core::Number::Integer(k)) if k < 0
-                )
+                ) || matches!(graph.get(*e).kind, ExprKind::Neg(_)))
             {
-                out.push(*b);
-            } else if graph.has_symbol(*b, wrt) && matches!(graph.get(*e).kind, ExprKind::Neg(_)) {
                 out.push(*b);
             }
             collect_denominators(graph, *b, wrt, out);

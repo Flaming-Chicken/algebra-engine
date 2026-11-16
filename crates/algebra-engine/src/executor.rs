@@ -33,6 +33,7 @@ use crate::numbertheory::{
 use crate::numeric::{EvalContext, NumericalEval};
 use crate::simplify::{AlgebraicTransformations, Simplifier, SymbolicSimplifier};
 use crate::solver::SymbolicSolver;
+use crate::systems::{LinearSystemSolver, PolynomialSystemSolver};
 use crate::topology::SimplicialComplex;
 use crate::transforms::SymbolicTransforms;
 use crate::tropical::{MaxPlus, MinPlus, TropicalMatrix, log_sum_exp};
@@ -395,18 +396,34 @@ impl OperationExecutor {
                                 .filter(|&sol| solution_satisfies_assumptions(graph, sol, wrt_sym, &ctx.assumptions, &eval_ctx))
                                 .collect();
                             let mut sol_strs = Vec::new();
-                            for sol in filtered {
+                            let mut sol_latex = Vec::new();
+                            for &sol in &filtered {
                                 sol_strs.push(unicode_fmt.format(graph, sol).unwrap_or_default());
+                                sol_latex.push(latex_fmt.format(graph, sol).unwrap_or_default());
                             }
                             let out =
                                 format!("Solutions for {}: [{}]", var_name, sol_strs.join(", "));
-                            OperationResult::success(out.clone(), format!("\\text{{{}}}", out), out)
+                            let latex = if sol_latex.is_empty() {
+                                format!("{} \\in \\emptyset", var_name)
+                            } else {
+                                format!("{} \\in \\left\\{{ {} \\right\\}}", var_name, sol_latex.join(", "))
+                            };
+                            let mut res = OperationResult::success(out.clone(), latex, out);
+                            if filtered.len() == 1 {
+                                res.root_expr = Some(filtered[0]);
+                            }
+                            res
                         }
                         Err(e) => OperationResult::error(e.to_string()),
                     },
                     Err(e) => OperationResult::error(e.to_string()),
                 }
             }
+
+            MathOperation::SolveSystem {
+                equations,
+                variables,
+            } => execute_solve_system(graph, equations, variables, ctx),
 
             MathOperation::Simplify {
                 expression,
@@ -806,6 +823,102 @@ impl OperationExecutor {
                             Err(e) => OperationResult::error(e.to_string()),
                         },
                         (Err(e), _) | (_, Err(e)) => OperationResult::error(e.to_string()),
+                    }
+                }
+                MatrixOpKind::Rref { matrix_str } => {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str).and_then(|m| m.rref(graph)) {
+                        Ok((rref_mat, pivots)) => {
+                            let mat_id = rref_mat.to_expr_id(graph);
+                            let latex = latex_fmt.format(graph, mat_id).unwrap_or_default();
+                            let unicode = unicode_fmt.format(graph, mat_id).unwrap_or_default();
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                            res.root_expr = Some(mat_id);
+                            res.metadata
+                                .insert("rank".to_string(), pivots.len().to_string());
+                            res.metadata
+                                .insert("pivot_columns".to_string(), format!("{:?}", pivots));
+                            res
+                        }
+                        Err(e) => OperationResult::error(e.to_string()),
+                    }
+                }
+                MatrixOpKind::Rank { matrix_str } => {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str).and_then(|m| m.rank(graph)) {
+                        Ok(rank) => {
+                            let r_id = graph.integer(rank as i64);
+                            let latex =
+                                latex_fmt.format(graph, r_id).unwrap_or_else(|_| rank.to_string());
+                            let unicode = unicode_fmt
+                                .format(graph, r_id)
+                                .unwrap_or_else(|_| rank.to_string());
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                            res.root_expr = Some(r_id);
+                            res
+                        }
+                        Err(e) => OperationResult::error(e.to_string()),
+                    }
+                }
+                MatrixOpKind::Nullspace { matrix_str } => {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str)
+                        .and_then(|m| m.nullspace(graph))
+                    {
+                        Ok(basis) => {
+                            if basis.is_empty() {
+                                let mut res = OperationResult::success(
+                                    "[]".to_string(),
+                                    "\\left[ \\right]".to_string(),
+                                    "[]".to_string(),
+                                );
+                                res.metadata.insert("nullity".to_string(), "0".to_string());
+                                res
+                            } else {
+                                let mut u_vecs = Vec::with_capacity(basis.len());
+                                let mut l_vecs = Vec::with_capacity(basis.len());
+                                for col_vec in &basis {
+                                    if let Ok(cm) =
+                                        SymbolicMatrix::new(col_vec.len(), 1, col_vec.clone())
+                                    {
+                                        let id = cm.to_expr_id(graph);
+                                        u_vecs.push(unicode_fmt.format(graph, id).unwrap_or_default());
+                                        l_vecs.push(latex_fmt.format(graph, id).unwrap_or_default());
+                                    }
+                                }
+                                let text = format!("[{}]", u_vecs.join(", "));
+                                let latex = format!("\\left[ {} \\right]", l_vecs.join(",\\; "));
+                                let mut res = OperationResult::success(text.clone(), latex, text);
+                                res.metadata
+                                    .insert("nullity".to_string(), basis.len().to_string());
+                                res
+                            }
+                        }
+                        Err(e) => OperationResult::error(e.to_string()),
+                    }
+                }
+                MatrixOpKind::Eigenvalues { matrix_str } => {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str)
+                        .and_then(|m| m.eigenvalues(graph))
+                    {
+                        Ok(evals) => {
+                            let mut u_vals = Vec::with_capacity(evals.len());
+                            let mut l_vals = Vec::with_capacity(evals.len());
+                            let mut last_simp = None;
+                            for &ev in &evals {
+                                let simp =
+                                    Simplifier::simplify_with_assumptions(graph, ev, &ctx.assumptions)
+                                        .unwrap_or(ev);
+                                last_simp = Some(simp);
+                                u_vals.push(unicode_fmt.format(graph, simp).unwrap_or_default());
+                                l_vals.push(latex_fmt.format(graph, simp).unwrap_or_default());
+                            }
+                            let text = format!("[{}]", u_vals.join(", "));
+                            let latex = format!("\\left\\{{ {} \\right\\}}", l_vals.join(",\\; "));
+                            let mut res = OperationResult::success(text.clone(), latex, text);
+                            if evals.len() == 1 {
+                                res.root_expr = last_simp;
+                            }
+                            res
+                        }
+                        Err(e) => OperationResult::error(e.to_string()),
                     }
                 }
             },
@@ -3382,7 +3495,7 @@ fn verify_equivalence_pair(
         return Ok((true, "expand(LHS - RHS) = 0".to_string()));
     }
 
-    let mut syms = std::collections::BTreeSet::new();
+        let mut syms = std::collections::BTreeSet::new();
     collect_expr_symbols(graph, diff, &mut syms);
     let free_vars: Vec<String> = syms
         .into_iter()
@@ -3422,5 +3535,304 @@ fn verify_equivalence_pair(
         Ok((false, format!("{} numerical probes agree within 1e-6", matched)))
     } else {
         Err("Unable to prove or evaluate equivalence".to_string())
+    }
+}
+
+fn format_system_complex_root(r: &crate::poly::ComplexRoot) -> String {
+    let fmt_real = |v: f64| -> String {
+        let clean = if v.abs() < 1e-11 { 0.0 } else { v };
+        let rounded = clean.round();
+        if (clean - rounded).abs() < 1e-10 {
+            format!("{}", rounded as i64)
+        } else {
+            let s = format!("{:.8}", clean);
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        }
+    };
+    let im_clean = if r.im.abs() < 1e-10 { 0.0 } else { r.im };
+    if im_clean == 0.0 {
+        return fmt_real(r.re);
+    }
+    let re_clean = if r.re.abs() < 1e-11 { 0.0 } else { r.re };
+    let sign = if im_clean >= 0.0 { "+" } else { "-" };
+    let im_abs = fmt_real(im_clean.abs());
+    let im_term = if im_abs == "1" {
+        "i".to_string()
+    } else {
+        format!("{}i", im_abs)
+    };
+    if re_clean == 0.0 {
+        if im_clean < 0.0 {
+            format!("-{}", im_term)
+        } else {
+            im_term
+        }
+    } else {
+        format!("{} {} {}", fmt_real(re_clean), sign, im_term)
+    }
+}
+
+fn execute_solve_system(
+    graph: &ExprGraph,
+    equations: &[String],
+    variables: &[String],
+    ctx: &ExecutionContext,
+) -> OperationResult {
+    if equations.is_empty() {
+        return OperationResult::error("System solver requires at least one equation");
+    }
+
+    let parser = ExprParser::new(graph);
+    let unicode_fmt = UnicodeFormatter;
+    let latex_fmt = LatexFormatter;
+
+    let mut raw_residuals = Vec::with_capacity(equations.len());
+    for eq_str in equations {
+        let parsed = match parser.parse(eq_str) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(e.to_string()),
+        };
+        let residual = match &graph.get(parsed).kind {
+            ExprKind::Relational { op, lhs, rhs } => {
+                if *op == algebra_core::RelOp::Equal {
+                    graph.sub(*lhs, *rhs)
+                } else {
+                    return OperationResult::error(
+                        "System solver expects equations (=), got inequality",
+                    );
+                }
+            }
+            _ => parsed,
+        };
+        raw_residuals.push(residual);
+    }
+
+    let var_names: Vec<String> = if !variables.is_empty() {
+        variables.to_vec()
+    } else {
+        let mut syms = std::collections::BTreeSet::new();
+        for &res_id in &raw_residuals {
+            collect_expr_symbols(graph, res_id, &mut syms);
+        }
+        let mut inferred: Vec<String> = syms
+            .into_iter()
+            .filter_map(|s| graph.symbols.resolve(s))
+            .filter(|name| {
+                !matches!(
+                    name.as_str(),
+                    "pi" | "π"
+                        | "e"
+                        | "i"
+                        | "I"
+                        | "tau"
+                        | "τ"
+                        | "oo"
+                        | "inf"
+                        | "Inf"
+                        | "infinity"
+                        | "∞"
+                        | "nan"
+                        | "NaN"
+                ) && !ctx.bindings.contains_key(name)
+            })
+            .collect();
+        for preferred in ["w", "z", "y", "x"] {
+            if let Some(pos) = inferred.iter().position(|v| v == preferred) {
+                let v = inferred.remove(pos);
+                inferred.insert(0, v);
+            }
+        }
+        inferred
+    };
+
+    if var_names.is_empty() {
+        return OperationResult::error("No free variables found to solve for in system");
+    }
+
+    // Substitute active session parameter bindings (excluding solve target variables)
+    let mut residuals = Vec::with_capacity(raw_residuals.len());
+    for &raw_id in &raw_residuals {
+        let mut sub_id = raw_id;
+        for (param, &val) in &ctx.bindings {
+            if !var_names.iter().any(|v| v == param) {
+                let param_sym = graph.symbols.get_or_intern(param);
+                let val_node = if val.fract() == 0.0 && val.abs() < 9e15 {
+                    graph.integer(val as i64)
+                } else {
+                    graph.float(val)
+                };
+                sub_id = graph.substitute(sub_id, param_sym, val_node);
+            }
+        }
+        let simp = Simplifier::simplify_with_assumptions(graph, sub_id, &ctx.assumptions)
+            .unwrap_or(sub_id);
+        residuals.push(simp);
+    }
+
+    let var_syms: Vec<_> = var_names
+        .iter()
+        .map(|v| graph.symbols.get_or_intern(v))
+        .collect();
+    let var_set: std::collections::HashSet<_> = var_syms.iter().copied().collect();
+    let zero = graph.integer(0);
+
+    // Check whether all equations are linear in `var_syms` and build A*x = b
+    let m = residuals.len();
+    let n = var_syms.len();
+    let mut is_linear = true;
+    let mut a_elems = Vec::with_capacity(m * n);
+    let mut b_elems = Vec::with_capacity(m);
+
+    'linear_check: for &f_i in &residuals {
+        for &v_sym in &var_syms {
+            let d = graph.diff(f_i, v_sym);
+            let deriv = Simplifier::simplify(graph, d).unwrap_or(d);
+            let mut d_syms = std::collections::BTreeSet::new();
+            collect_expr_symbols(graph, deriv, &mut d_syms);
+            if d_syms.iter().any(|s| var_set.contains(s)) {
+                is_linear = false;
+                break 'linear_check;
+            }
+            a_elems.push(deriv);
+        }
+
+        let mut const_term = f_i;
+        for &v_sym in &var_syms {
+            const_term = graph.substitute(const_term, v_sym, zero);
+        }
+        let const_simp = Simplifier::simplify(graph, const_term).unwrap_or(const_term);
+        let mut c_syms = std::collections::BTreeSet::new();
+        collect_expr_symbols(graph, const_simp, &mut c_syms);
+        if c_syms.iter().any(|s| var_set.contains(s)) {
+            is_linear = false;
+            break 'linear_check;
+        }
+        let neg_c = graph.neg(const_simp);
+        let b_i = Simplifier::simplify(graph, neg_c).unwrap_or(neg_c);
+        b_elems.push(b_i);
+    }
+
+    let vars_header = format!("[{}]", var_names.join(", "));
+    let vars_latex = var_names.join(", ");
+
+    if is_linear {
+        let a_mat = match SymbolicMatrix::new(m, n, a_elems) {
+            Ok(mat) => mat,
+            Err(e) => return OperationResult::error(e.to_string()),
+        };
+        match LinearSystemSolver::solve(graph, &a_mat, &b_elems) {
+            Ok(space) => {
+                let mut expr_sols = Vec::with_capacity(n);
+                if !space.has_infinite_solutions {
+                    for &p_i in &space.particular {
+                        let s = Simplifier::simplify_with_assumptions(graph, p_i, &ctx.assumptions)
+                            .unwrap_or(p_i);
+                        expr_sols.push(s);
+                    }
+                } else {
+                    let param_syms: Vec<_> = if space.nullspace_basis.len() == 1 {
+                        vec![graph.symbol("t")]
+                    } else {
+                        (1..=space.nullspace_basis.len())
+                            .map(|k| graph.symbol(&format!("t_{}", k)))
+                            .collect()
+                    };
+                    for i in 0..n {
+                        let mut acc = space.particular[i];
+                        for (k, basis_vec) in space.nullspace_basis.iter().enumerate() {
+                            let coeff = basis_vec[i];
+                            if !SymbolicMatrix::is_entry_zero(graph, coeff) {
+                                let term = graph.mul([coeff, param_syms[k]]);
+                                acc = graph.add([acc, term]);
+                            }
+                        }
+                        let s =
+                            Simplifier::simplify_with_assumptions(graph, acc, &ctx.assumptions)
+                                .unwrap_or(acc);
+                        expr_sols.push(s);
+                    }
+                }
+
+                let mut u_parts = Vec::with_capacity(n);
+                let mut l_parts = Vec::with_capacity(n);
+                for (name, &sol_id) in var_names.iter().zip(expr_sols.iter()) {
+                    let u_val = unicode_fmt.format(graph, sol_id).unwrap_or_default();
+                    let l_val = latex_fmt.format(graph, sol_id).unwrap_or_default();
+                    u_parts.push(format!("{} = {}", name, u_val));
+                    l_parts.push(format!("{} = {}", name, l_val));
+                }
+                let text = format!("Solutions for {}: [{{{}}}]", vars_header, u_parts.join(", "));
+                let latex = format!("\\left\\{{ {} \\right\\}}", l_parts.join(",\\; "));
+                let mut res = OperationResult::success(text.clone(), latex, text);
+                res.metadata.insert(
+                    "solution_count".to_string(),
+                    if space.has_infinite_solutions {
+                        "infinite".to_string()
+                    } else {
+                        "1".to_string()
+                    },
+                );
+                res.metadata
+                    .insert("rank".to_string(), space.rank.to_string());
+                res
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("Inconsistent") {
+                    let out = format!("Solutions for {}: []", vars_header);
+                    let latex = format!("\\left[ {} \\right] \\in \\emptyset", vars_latex);
+                    let mut res = OperationResult::success(out.clone(), latex, out);
+                    res.metadata
+                        .insert("solution_count".to_string(), "0".to_string());
+                    res
+                } else {
+                    OperationResult::error(msg)
+                }
+            }
+        }
+    } else {
+        match PolynomialSystemSolver::solve(graph, &residuals, &var_names) {
+            Ok(tuples) => {
+                if tuples.is_empty() {
+                    let out = format!("Solutions for {}: []", vars_header);
+                    let latex = format!("\\left[ {} \\right] \\in \\emptyset", vars_latex);
+                    let mut res = OperationResult::success(out.clone(), latex, out);
+                    res.metadata
+                        .insert("solution_count".to_string(), "0".to_string());
+                    return res;
+                }
+                let mut u_tuples = Vec::with_capacity(tuples.len());
+                let mut l_tuples = Vec::with_capacity(tuples.len());
+                for tup in &tuples {
+                    let assigns: Vec<String> = var_names
+                        .iter()
+                        .zip(tup.iter())
+                        .map(|(v, r)| format!("{} = {}", v, format_system_complex_root(r)))
+                        .collect();
+                    let joined = assigns.join(", ");
+                    u_tuples.push(format!("{{{}}}", joined));
+                    l_tuples.push(format!("\\left( {} \\right)", assigns.join(",\\; ")));
+                }
+                let out = format!("Solutions for {}: [{}]", vars_header, u_tuples.join(", "));
+                let latex = format!("\\left\\{{ {} \\right\\}}", l_tuples.join(",\\; "));
+                let mut res = OperationResult::success(out.clone(), latex, out);
+                res.metadata
+                    .insert("solution_count".to_string(), tuples.len().to_string());
+                res
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("Inconsistent") {
+                    let out = format!("Solutions for {}: []", vars_header);
+                    let latex = format!("\\left[ {} \\right] \\in \\emptyset", vars_latex);
+                    let mut res = OperationResult::success(out.clone(), latex, out);
+                    res.metadata
+                        .insert("solution_count".to_string(), "0".to_string());
+                    res
+                } else {
+                    OperationResult::error(msg)
+                }
+            }
+        }
     }
 }

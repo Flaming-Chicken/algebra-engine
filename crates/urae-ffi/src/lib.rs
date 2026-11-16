@@ -112,7 +112,9 @@ pub unsafe extern "C" fn urae_differentiate_and_format_latex(
         Ok(expr_id) => {
             let wrt_sym = graph_ref.symbols.get_or_intern(var);
             let diff_id = graph_ref.diff(expr_id, wrt_sym);
-            match formatter.format(graph_ref, diff_id) {
+            let simp_id = algebra_engine::simplify::Simplifier::simplify(graph_ref, diff_id)
+                .unwrap_or(diff_id);
+            match formatter.format(graph_ref, simp_id) {
                 Ok(latex) => match CString::new(latex) {
                     Ok(c_res) => c_res.into_raw(),
                     Err(_) => std::ptr::null_mut(),

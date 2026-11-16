@@ -423,7 +423,7 @@ fn test_audit_parser_implicit_mul_factorial_mod_and_json_api() {
     assert_eq!(resp_det.output_unicode.trim(), "-2");
 
     // JSON API implicit mul + modulo + factorial + 2-arg log + expression gcd
-    assert_eq!(run_cli("eval 2x + 3").is_error, true); // free symbol x
+    assert!(run_cli("eval 2x + 3").is_error); // free symbol x
     assert_eq!(run_cli("diff 2x^3, x").output_text, run_cli("diff 2*x^3, x").output_text);
     assert_eq!(run_cli("expand (x+1)(x-1)").output_text, run_cli("expand (x+1)*(x-1)").output_text);
     assert_eq!(run_cli("eval 5!").output_text.trim(), "120");

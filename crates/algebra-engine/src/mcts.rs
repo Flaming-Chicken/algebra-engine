@@ -22,6 +22,7 @@ use algebra_core::lemma_miner::LemmaRegistry;
 use algebra_core::probabilistic::ProbabilisticVerifier;
 use algebra_core::{ExprGraph, ExprId, ExprKind, SymbolId};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 /// Discrete algebraic rewrite action applicable during MCTS exploration.

@@ -2,6 +2,10 @@
 //!
 //! Rigorous Interval Arithmetic $[a, b]$ with certified numerical bounds, directed inclusions,
 //! and Interval Newton root containment.
+//!
+//! ## References
+//! - Moore, R. E., Kearfott, R. B., & Cloud, M. J. (2009). *Introduction to Interval Analysis*. SIAM.
+//! - Tucker, W. (2011). *Validated Numerics: A Short Introduction to Rigorous Computations*. Princeton University Press.
 
 use serde::{Deserialize, Serialize};
 
@@ -278,9 +282,7 @@ impl RealInterval {
             let pos = self.powi(-n)?;
             return pos.recip();
         }
-        if n % 2 == 1 {
-            Some(RealInterval::new(self.inf.powi(n), self.sup.powi(n)))
-        } else if self.inf >= 0.0 {
+        if n % 2 == 1 || self.inf >= 0.0 {
             Some(RealInterval::new(self.inf.powi(n), self.sup.powi(n)))
         } else if self.sup <= 0.0 {
             Some(RealInterval::new(self.sup.powi(n), self.inf.powi(n)))

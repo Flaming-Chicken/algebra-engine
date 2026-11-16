@@ -97,6 +97,10 @@ pub enum MatrixOpKind {
     Transpose { matrix_str: String },
     CharPoly { matrix_str: String, var: String },
     Multiply { a_str: String, b_str: String },
+    Rref { matrix_str: String },
+    Rank { matrix_str: String },
+    Nullspace { matrix_str: String },
+    Eigenvalues { matrix_str: String },
 }
 
 /// Discrete combinatorics and partition functions.
@@ -535,6 +539,12 @@ pub enum MathOperation {
     Solve {
         equation: String,
         variable: Option<String>,
+    },
+
+    /// Multi-equation system solving: e.g. `solve [2*x + y = 5, x - y = 1], [x, y]`
+    SolveSystem {
+        equations: Vec<String>,
+        variables: Vec<String>,
     },
 
     /// Algebraic simplification and transformations: e.g. `simplify (x+0)*1`, `expand (x+1)^3`, `factor x^2-1`

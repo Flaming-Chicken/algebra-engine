@@ -7,6 +7,11 @@
 //! - **Buchberger's Algorithm**: Generates Gröbner bases $\langle \operatorname{LT}(G) \rangle = \langle \operatorname{LT}(I) \rangle$
 //!   with Gebauer-Möller useless pair elimination criteria.
 //! - **Reduced Gröbner Bases**: Guarantees uniqueness, monic leading terms, and complete reduction of tail monomials.
+//!
+//! ## References
+//! - Buchberger, B. (1965). *Ein Algorithmus zum Auffinden der Basiselemente des Restklassenringes nach einem nulldimensionalen Polynomideal*. PhD thesis, Univ. Innsbruck.
+//! - Gebauer, R., & Möller, H. M. (1988). On an installation of Buchberger's algorithm. *J. Symbolic Comput.*, 6(2–3), 275–286.
+//! - Cox, D., Little, J., & O'Shea, D. (2015). *Ideals, Varieties, and Algorithms* (4th ed.). Springer.
 
 use super::multivariate::{MonomialOrder, MultiPoly, Term};
 use algebra_core::error::AlgebraResult;

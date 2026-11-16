@@ -340,7 +340,7 @@ impl<'a> ExprParser<'a> {
     fn parse_primary<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
         let (input, _) = multispace0(input)?;
         alt((
-            |i| self.parse_matlab_matrix(i),
+            |i| self.parse_bracket_matrix(i),
             |i| self.parse_number(i),
             |i| self.parse_symbol_or_fn(i),
             delimited(
@@ -351,7 +351,7 @@ impl<'a> ExprParser<'a> {
         ))(input)
     }
 
-    fn parse_matlab_matrix<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
+    fn parse_bracket_matrix<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
         let (mut rest, _) = char('[')(input)?;
         let mut rows = Vec::new();
         loop {
@@ -665,6 +665,64 @@ fn split_top_level_commas(input: &str) -> Vec<&str> {
     }
     parts.push(input[start..].trim());
     parts
+}
+
+fn strip_matched_call<'a>(input: &'a str, names: &[&str]) -> Option<&'a str> {
+    for &name in names {
+        if let Some(rest) = input.strip_prefix(name) {
+            if let Some(after_space) = rest.strip_prefix(' ') {
+                return Some(after_space.trim());
+            }
+            if let Some(after_paren) = rest.strip_prefix('(') {
+                let mut depth = 1usize;
+                for (idx, c) in after_paren.char_indices() {
+                    match c {
+                        '(' | '[' | '{' => depth += 1,
+                        ')' | ']' | '}' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                if idx == after_paren.len() - 1 {
+                                    return Some(after_paren[..idx].trim());
+                                }
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_bracketed_list(input: &str) -> Option<Vec<String>> {
+    let trimmed = input.trim();
+    let (open, close) = if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        ('[', ']')
+    } else if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        ('{', '}')
+    } else {
+        return None;
+    };
+    let mut depth = 0usize;
+    for (idx, c) in trimmed.char_indices() {
+        if c == open || c == '(' || c == '[' || c == '{' {
+            depth += 1;
+        } else if c == close || c == ')' || c == ']' || c == '}' {
+            depth = depth.saturating_sub(1);
+            if depth == 0 && idx != trimmed.len() - 1 {
+                return None;
+            }
+        }
+    }
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let items: Vec<String> = split_top_level_commas(inner)
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    Some(items)
 }
 
 fn split_expr_and_var(input: &str) -> (String, Option<String>) {
@@ -2332,24 +2390,44 @@ pub fn parse_operation(input: &str) -> MathOperation {
     }
 
     // 13. Linear Algebra & Matrix Commands
-    if let Some(body) = input.strip_prefix("det ") {
+    if let Some(body) = strip_matched_call(input, &["det"]) {
         return MathOperation::Matrix(MatrixOpKind::Determinant {
-            matrix_str: body.trim().to_string(),
+            matrix_str: body.to_string(),
         });
     }
-    if let Some(body) = input.strip_prefix("inv ") {
+    if let Some(body) = strip_matched_call(input, &["inv"]) {
         return MathOperation::Matrix(MatrixOpKind::Inverse {
-            matrix_str: body.trim().to_string(),
+            matrix_str: body.to_string(),
         });
     }
-    if let Some(body) = input.strip_prefix("trace ") {
+    if let Some(body) = strip_matched_call(input, &["trace", "tr"]) {
         return MathOperation::Matrix(MatrixOpKind::Trace {
-            matrix_str: body.trim().to_string(),
+            matrix_str: body.to_string(),
         });
     }
-    if let Some(body) = input.strip_prefix("transpose ") {
+    if let Some(body) = strip_matched_call(input, &["transpose"]) {
         return MathOperation::Matrix(MatrixOpKind::Transpose {
-            matrix_str: body.trim().to_string(),
+            matrix_str: body.to_string(),
+        });
+    }
+    if let Some(body) = strip_matched_call(input, &["rref"]) {
+        return MathOperation::Matrix(MatrixOpKind::Rref {
+            matrix_str: body.to_string(),
+        });
+    }
+    if let Some(body) = strip_matched_call(input, &["rank"]) {
+        return MathOperation::Matrix(MatrixOpKind::Rank {
+            matrix_str: body.to_string(),
+        });
+    }
+    if let Some(body) = strip_matched_call(input, &["nullspace", "kernel"]) {
+        return MathOperation::Matrix(MatrixOpKind::Nullspace {
+            matrix_str: body.to_string(),
+        });
+    }
+    if let Some(body) = strip_matched_call(input, &["eigenvalues", "eigvals"]) {
+        return MathOperation::Matrix(MatrixOpKind::Eigenvalues {
+            matrix_str: body.to_string(),
         });
     }
     if let Some(body) = input.strip_prefix("charpoly ") {
@@ -2686,17 +2764,32 @@ pub fn parse_operation(input: &str) -> MathOperation {
             upper,
         };
     }
-    if let Some(solve_body) = input.strip_prefix("solve ").or_else(|| {
-        if input.starts_with("solve(") && input.ends_with(')') {
-            Some(&input[6..input.len() - 1])
-        } else {
-            None
-        }
-    }) {
+    if let Some(solve_body) = strip_matched_call(input, &["solve", "solve_system", "linsolve"]) {
         let parts: Vec<&str> = split_top_level_commas(solve_body)
             .into_iter()
             .map(|s| s.trim())
             .collect();
+        if let Some(first) = parts.first()
+            && let Some(eq_list) = parse_bracketed_list(first)
+        {
+            let variables = if parts.len() >= 2 {
+                if let Some(var_list) = parse_bracketed_list(parts[1]) {
+                    var_list
+                } else {
+                    parts[1..]
+                        .iter()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                }
+            } else {
+                Vec::new()
+            };
+            return MathOperation::SolveSystem {
+                equations: eq_list,
+                variables,
+            };
+        }
         let (eq, var) = if parts.len() >= 2 && !parts[1].is_empty() {
             (parts[0], Some(parts[1].to_string()))
         } else {
@@ -2864,12 +2957,12 @@ pub fn parse_operation(input: &str) -> MathOperation {
 }
 
 #[cfg(test)]
-mod matlab_syntax_tests {
+mod bracket_matrix_syntax_tests {
     use super::*;
     use crate::ExprKind;
 
     #[test]
-    fn test_matlab_matrix_and_elementwise_syntax() {
+    fn test_semicolon_matrix_and_elementwise_syntax() {
         let graph = ExprGraph::new();
         let parser = ExprParser::new(&graph);
 

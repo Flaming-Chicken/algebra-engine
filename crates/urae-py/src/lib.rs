@@ -60,13 +60,8 @@ impl PyExprGraph {
         let expr_id = parser.parse(&self.raw_text).map_err(|e| e.to_string())?;
         let wrt_sym = graph.symbols.get_or_intern(wrt);
         let diff_id = graph.diff(expr_id, wrt_sym);
-        let latex = LatexFormatter.format(&graph, diff_id).unwrap_or_default();
-        let unicode = UnicodeFormatter.format(&graph, diff_id).unwrap_or_default();
-        Ok(Self {
-            raw_text: unicode.clone(),
-            latex,
-            unicode,
-        })
+        let simp = Simplifier::simplify(&graph, diff_id).unwrap_or(diff_id);
+        node_to_py_expr(&graph, simp)
     }
 
     /// Symbolically integrate using Risch algorithm with respect to variable string.
@@ -78,13 +73,8 @@ impl PyExprGraph {
         let int_id = graph
             .integrate(expr_id, wrt_sym)
             .map_err(|e| e.to_string())?;
-        let latex = LatexFormatter.format(&graph, int_id).unwrap_or_default();
-        let unicode = UnicodeFormatter.format(&graph, int_id).unwrap_or_default();
-        Ok(Self {
-            raw_text: unicode.clone(),
-            latex,
-            unicode,
-        })
+        let simp = Simplifier::simplify(&graph, int_id).unwrap_or(int_id);
+        node_to_py_expr(&graph, simp)
     }
 
     /// Simplify expression using E-Graph pattern saturation.

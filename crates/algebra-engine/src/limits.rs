@@ -19,6 +19,10 @@
 //! 3. Computes the Puiseux / Laurent series expansion in powers of $\omega$:
 //!    $$f(x) = c_0 \omega^{d_0} + c_1 \omega^{d_1} + \cdots \quad (d_0 < d_1 < \cdots)$$
 //! 4. Extracts the leading term $\lim_{\omega \to 0^+} c_0 \omega^{d_0} = \begin{cases} 0 & \text{if } d_0 > 0 \\ c_0 & \text{if } d_0 = 0 \\ \pm \infty & \text{if } d_0 < 0 \end{cases}$.
+//!
+//! ## References
+//! - Gruntz, D. (1996). *On Computing Limits in a Symbolic Manipulation System*. PhD thesis, ETH Zürich.
+//! - Shackell, J. (2004). *Symbolic Asymptotics: Functions of One Variable, Estimates with Remainder and Oscillation Degree*. Springer.
 
 use crate::calculus::SymbolicCalculus;
 use crate::numeric::NumericalEval;
@@ -881,8 +885,7 @@ impl LimitEngine {
                 }
                 ExprKind::Pow(b, e) if !graph.has_symbol(*e, wrt) => {
                     if let ExprKind::Number(Number::Integer(p)) = graph.get(*e).kind
-                        && p >= 0
-                        && p <= 16
+                        && (0..=16).contains(&p)
                     {
                         let pb = extract(graph, *b, wrt)?;
                         let mut acc = vec![graph.integer(1)];

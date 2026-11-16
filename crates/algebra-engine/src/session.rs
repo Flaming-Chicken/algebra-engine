@@ -13,7 +13,7 @@ use algebra_core::domain::{DomainBound, MathContext};
 use algebra_core::operation::{MathOperation, SymbolRoleKind};
 use algebra_core::parser::{parse_domain_declaration, parse_operation};
 use algebra_core::{
-    ExprGraph, ExprId, ExprKind, RealInterval, parse_value_uncertainty_and_unit,
+    ExprGraph, ExprId, ExprKind, Formatter, RealInterval, parse_value_uncertainty_and_unit,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -74,6 +74,12 @@ pub struct UraeSession {
     pub symbol_metadata: HashMap<String, SymbolSessionMeta>,
     /// User-defined function definitions `name -> (args, body)`.
     pub user_functions: HashMap<String, (Vec<String>, String)>,
+    /// Symbolic variable aliases `name -> rhs_expr_str` (e.g. `p = (x + 1)^2`).
+    pub user_aliases: HashMap<String, String>,
+    /// Most recent successfully computed AST node (used for `ans`).
+    pub last_result_expr: Option<ExprId>,
+    /// Most recent parseable mathematical result string (used for `ans`).
+    pub last_result_text: Option<String>,
     /// Ambient mathematical context.
     pub context: MathContext,
     /// Document line history or command execution trace.
@@ -98,6 +104,9 @@ impl UraeSession {
             symbol_domains: HashMap::new(),
             symbol_metadata: HashMap::new(),
             user_functions: HashMap::new(),
+            user_aliases: HashMap::new(),
+            last_result_expr: None,
+            last_result_text: None,
             context: MathContext::default(),
             history: Vec::new(),
         }
@@ -113,6 +122,9 @@ impl UraeSession {
         self.symbol_domains.clear();
         self.symbol_metadata.clear();
         self.user_functions.clear();
+        self.user_aliases.clear();
+        self.last_result_expr = None;
+        self.last_result_text = None;
         self.context = MathContext::default();
         self.history.clear();
     }
@@ -202,6 +214,18 @@ impl UraeSession {
                     }
                 }
                 "Negative" => ctx.assumptions.assume(sym, crate::logic::Predicate::Negative),
+                "NonPositive" => {
+                    ctx.assumptions.assume(sym, crate::logic::Predicate::Real);
+                    ctx.assumptions.set_bounds(
+                        sym,
+                        crate::logic::IntervalBound {
+                            min_value: None,
+                            min_inclusive: false,
+                            max_value: Some(0.0),
+                            max_inclusive: true,
+                        },
+                    );
+                }
                 "NonZero" => ctx.assumptions.assume(sym, crate::logic::Predicate::NonZero),
                 "Integers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Integer),
                 "EvenIntegers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Even),
@@ -222,6 +246,17 @@ impl UraeSession {
                 }
                 _ => {}
             }
+            if bound.min_val.is_some() || bound.max_val.is_some() {
+                ctx.assumptions.set_bounds(
+                    sym,
+                    crate::logic::IntervalBound {
+                        min_value: bound.min_val,
+                        min_inclusive: bound.inclusive_min,
+                        max_value: bound.max_val,
+                        max_inclusive: bound.inclusive_max,
+                    },
+                );
+            }
         }
         let mut summary = Vec::new();
         for (name, meta) in &self.symbol_metadata {
@@ -237,10 +272,95 @@ impl UraeSession {
         ctx
     }
 
+    /// Register an assumption or domain bound (e.g. `"x > 0"`, `"n in Integers"`, `"x: positive"`).
+    pub fn assume(&mut self, decl: &str) -> OperationResult {
+        let trimmed = decl.trim();
+        let line = if trimmed.to_ascii_lowercase().starts_with("assume ")
+            || trimmed.contains(" in ")
+        {
+            trimmed.to_string()
+        } else {
+            format!("assume {}", trimmed)
+        };
+        self.execute_line(&line)
+    }
+
+    /// Evaluate any URAE expression or command and return its Unicode result string.
+    pub fn eval(&mut self, input: &str) -> Result<String, String> {
+        let res = self.execute_line(input);
+        if res.is_error {
+            Err(res.error_msg.unwrap_or(res.output_text))
+        } else {
+            Ok(res.output_unicode)
+        }
+    }
+
+    /// Evaluate any URAE expression or command and return its LaTeX result string.
+    pub fn eval_latex(&mut self, input: &str) -> Result<String, String> {
+        let res = self.execute_line(input);
+        if res.is_error {
+            Err(res.error_msg.unwrap_or(res.output_text))
+        } else {
+            Ok(res.output_latex)
+        }
+    }
+
+    /// Differentiate an expression with respect to `var` under current session state.
+    pub fn diff(&mut self, expr: &str, var: &str) -> Result<String, String> {
+        let cmd = format!("diff {}, {}", expr, var);
+        self.eval(&cmd)
+    }
+
+    /// Integrate an expression with respect to `var` under current session state.
+    pub fn integrate(&mut self, expr: &str, var: &str) -> Result<String, String> {
+        let cmd = format!("integrate {}, {}", expr, var);
+        self.eval(&cmd)
+    }
+
+    /// Solve an equation for `var` under current session assumptions and bindings.
+    pub fn solve(&mut self, eq: &str, var: &str) -> Result<String, String> {
+        let cmd = format!("solve {}, {}", eq, var);
+        self.eval(&cmd)
+    }
+
+    /// Expand session user aliases, `ans` references, and user-defined functions in `input`.
+    pub fn expand_definitions(&self, input: &str) -> String {
+        let mut cur = input.to_string();
+        for _ in 0..8 {
+            let before = cur.clone();
+            if !self.user_aliases.is_empty() {
+                cur = subst_identifiers(&cur, &self.user_aliases);
+            }
+            if let Some(prev) = &self.last_result_text {
+                let mut ans_map = HashMap::new();
+                let wrapped = if prev.contains(' ')
+                    || prev.contains('+')
+                    || prev.contains('-')
+                    || prev.contains('*')
+                    || prev.contains('/')
+                    || prev.contains('^')
+                {
+                    format!("({})", prev)
+                } else {
+                    prev.clone()
+                };
+                ans_map.insert("ans".to_string(), wrapped);
+                cur = subst_identifiers(&cur, &ans_map);
+            }
+            for (fn_name, (args, body)) in &self.user_functions {
+                cur = expand_fn_calls(&cur, fn_name, args, body);
+            }
+            if cur == before {
+                break;
+            }
+        }
+        cur
+    }
+
     /// Parse and execute a single line of input against this session, updating state.
     pub fn execute_line(&mut self, input: &str) -> OperationResult {
         let trimmed = input.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
             return OperationResult::success("", "", "");
         }
 
@@ -254,146 +374,274 @@ impl UraeSession {
             return OperationExecutor::execute(&self.graph, &op, &ctx);
         }
 
-        // Check for explicit parameter assignment `param = val [+/- err] [unit]`
-        if let Some((name, val_str)) = trimmed.split_once('=') {
-            let name = name.trim();
-            let val_norm = val_str.trim().replace("\\pm", "±");
-            if !name.contains(':')
-                && !name.contains('(')
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && let Some((f, err_opt, unit_opt)) = parse_value_uncertainty_and_unit(&val_norm)
-            {
-                if let Some(sigma) = err_opt {
-                    self.set_uncertain_binding(name, f, sigma, unit_opt);
-                    let meta = self.symbol_metadata.get(name).unwrap();
-                    let unit_suffix = meta
-                        .unit_str
-                        .as_ref()
-                        .map(|u| format!(" [{}]", u))
-                        .unwrap_or_default();
-                    let out = format!("{} = {} ± {}{}", name, f, sigma, unit_suffix);
-                    return OperationResult::success(out.clone(), out.clone(), out);
-                }
-                self.set_binding(name, f);
-                if let Some(u) = unit_opt
-                    && let Some(meta) = self.symbol_metadata.get_mut(name)
-                {
-                    meta.unit_str = Some(u);
-                }
-                let meta = self.symbol_metadata.get(name).unwrap();
-                let unit_suffix = meta
-                    .unit_str
-                    .as_ref()
-                    .map(|u| format!(" [{}]", u))
-                    .unwrap_or_default();
-                let out = format!("{} = {:.4}{}", name, meta.cur_val, unit_suffix);
-                return OperationResult::success(out.clone(), out.clone(), out);
-            }
-        }
+        // Check for assignment or function definition (`name = rhs` or `f(x, y) = body`),
+        // carefully avoiding relational operators (`==`, `<=`, `>=`, `!=`).
+        if !trimmed.contains("==")
+            && !trimmed.contains("<=")
+            && !trimmed.contains(">=")
+            && !trimmed.contains("!=")
+            && let Some((lhs_raw, rhs_raw)) = trimmed.split_once('=')
+        {
+            let lhs = lhs_raw.trim();
+            let rhs_trim = rhs_raw.trim();
 
-        // Check for function definition e.g. `f(x) = x^2 + 1`
-        if let Some((lhs, rhs)) = trimmed.split_once('=') {
-            let lhs = lhs.trim();
+            // Function definition `f(x, y) = body`
             if let Some(open_p) = lhs.find('(')
-                && let Some(close_p) = lhs.find(')')
-                && close_p > open_p
+                && lhs.ends_with(')')
             {
-                let fn_name = lhs[..open_p].trim().to_string();
-                let args: Vec<String> = lhs[open_p + 1..close_p]
+                let fn_name = lhs[..open_p].trim();
+                let inner = &lhs[open_p + 1..lhs.len() - 1];
+                let args: Vec<String> = inner
                     .split(',')
                     .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+                    .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_'))
                     .collect();
-                if !fn_name.is_empty() {
+                if !fn_name.is_empty()
+                    && fn_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && !args.is_empty()
+                {
                     self.user_functions
-                        .insert(fn_name.clone(), (args.clone(), rhs.trim().to_string()));
-                    let out = format!("{}({}) = {}", fn_name, args.join(", "), rhs.trim());
+                        .insert(fn_name.to_string(), (args.clone(), rhs_trim.to_string()));
+                    let out = format!("{}({}) = {}", fn_name, args.join(", "), rhs_trim);
                     return OperationResult::success(out.clone(), out.clone(), out);
                 }
             }
-        }
 
-        // Expand user functions in expression before parsing operation (ensuring word boundaries)
-        let mut expanded_input = trimmed.to_string();
-        for (fn_name, (args, body)) in &self.user_functions {
-            let p_start = format!("{}(", fn_name);
-            let mut search_idx = 0;
-            while let Some(rel_pos) = expanded_input[search_idx..].find(&p_start) {
-                let pos = search_idx + rel_pos;
-                let is_word_boundary = pos == 0 || {
-                    let prev = expanded_input[..pos].chars().last().unwrap();
-                    !prev.is_alphanumeric() && prev != '_'
-                };
-
-                if is_word_boundary
-                    && let Some(close) = expanded_input[pos..].find(')')
-                    && args.len() == 1
-                {
-                    let actual_arg = &expanded_input[pos + p_start.len()..pos + close];
-                    let replaced_body = body.replace(&args[0], actual_arg);
-                    let replacement = format!("({})", replaced_body);
-                    expanded_input = format!(
-                        "{}{}{}",
-                        &expanded_input[..pos],
-                        replacement,
-                        &expanded_input[pos + close + 1..]
-                    );
-                    search_idx = pos + replacement.len();
-                    continue;
+            // Simple variable assignment `name = ...`
+            if !lhs.contains(':')
+                && !lhs.contains('(')
+                && lhs != "ans"
+                && lhs.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
+            {
+                let val_norm = rhs_trim.replace("\\pm", "±");
+                if let Some((f, err_opt, unit_opt)) = parse_value_uncertainty_and_unit(&val_norm) {
+                    self.user_aliases.remove(lhs);
+                    if let Some(sigma) = err_opt {
+                        self.set_uncertain_binding(lhs, f, sigma, unit_opt);
+                        let unit_suffix = self
+                            .symbol_metadata
+                            .get(lhs)
+                            .and_then(|m| m.unit_str.as_ref())
+                            .map(|u| format!(" [{}]", u))
+                            .unwrap_or_default();
+                        let out = format!("{} = {} ± {}{}", lhs, f, sigma, unit_suffix);
+                        return OperationResult::success(out.clone(), out.clone(), out);
+                    }
+                    self.set_binding(lhs, f);
+                    if let Some(u) = unit_opt
+                        && let Some(meta) = self.symbol_metadata.get_mut(lhs)
+                    {
+                        meta.unit_str = Some(u);
+                    }
+                    let cur_val = self
+                        .symbol_metadata
+                        .get(lhs)
+                        .map(|m| m.cur_val)
+                        .unwrap_or(f);
+                    let unit_suffix = self
+                        .symbol_metadata
+                        .get(lhs)
+                        .and_then(|m| m.unit_str.as_ref())
+                        .map(|u| format!(" [{}]", u))
+                        .unwrap_or_default();
+                    let out = format!("{} = {}{}", lhs, format_clean_float(cur_val), unit_suffix);
+                    return OperationResult::success(out.clone(), out.clone(), out);
                 }
-                search_idx = pos + p_start.len();
+
+                // Computed expression or symbolic alias assignment (e.g. `area = pi * r^2`, `p = (x + 1)^2`)
+                let rhs_expanded = self.expand_definitions(rhs_trim);
+                let parser = algebra_core::parser::ExprParser::new(&self.graph);
+                if let Ok(rhs_id) = parser.parse(&rhs_expanded) {
+                    let syms = self.extract_symbols(rhs_id);
+                    let has_unc_syms = syms.iter().any(|s| {
+                        self.uncertainties.get(s).copied().unwrap_or(0.0) > 0.0
+                            || self.intervals.contains_key(s)
+                    });
+                    let has_unc_nodes =
+                        crate::numeric::expr_has_uncertainty_nodes(&self.graph, rhs_id);
+                    let all_bound = syms.iter().all(|s| {
+                        self.bindings.contains_key(s)
+                            || matches!(s.as_str(), "pi" | "π" | "e")
+                    }) && !syms.iter().any(|s| s == lhs);
+
+                    if all_bound && (has_unc_syms || has_unc_nodes) {
+                        let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
+                            .with_uncertainties(self.uncertainties.clone())
+                            .with_intervals(self.intervals.clone())
+                            .with_branch_sheet(self.branch_sheet);
+                        if let Ok(u) = crate::numeric::eval_uncertain(&self.graph, rhs_id, &eval_ctx)
+                        {
+                            self.user_aliases.remove(lhs);
+                            self.set_uncertain_binding(lhs, u.mean, u.std_dev, None);
+                            let out = format!("{} = {}", lhs, u.format_unicode());
+                            let latex = format!("{} = {}", lhs, u.format_latex());
+                            return OperationResult::success(out.clone(), latex, out);
+                        }
+                    } else if all_bound {
+                        use num_traits::ToPrimitive as _;
+                        if let Ok(Some(q)) =
+                            crate::numeric::try_eval_exact(&self.graph, rhs_id, &self.bindings)
+                        {
+                            let val_str = if q.is_integer() {
+                                q.numer().to_string()
+                            } else {
+                                format!("{}/{}", q.numer(), q.denom())
+                            };
+                            if let Some(f) = q.to_f64() && f.is_finite() {
+                                self.set_binding(lhs, f);
+                            }
+                            if !q.is_integer() || q.numer().bits() > 53 {
+                                self.user_aliases
+                                    .insert(lhs.to_string(), format!("({})", val_str));
+                            } else {
+                                self.user_aliases.remove(lhs);
+                            }
+                            self.last_result_text = Some(val_str.clone());
+                            let out = format!("{} = {}", lhs, val_str);
+                            let latex = if q.is_integer() {
+                                out.clone()
+                            } else {
+                                format!("{} = \\frac{{{}}}{{{}}}", lhs, q.numer(), q.denom())
+                            };
+                            return OperationResult::success(out.clone(), latex, out);
+                        }
+                        let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
+                            .with_branch_sheet(self.branch_sheet);
+                        if let Ok(num) = self.graph.evalf(rhs_id, &eval_ctx)
+                            && let crate::numeric::BigValue::Real(val_f64) = num
+                            && val_f64.is_finite()
+                        {
+                            self.user_aliases.remove(lhs);
+                            self.set_binding(lhs, val_f64);
+                            let val_str = format_clean_float(val_f64);
+                            self.last_result_text = Some(val_str.clone());
+                            let out = format!("{} = {}", lhs, val_str);
+                            return OperationResult::success(out.clone(), out.clone(), out);
+                        }
+                    } else if !syms.iter().any(|s| s == lhs) {
+                        // Free symbolic variables on RHS -> store as reusable symbolic alias
+                        self.bindings.remove(lhs);
+                        self.user_aliases.insert(lhs.to_string(), rhs_expanded.clone());
+                        let u_fmt = algebra_core::format::UnicodeFormatter
+                            .format(&self.graph, rhs_id)
+                            .unwrap_or_else(|_| rhs_trim.to_string());
+                        let l_fmt = algebra_core::format::LatexFormatter
+                            .format(&self.graph, rhs_id)
+                            .unwrap_or_else(|_| rhs_trim.to_string());
+                        self.last_result_expr = Some(rhs_id);
+                        self.last_result_text = Some(u_fmt.clone());
+                        let mut res = OperationResult::success(
+                            format!("{} = {}", lhs, u_fmt),
+                            format!("{} = {}", lhs, l_fmt),
+                            format!("{} = {}", lhs, u_fmt),
+                        );
+                        res.root_expr = Some(rhs_id);
+                        return res;
+                    }
+                }
             }
         }
 
-        // Substitute numerical bindings for constant parameters in calculus or general expressions
-        if !self.bindings.is_empty()
-            || trimmed.contains("±")
-            || trimmed.contains("+/-")
-            || trimmed.contains("uncertain(")
-            || trimmed.contains("interval(")
-        {
+        // Expand user functions, symbolic aliases, and `ans` before parsing/evaluation
+        let expanded_input = self.expand_definitions(trimmed);
+        let parsed_op = parse_operation(&expanded_input);
+
+        // Evaluate pure expressions (constants, exact rationals, or all-bound expressions/uncertainties)
+        if matches!(parsed_op, MathOperation::Expression { .. }) {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
                 let syms = self.extract_symbols(expr_id);
-                let all_bound = !syms.is_empty() && syms.iter().all(|s| self.bindings.contains_key(s));
-                let has_unc_syms = syms
-                    .iter()
-                    .any(|s| self.uncertainties.get(s).copied().unwrap_or(0.0) > 0.0 || self.intervals.contains_key(s));
-                let has_unc_nodes = crate::numeric::expr_has_uncertainty_nodes(&self.graph, expr_id);
-                if all_bound && (has_unc_syms || has_unc_nodes) || (syms.is_empty() && has_unc_nodes) {
+                let all_bound = syms.iter().all(|s| {
+                    self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
+                });
+                let has_user_bound = syms.iter().any(|s| self.bindings.contains_key(s));
+                let has_unc_syms = syms.iter().any(|s| {
+                    self.uncertainties.get(s).copied().unwrap_or(0.0) > 0.0
+                        || self.intervals.contains_key(s)
+                });
+                let has_unc_nodes =
+                    crate::numeric::expr_has_uncertainty_nodes(&self.graph, expr_id);
+                if (all_bound && (has_unc_syms || has_unc_nodes))
+                    || (syms.is_empty() && has_unc_nodes)
+                {
                     let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
                         .with_uncertainties(self.uncertainties.clone())
                         .with_intervals(self.intervals.clone())
                         .with_branch_sheet(self.branch_sheet);
                     if let Ok(u) = crate::numeric::eval_uncertain(&self.graph, expr_id, &eval_ctx) {
+                        self.last_result_text = Some(format_clean_float(u.mean));
                         let out = u.format_unicode();
                         let latex = u.format_latex();
                         return OperationResult::success(out.clone(), latex, out);
                     }
-                } else if all_bound {
-                    let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
-                        .with_branch_sheet(self.branch_sheet);
-                    if let Ok(num) = self.graph.evalf(expr_id, &eval_ctx) {
-                        let val_f64 = num.to_f64();
-                        let val_str = if val_f64.fract() == 0.0 && val_f64.abs() < 1e12 {
-                            format!("{}", val_f64 as i64)
+                } else if (has_user_bound && all_bound) || syms.is_empty() {
+                    let exec_ctx = self.execution_context();
+                    let simp_id = crate::simplify::Simplifier::simplify_with_assumptions(
+                        &self.graph,
+                        expr_id,
+                        &exec_ctx.assumptions,
+                    )
+                    .unwrap_or(expr_id);
+                    if let Ok(Some(q)) =
+                        crate::numeric::try_eval_exact(&self.graph, simp_id, &self.bindings)
+                    {
+                        let out = if q.is_integer() {
+                            q.numer().to_string()
                         } else {
-                            format!("{:.4}", val_f64)
+                            format!("{}/{}", q.numer(), q.denom())
                         };
-                        return OperationResult::success(val_str.clone(), val_str.clone(), val_str);
+                        let latex = if q.is_integer() {
+                            out.clone()
+                        } else {
+                            format!("\\frac{{{}}}{{{}}}", q.numer(), q.denom())
+                        };
+                        self.last_result_expr = Some(simp_id);
+                        self.last_result_text = Some(out.clone());
+                        let mut res = OperationResult::success(out.clone(), latex, out);
+                        res.root_expr = Some(simp_id);
+                        return res;
+                    }
+                    if has_user_bound {
+                        let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
+                            .with_branch_sheet(self.branch_sheet);
+                        if let Ok(num) = self.graph.evalf(simp_id, &eval_ctx) {
+                            let val_f64 = num.to_f64();
+                            let val_str = format_clean_float(val_f64);
+                            self.last_result_text = Some(val_str.clone());
+                            return OperationResult::success(
+                                val_str.clone(),
+                                val_str.clone(),
+                                val_str,
+                            );
+                        }
+                    } else {
+                        let u_out = algebra_core::format::UnicodeFormatter
+                            .format(&self.graph, simp_id)
+                            .unwrap_or_else(|_| expanded_input.clone());
+                        let l_out = algebra_core::format::LatexFormatter
+                            .format(&self.graph, simp_id)
+                            .unwrap_or_else(|_| expanded_input.clone());
+                        self.last_result_expr = Some(simp_id);
+                        self.last_result_text = Some(u_out.clone());
+                        let mut res = OperationResult::success(u_out.clone(), l_out, u_out);
+                        res.root_expr = Some(simp_id);
+                        return res;
                     }
                 }
             }
         }
 
-        let op = parse_operation(&expanded_input);
-        self.execute_op(&op)
+        self.execute_op(&parsed_op)
     }
 
     /// Execute a parsed `MathOperation` against this session.
     pub fn execute_op(&mut self, op: &MathOperation) -> OperationResult {
         // Intercept state mutations
         match op {
+            MathOperation::System(algebra_core::operation::SystemCommandKind::Clear) => {
+                self.reset();
+            }
             MathOperation::Declaration {
                 name,
                 role,
@@ -458,13 +706,31 @@ impl UraeSession {
         }
 
         let ctx = self.execution_context();
-        OperationExecutor::execute(&self.graph, op, &ctx)
+        let res = OperationExecutor::execute(&self.graph, op, &ctx);
+        if !res.is_error {
+            if let Some(root) = res.root_expr {
+                self.last_result_expr = Some(root);
+                if let Ok(formatted) =
+                    algebra_core::format::UnicodeFormatter.format(&self.graph, root)
+                    && !formatted.is_empty()
+                {
+                    self.last_result_text = Some(formatted);
+                }
+            } else if matches!(
+                op,
+                MathOperation::Evaluate { .. } | MathOperation::Simplify { .. }
+            ) && !res.output_unicode.is_empty()
+            {
+                self.last_result_text = Some(res.output_unicode.clone());
+            }
+        }
+        res
     }
 
-    /// Execute a Wolfram Alpha style natural language query, returning a structured multi-pod response.
-    pub fn wolfram_query(&self, query: &str) -> crate::wolfram::WolframAlphaResponse {
+    /// Execute a natural-language mathematical query, returning a structured multi-pod response.
+    pub fn structured_query(&self, query: &str) -> crate::query::QueryResponse {
         let ctx = self.execution_context();
-        crate::wolfram::WolframAlphaEngine::query(&self.graph, query, &ctx)
+        crate::query::QueryEngine::query(&self.graph, query, &ctx)
     }
 
     /// Extract all unique variable symbol names contained in an expression tree.
@@ -497,4 +763,140 @@ impl UraeSession {
         list.sort();
         list
     }
+}
+
+fn format_clean_float(val: f64) -> String {
+    if !val.is_finite() {
+        return val.to_string();
+    }
+    if (val - val.round()).abs() < 1e-12 && val.abs() < 1e14 {
+        let i = val.round() as i64;
+        format!("{}", i)
+    } else {
+        let s = format!("{:.10}", val);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+fn is_ident_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn subst_identifiers(expr: &str, map: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(expr.len());
+    let chars: Vec<(usize, char)> = expr.char_indices().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let (byte_idx, ch) = chars[i];
+        if ch.is_alphabetic() || ch == '_' {
+            let mut end = i + 1;
+            while end < chars.len() && is_ident_char(chars[end].1) {
+                end += 1;
+            }
+            let end_byte = if end < chars.len() {
+                chars[end].0
+            } else {
+                expr.len()
+            };
+            let ident = &expr[byte_idx..end_byte];
+            // Do not substitute if immediately invoked as a function `ident(...)`
+            let mut look = end;
+            while look < chars.len() && chars[look].1.is_whitespace() {
+                look += 1;
+            }
+            let is_call = look < chars.len() && chars[look].1 == '(';
+            if !is_call
+                && let Some(rep) = map.get(ident)
+            {
+                out.push_str(rep);
+                i = end;
+                continue;
+            }
+            out.push_str(ident);
+            i = end;
+        } else {
+            out.push(ch);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn expand_fn_calls(input: &str, fn_name: &str, params: &[String], body: &str) -> String {
+    if fn_name.is_empty() || params.is_empty() {
+        return input.to_string();
+    }
+    let pattern = format!("{}(", fn_name);
+    let mut result = String::with_capacity(input.len());
+    let mut cursor = 0usize;
+
+    while let Some(rel) = input[cursor..].find(&pattern) {
+        let pos = cursor + rel;
+        let is_word_boundary = pos == 0
+            || input[..pos]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !is_ident_char(c));
+
+        if !is_word_boundary {
+            result.push_str(&input[cursor..pos + pattern.len()]);
+            cursor = pos + pattern.len();
+            continue;
+        }
+
+        let arg_start = pos + pattern.len();
+        let mut depth_paren = 1usize;
+        let mut depth_brack = 0usize;
+        let mut cur_arg_start = arg_start;
+        let mut actual_args = Vec::new();
+        let mut close_byte = None;
+
+        for (offset, ch) in input[arg_start..].char_indices() {
+            let abs = arg_start + offset;
+            match ch {
+                '(' => depth_paren += 1,
+                ')' => {
+                    depth_paren -= 1;
+                    if depth_paren == 0 && depth_brack == 0 {
+                        actual_args.push(input[cur_arg_start..abs].trim().to_string());
+                        close_byte = Some(abs);
+                        break;
+                    }
+                }
+                '[' => depth_brack += 1,
+                ']' => depth_brack = depth_brack.saturating_sub(1),
+                ',' if depth_paren == 1 && depth_brack == 0 => {
+                    actual_args.push(input[cur_arg_start..abs].trim().to_string());
+                    cur_arg_start = abs + 1;
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(end_paren) = close_byte
+            && actual_args.len() == params.len()
+        {
+            let mut param_map = HashMap::new();
+            for (p, a) in params.iter().zip(actual_args.iter()) {
+                let wrapped = if a.is_empty() {
+                    a.clone()
+                } else {
+                    format!("({})", a)
+                };
+                param_map.insert(p.clone(), wrapped);
+            }
+            let substituted = subst_identifiers(body, &param_map);
+            result.push_str(&input[cursor..pos]);
+            result.push('(');
+            result.push_str(&substituted);
+            result.push(')');
+            cursor = end_paren + 1;
+        } else {
+            result.push_str(&input[cursor..arg_start]);
+            cursor = arg_start;
+        }
+    }
+
+    result.push_str(&input[cursor..]);
+    result
 }

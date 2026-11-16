@@ -79,15 +79,15 @@ fn test_unicode_input_parsing_and_output_formatting() {
 }
 
 #[test]
-fn test_sympy_input_parsing_and_python_code_emission() {
+fn test_python_exponent_parsing_and_rust_code_emission() {
     let graph = ExprGraph::new();
     let parser = ExprParser::new(&graph);
 
-    // SymPy exponent notation x**2 + 3*x
-    let sympy_input = "x**2 + 3*x + sin(x)";
+    // Python exponent notation x**2 + 3*x
+    let py_input = "x**2 + 3*x + sin(x)";
     let expr_id = parser
-        .parse(sympy_input)
-        .expect("SymPy input parsing failed");
+        .parse(py_input)
+        .expect("Python exponent input parsing failed");
 
     // Code generation emission to Rust/C code string
     let emitted_code = urae::codegen::CodeGenerator::emit_code(

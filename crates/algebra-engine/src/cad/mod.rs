@@ -23,6 +23,11 @@
 //! - **Parametric Geometric Constraint Solver**:
 //!   Translates 2D/3D/ND geometric constraints (tangency, perpendicularity, distance, incidence)
 //!   into polynomial ideals resolved via Gröbner bases and CAD cell evaluation.
+//!
+//! ## References
+//! - Collins, G. E. (1975). Quantifier elimination for real closed fields by cylindrical algebraic decomposition. *LNCS* 33, 134–183.
+//! - McCallum, S. (1988). An improved projection operation for cylindrical algebraic decomposition of three-dimensional space. *J. Symbolic Comput.*, 5(1–2), 141–161.
+//! - Tarski, A. (1951). *A Decision Method for Elementary Algebra and Geometry*. Univ. of California Press.
 
 pub mod bvh;
 pub mod engineering;

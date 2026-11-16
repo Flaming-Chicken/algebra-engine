@@ -38,6 +38,7 @@ pub use algebra_engine::{
         ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer,
         ZeroType,
     },
+    api::{ConstPoly, ConstRational, Expr, IntoExpr, NumMat, Sym, SymMat, parse_expr, sym},
     autodiff::{Dual, ForwardGradient, HyperDual, TapeFreeVjp},
     branch::{
         BranchCutFunctionKind, BranchCutGeometry, BranchCutManager, BranchSelection,
@@ -63,6 +64,15 @@ pub use algebra_engine::{
     distributions::EmpiricalDistributionMut,
     exceptional_lie::{AlbertAlgebra, E8Lattice, LieOctonion},
     executor::{ExecutionContext, OperationExecutor, OperationResult},
+    query::{QueryEngine, QueryResponse, ResultPod},
+    stream::{
+        BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
+        execute_async, execute_batch_async, query_async,
+    },
+    workbench::{
+        ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,
+        EquationSystemSpec, QuiverArrow, WorkbenchEngine, WorkbenchPresets,
+    },
     geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer},
     geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder},
     gpu::{GpuKernelDescriptor, WgslShaderGenerator},

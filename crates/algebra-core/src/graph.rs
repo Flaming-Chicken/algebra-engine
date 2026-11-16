@@ -580,9 +580,7 @@ impl ExprGraph {
             ExprKind::Relational { lhs, rhs, .. } => {
                 self.has_symbol(*lhs, target) || self.has_symbol(*rhs, target)
             }
-            ExprKind::SetOperation { args, .. } => {
-                args.iter().any(|&a| self.has_symbol(a, target))
-            }
+            ExprKind::SetOperation { args, .. } => args.iter().any(|&a| self.has_symbol(a, target)),
             ExprKind::Sum {
                 body,
                 var,
@@ -600,9 +598,7 @@ impl ExprGraph {
                     || upper.is_some_and(|u| self.has_symbol(u, target))
             }
             ExprKind::TensorContraction {
-                tensor_a,
-                tensor_b,
-                ..
+                tensor_a, tensor_b, ..
             } => self.has_symbol(*tensor_a, target) || self.has_symbol(*tensor_b, target),
             ExprKind::Number(_) => false,
         }

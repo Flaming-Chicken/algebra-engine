@@ -20,7 +20,11 @@ fn test_session_functions_aliases_ans_exact_and_assumptions() {
     // `g(2)` must expand `exp(2) + 2`, NOT corrupt `exp` into `e2p`
     let g_res = session.execute_line("g(0)");
     assert!(!g_res.is_error, "g(0) failed: {}", g_res.output_text);
-    assert_eq!(g_res.output_text, "1", "exp(0) + 0 = 1, got {}", g_res.output_text);
+    assert_eq!(
+        g_res.output_text, "1",
+        "exp(0) + 0 = 1, got {}",
+        g_res.output_text
+    );
 
     // Nested parentheses inside function args: `f(sin(t), cos(t))` -> `sin(t)^2 + cos(t)^2` -> `1`
     let nested = session.execute_line("simplify f(sin(t), cos(t))");
@@ -35,7 +39,10 @@ fn test_session_functions_aliases_ans_exact_and_assumptions() {
     let d = session.diff("x^3", "x").expect("diff x^3");
     assert!(d.contains("3") && d.contains("x"), "got {d}");
     let integrated = session.integrate("ans", "x").expect("integrate ans");
-    assert!(integrated.contains("x^3") || integrated.contains("x³"), "got {integrated}");
+    assert!(
+        integrated.contains("x^3") || integrated.contains("x³"),
+        "got {integrated}"
+    );
 
     // 3. Computed scalar assignments, symbolic aliases, and exact rationals
     let a = session.eval("a = 1/3").expect("rational assign");
@@ -44,7 +51,9 @@ fn test_session_functions_aliases_ans_exact_and_assumptions() {
     assert_eq!(sum, "1/2", "expected exact 1/2, got {sum}");
 
     session.execute_line("r = 3");
-    let area = session.eval("area = pi * r^2").expect("computed assignment");
+    let area = session
+        .eval("area = pi * r^2")
+        .expect("computed assignment");
     assert!(area.contains("28.274") || area.contains("9"), "got {area}");
 
     session.execute_line("p = (x + 1)^2");
@@ -77,7 +86,9 @@ fn test_session_functions_aliases_ans_exact_and_assumptions() {
 
     // `clear` resets bindings, assumptions, aliases, and functions
     session.execute_line("clear");
-    let cleared_roots = session.solve("x^2 - 9 = 0", "x").expect("solve after clear");
+    let cleared_roots = session
+        .solve("x^2 - 9 = 0", "x")
+        .expect("solve after clear");
     assert!(
         cleared_roots.contains('3') && cleared_roots.contains("-3"),
         "expected both 3 and -3 after clear, got {cleared_roots}"
@@ -98,7 +109,11 @@ fn test_unified_json_api_latex_and_query_pods() {
         let req = serde_json::json!({ "input": cmd }).to_string();
         let resp_str = process_json_request(&graph, &req);
         let resp: serde_json::Value = serde_json::from_str(&resp_str).expect("valid json response");
-        assert_eq!(resp["success"].as_bool(), Some(true), "cmd failed: {cmd} -> {resp}");
+        assert_eq!(
+            resp["success"].as_bool(),
+            Some(true),
+            "cmd failed: {cmd} -> {resp}"
+        );
         let latex = resp["output_latex"].as_str().unwrap_or("");
         assert!(
             !latex.starts_with("\\text{"),
@@ -115,7 +130,9 @@ fn test_unified_json_api_latex_and_query_pods() {
     ctx.bindings.insert("a".to_string(), 2.0);
     let resp: QueryResponse = QueryEngine::query(&graph, "t^2 - 9", &ctx);
     assert!(
-        resp.pods.iter().any(|p: &ResultPod| p.title == "Calculus companion"),
+        resp.pods
+            .iter()
+            .any(|p: &ResultPod| p.title == "Calculus companion"),
         "expected Calculus companion for t^2 - 9, pods: {:?}",
         resp.pods.iter().map(|p| &p.title).collect::<Vec<_>>()
     );
@@ -167,7 +184,11 @@ fn test_matrix_depth_and_equation_systems() {
 
     let eig_sym_op = parse_operation("eigenvalues [[a, 0], [0, b]]");
     let eig_sym_res = OperationExecutor::execute(&graph, &eig_sym_op, &ctx);
-    assert!(!eig_sym_res.is_error, "sym eig err: {}", eig_sym_res.output_text);
+    assert!(
+        !eig_sym_res.is_error,
+        "sym eig err: {}",
+        eig_sym_res.output_text
+    );
     assert!(
         eig_sym_res.output_text.contains('a') && eig_sym_res.output_text.contains('b'),
         "expected symbolic eigenvalues [a, b], got {}",
@@ -188,7 +209,10 @@ fn test_matrix_depth_and_equation_systems() {
     let ns_op = parse_operation("nullspace [[1, 2], [2, 4]]");
     let ns_res = OperationExecutor::execute(&graph, &ns_op, &ctx);
     assert!(!ns_res.is_error, "nullspace err: {}", ns_res.output_text);
-    assert_eq!(ns_res.metadata.get("nullity").map(String::as_str), Some("1"));
+    assert_eq!(
+        ns_res.metadata.get("nullity").map(String::as_str),
+        Some("1")
+    );
     assert!(
         ns_res.output_text.contains("-2") && ns_res.output_text.contains('1'),
         "expected nullspace vector [-2, 1], got {}",
@@ -208,13 +232,24 @@ fn test_matrix_depth_and_equation_systems() {
     // Inconsistent linear system: x + y = 1, x + y = 2 => empty
     let inc_op = parse_operation("solve [x + y = 1, x + y = 2], [x, y]");
     let inc_res = OperationExecutor::execute(&graph, &inc_op, &ctx);
-    assert!(!inc_res.is_error, "inconsistent system shouldn't error/panic: {}", inc_res.output_text);
-    assert_eq!(inc_res.metadata.get("solution_count").map(String::as_str), Some("0"));
+    assert!(
+        !inc_res.is_error,
+        "inconsistent system shouldn't error/panic: {}",
+        inc_res.output_text
+    );
+    assert_eq!(
+        inc_res.metadata.get("solution_count").map(String::as_str),
+        Some("0")
+    );
 
     // Symbolic linear system: a*x + y = 1, x - y = 0 => x = 1/(a+1), y = 1/(a+1)
     let sym_sys_op = parse_operation("solve [a*x + y = 1, x - y = 0], [x, y]");
     let sym_sys_res = OperationExecutor::execute(&graph, &sym_sys_op, &ctx);
-    assert!(!sym_sys_res.is_error, "symbolic sys err: {}", sym_sys_res.output_text);
+    assert!(
+        !sym_sys_res.is_error,
+        "symbolic sys err: {}",
+        sym_sys_res.output_text
+    );
     assert!(
         sym_sys_res.output_text.contains('a') && sym_sys_res.output_text.contains("x ="),
         "expected parametric symbolic solution in `a`, got {}",
@@ -224,7 +259,11 @@ fn test_matrix_depth_and_equation_systems() {
     // Nonlinear polynomial system: x^2 + y^2 = 5, x - y = 1 => (2, 1) and (-1, -2)
     let nl_op = parse_operation("solve [x^2 + y^2 = 5, x - y = 1], [x, y]");
     let nl_res = OperationExecutor::execute(&graph, &nl_op, &ctx);
-    assert!(!nl_res.is_error, "nonlinear sys err: {}", nl_res.output_text);
+    assert!(
+        !nl_res.is_error,
+        "nonlinear sys err: {}",
+        nl_res.output_text
+    );
     assert!(
         nl_res.output_text.contains("x = 2")
             && nl_res.output_text.contains("y = 1")

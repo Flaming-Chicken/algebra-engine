@@ -68,7 +68,11 @@ impl Default for EquationSystemSpec {
             name: "Circle-Line Intersection".to_string(),
             equations: vec!["x^2 + y^2 = r^2".to_string(), "y = m * x + c".to_string()],
             variables: vec!["x".to_string(), "y".to_string()],
-            parameters: vec![("r".to_string(), 3.0), ("m".to_string(), 1.0), ("c".to_string(), 0.5)],
+            parameters: vec![
+                ("r".to_string(), 3.0),
+                ("m".to_string(), 1.0),
+                ("c".to_string(), 0.5),
+            ],
             x_range: [-5.0, 5.0],
             y_range: [-5.0, 5.0],
             grid_res: 48,
@@ -174,7 +178,11 @@ impl WorkbenchPresets {
                     "x * y = c".to_string(),
                 ],
                 variables: vec!["x".to_string(), "y".to_string()],
-                parameters: vec![("a".to_string(), 3.0), ("b".to_string(), 2.0), ("c".to_string(), 1.5)],
+                parameters: vec![
+                    ("a".to_string(), 3.0),
+                    ("b".to_string(), 2.0),
+                    ("c".to_string(), 1.5),
+                ],
                 x_range: [-4.5, 4.5],
                 y_range: [-4.5, 4.5],
                 grid_res: 52,
@@ -222,10 +230,7 @@ impl WorkbenchPresets {
             DifferentialSystemSpec {
                 name: "Van der Pol Limit Cycle".to_string(),
                 state_vars: vec!["x".to_string(), "y".to_string()],
-                rhs_expressions: vec![
-                    "y".to_string(),
-                    "mu * (1 - x^2) * y - x".to_string(),
-                ],
+                rhs_expressions: vec!["y".to_string(), "mu * (1 - x^2) * y - x".to_string()],
                 t_var: "t".to_string(),
                 t_span: [0.0, 25.0],
                 y0: vec![0.5, 0.0],
@@ -342,7 +347,8 @@ impl WorkbenchEngine {
 
             for &r_id in &residuals_expr {
                 let mut segs = Vec::new();
-                if let Ok(prog) = VmCompiler::compile(graph, r_id, &spec.variables[0], &param_order) {
+                if let Ok(prog) = VmCompiler::compile(graph, r_id, &spec.variables[0], &param_order)
+                {
                     segs = marching_squares_contours(
                         &vm,
                         &prog,
@@ -427,7 +433,10 @@ impl WorkbenchEngine {
                 Err(e) => {
                     return empty_de_error(
                         dim,
-                        format!("Parse error in {}' equation `{expr_str}`: {e}", spec.state_vars[idx]),
+                        format!(
+                            "Parse error in {}' equation `{expr_str}`: {e}",
+                            spec.state_vars[idx]
+                        ),
                     );
                 }
             }
@@ -463,7 +472,12 @@ impl WorkbenchEngine {
         }
         let param_vals: Vec<f64> = param_names[dim..]
             .iter()
-            .filter_map(|pname| spec.parameters.iter().find(|(k, _)| k == pname).map(|(_, v)| *v))
+            .filter_map(|pname| {
+                spec.parameters
+                    .iter()
+                    .find(|(k, _)| k == pname)
+                    .map(|(_, v)| *v)
+            })
             .collect();
 
         let mut programs: Vec<BytecodeProgram> = Vec::with_capacity(dim);
@@ -473,7 +487,10 @@ impl WorkbenchEngine {
                 Err(e) => {
                     return empty_de_error(
                         dim,
-                        format!("Bytecode compilation failed for {}': {e}", spec.state_vars[i]),
+                        format!(
+                            "Bytecode compilation failed for {}': {e}",
+                            spec.state_vars[i]
+                        ),
                     );
                 }
             }
@@ -630,10 +647,18 @@ fn empty_de_error(dim: usize, msg: String) -> DifferentialSystemAnalysis {
     }
 }
 
-fn parse_residual_expr(parser: &ExprParser<'_>, graph: &ExprGraph, raw: &str) -> Result<ExprId, String> {
+fn parse_residual_expr(
+    parser: &ExprParser<'_>,
+    graph: &ExprGraph,
+    raw: &str,
+) -> Result<ExprId, String> {
     let parsed = parser.parse(raw).map_err(|e| e.to_string())?;
     Ok(match &graph.get(parsed).kind {
-        ExprKind::Relational { op: RelOp::Equal, lhs, rhs } => graph.sub(*lhs, *rhs),
+        ExprKind::Relational {
+            op: RelOp::Equal,
+            lhs,
+            rhs,
+        } => graph.sub(*lhs, *rhs),
         _ => parsed,
     })
 }
@@ -645,7 +670,10 @@ fn format_symbolic_jacobian(
 ) -> (String, String) {
     let m = exprs.len();
     let n = vars.len();
-    let var_syms: Vec<_> = vars.iter().map(|v| graph.symbols.get_or_intern(v)).collect();
+    let var_syms: Vec<_> = vars
+        .iter()
+        .map(|v| graph.symbols.get_or_intern(v))
+        .collect();
     let mut elems = Vec::with_capacity(m * n);
     for &f_i in exprs {
         for &v_sym in &var_syms {
@@ -714,7 +742,11 @@ fn analyze_linearized_stability(
             "Marginal Equilibrium"
         };
         let s = format!("[{:.4}]", lam);
-        return (s.clone(), format!("\\left\\{{ {:.4} \\right\\}}", lam), label.to_string());
+        return (
+            s.clone(),
+            format!("\\left\\{{ {:.4} \\right\\}}", lam),
+            label.to_string(),
+        );
     }
 
     if dim == 2 {

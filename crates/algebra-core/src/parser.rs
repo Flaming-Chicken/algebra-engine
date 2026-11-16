@@ -250,7 +250,14 @@ impl<'a> ExprParser<'a> {
             let (next_rem, op_opt) = opt(tuple((
                 delimited(
                     multispace0,
-                    alt((tag(".*"), tag("./"), tag("*"), tag("/"), tag("%"), tag("\\"))),
+                    alt((
+                        tag(".*"),
+                        tag("./"),
+                        tag("*"),
+                        tag("/"),
+                        tag("%"),
+                        tag("\\"),
+                    )),
                     multispace0,
                 ),
                 |i| self.parse_uncertainty(i),
@@ -273,7 +280,10 @@ impl<'a> ExprParser<'a> {
             // Contiguous implicit multiplication (no whitespace so `[1 2; 3 4]` keeps space-separated columns):
             // handles `2x`, `2(x+1)`, `(x+1)(x-1)`, `(x+1)2`, `2sin(x)`, `sin(x)cos(x)`.
             if let Some(next_ch) = rem.chars().next()
-                && (next_ch == '(' || next_ch.is_alphabetic() || next_ch == '_' || next_ch.is_ascii_digit())
+                && (next_ch == '('
+                    || next_ch.is_alphabetic()
+                    || next_ch == '_'
+                    || next_ch.is_ascii_digit())
                 && let Ok((after_rhs, rhs)) = self.parse_uncertainty(rem)
             {
                 current = self.graph.mul([current, rhs]);
@@ -292,7 +302,11 @@ impl<'a> ExprParser<'a> {
     fn parse_uncertainty<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
         let (input, lhs) = self.parse_factor(input)?;
         let (input, err_opt) = opt(tuple((
-            delimited(multispace0, alt((tag("±"), tag("+/-"), tag("+-"))), multispace0),
+            delimited(
+                multispace0,
+                alt((tag("±"), tag("+/-"), tag("+-"))),
+                multispace0,
+            ),
             |i| self.parse_factor(i),
         )))(input)?;
         if let Some((_, err)) = err_opt {
@@ -954,7 +968,11 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
             }
         } else {
             let parts = split_top_level_commas(clean);
-            if parts.len() >= 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() {
+            if parts.len() >= 3
+                && !parts[0].is_empty()
+                && !parts[1].is_empty()
+                && !parts[2].is_empty()
+            {
                 let (mut pt, mut dir) = split_limit_point_direction(parts[2]);
                 if parts.len() >= 4 && !parts[3].is_empty() {
                     let explicit_dir = match parts[3].trim() {
@@ -986,10 +1004,7 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
         if trimmed.starts_with("sum(") && trimmed.ends_with(')') {
             let inner = &trimmed[4..trimmed.len() - 1];
             let parts = split_top_level_commas(inner);
-            if parts.len() == 2
-                && parts[1].starts_with('(')
-                && parts[1].ends_with(')')
-            {
+            if parts.len() == 2 && parts[1].starts_with('(') && parts[1].ends_with(')') {
                 let range_parts = split_top_level_commas(&parts[1][1..parts[1].len() - 1]);
                 if range_parts.len() == 3 {
                     return Some(PermissiveIntent::Sum {
@@ -1552,7 +1567,12 @@ pub fn parse_operation(input: &str) -> MathOperation {
         if let Some(bound) = parse_domain_declaration(body) {
             return MathOperation::DomainRestriction(bound);
         }
-        let make_bound = |name: &str, domain_type: &str, min_val: Option<f64>, max_val: Option<f64>, inc_min: bool, inc_max: bool| {
+        let make_bound = |name: &str,
+                          domain_type: &str,
+                          min_val: Option<f64>,
+                          max_val: Option<f64>,
+                          inc_min: bool,
+                          inc_max: bool| {
             MathOperation::DomainRestriction(DomainBound {
                 name: name.to_string(),
                 domain_type: domain_type.to_string(),
@@ -1905,7 +1925,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
         if !parts.is_empty() && !parts[0].trim().is_empty() {
             return MathOperation::DiffEq(DiffEqOpKind::ClassifyAndSolve {
                 equation: parts[0].trim().to_string(),
-                dependent_var: parts.get(1).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                dependent_var: parts
+                    .get(1)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty()),
                 independent_vars: parts
                     .get(2)
                     .map(|s| vec![s.trim().to_string()])
@@ -2253,7 +2276,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
     // 11b. Bare uncertain parameter assignment: e.g. `a = 5.0 +/- 0.1 [m]`, `m = 2.5 ± 0.05`
     if !input.starts_with("solve ")
         && !input.starts_with("eval ")
-        && (input.contains("+/-") || input.contains('±') || input.contains("+-") || input.contains("\\pm"))
+        && (input.contains("+/-")
+            || input.contains('±')
+            || input.contains("+-")
+            || input.contains("\\pm"))
         && let Some((lhs, rhs)) = input.split_once('=')
     {
         let sym_name = lhs.trim();
@@ -2261,7 +2287,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
         if !sym_name.is_empty()
             && !sym_name.contains(':')
             && sym_name.chars().all(|c| c.is_alphanumeric() || c == '_')
-            && sym_name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && sym_name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
             && let Some((v, Some(u), unit)) = parse_value_uncertainty_and_unit(&rhs_norm)
         {
             return MathOperation::UncertainDeclaration {
@@ -2716,7 +2745,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
         {
             let expr_parts = split_top_level_commas(expr_part);
             let (expr, mut var) = if expr_parts.len() >= 2 {
-                (expr_parts[0].trim().to_string(), Some(expr_parts[1].trim().to_string()))
+                (
+                    expr_parts[0].trim().to_string(),
+                    Some(expr_parts[1].trim().to_string()),
+                )
             } else {
                 (expr_part.trim().to_string(), None)
             };

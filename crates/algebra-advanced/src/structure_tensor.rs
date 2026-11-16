@@ -212,13 +212,12 @@ impl StructureTensorAlgebra {
         // i * i = -1
         tensor[1][1][0] = -1.0;
 
-        Self::new("ComplexNumbers", names, tensor)
-            .unwrap_or_else(|_| Self {
-                name: "ComplexNumbers".into(),
-                basis_names: vec!["1".into(), "i".into()],
-                structure_tensor: vec![],
-                dim: 2,
-            })
+        Self::new("ComplexNumbers", names, tensor).unwrap_or_else(|_| Self {
+            name: "ComplexNumbers".into(),
+            basis_names: vec!["1".into(), "i".into()],
+            structure_tensor: vec![],
+            dim: 2,
+        })
     }
 
     /// Dual Numbers $\mathbb{D} = \operatorname{span}\{1, \varepsilon\}$ where $\varepsilon^2 = 0$.
@@ -233,13 +232,12 @@ impl StructureTensorAlgebra {
         tensor[1][0][1] = 1.0;
         // eps * eps = 0
 
-        Self::new("DualNumbers", names, tensor)
-            .unwrap_or_else(|_| Self {
-                name: "DualNumbers".into(),
-                basis_names: vec!["1".into(), "eps".into()],
-                structure_tensor: vec![],
-                dim: 2,
-            })
+        Self::new("DualNumbers", names, tensor).unwrap_or_else(|_| Self {
+            name: "DualNumbers".into(),
+            basis_names: vec!["1".into(), "eps".into()],
+            structure_tensor: vec![],
+            dim: 2,
+        })
     }
 
     /// Hamilton Quaternions $\mathbb{H} = \operatorname{span}\{1, i, j, k\}$.
@@ -275,13 +273,12 @@ impl StructureTensorAlgebra {
         tensor[3][1][2] = 1.0;
         tensor[1][3][2] = -1.0;
 
-        Self::new("Quaternions", names, tensor)
-            .unwrap_or_else(|_| Self {
-                name: "Quaternions".into(),
-                basis_names: vec!["1".into(), "i".into(), "j".into(), "k".into()],
-                structure_tensor: vec![],
-                dim: 4,
-            })
+        Self::new("Quaternions", names, tensor).unwrap_or_else(|_| Self {
+            name: "Quaternions".into(),
+            basis_names: vec!["1".into(), "i".into(), "j".into(), "k".into()],
+            structure_tensor: vec![],
+            dim: 4,
+        })
     }
 
     /// Complex Dual Numbers $\mathbb{C} \otimes \mathbb{D} = \operatorname{span}\{1, i, \varepsilon, i\varepsilon\}$.

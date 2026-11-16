@@ -7,14 +7,16 @@
 //! physics units, certified intervals, logic, number theory, topology, control systems,
 //! and esoteric hyperoperations.
 
+use crate::logic::SatSolver;
+use crate::matrix::SymbolicMatrix;
+use crate::poly::{
+    UniPoly, collect_expr_symbols, expr_from_rational, symbolic_discriminant, symbolic_resultant,
+};
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::interval::RealInterval;
 use algebra_core::operation::*;
 use algebra_core::parser::ExprParser;
 use algebra_core::{ExprGraph, ExprId, ExprKind};
-use crate::logic::SatSolver;
-use crate::matrix::SymbolicMatrix;
-use crate::poly::{UniPoly, collect_expr_symbols, expr_from_rational, symbolic_discriminant, symbolic_resultant};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -186,20 +188,40 @@ impl OperationExecutor {
                 variable,
                 order,
                 is_total: _,
-            } => {
-                match parser.parse(expression) {
-                    Ok(expr_id) => {
-                        let mut subbed_id = expr_id;
-                        for (param, &val) in &ctx.bindings {
-                            if Some(param.as_str()) != variable.as_deref() {
-                                let param_sym = graph.symbols.get_or_intern(param);
-                                let val_node = graph.float(val);
-                                subbed_id = graph.substitute(subbed_id, param_sym, val_node);
-                            }
+            } => match parser.parse(expression) {
+                Ok(expr_id) => {
+                    let mut subbed_id = expr_id;
+                    for (param, &val) in &ctx.bindings {
+                        if Some(param.as_str()) != variable.as_deref() {
+                            let param_sym = graph.symbols.get_or_intern(param);
+                            let val_node = graph.float(val);
+                            subbed_id = graph.substitute(subbed_id, param_sym, val_node);
                         }
+                    }
 
-                        if let Some(var_str) = variable {
-                            let wrt_sym = graph.symbols.get_or_intern(var_str);
+                    if let Some(var_str) = variable {
+                        let wrt_sym = graph.symbols.get_or_intern(var_str);
+                        let mut cur_id = subbed_id;
+                        for _ in 0..*order {
+                            cur_id = graph.diff(cur_id, wrt_sym);
+                        }
+                        let simp_id = Simplifier::simplify(graph, cur_id)
+                            .unwrap_or_else(|_| graph.simplify(cur_id));
+                        let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
+                        let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
+                        let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                        res.root_expr = Some(simp_id);
+                        res.simplified_unicode =
+                            Some(unicode_fmt.format(graph, simp_id).unwrap_or_default());
+                        res
+                    } else {
+                        let mut free_sym_ids = std::collections::BTreeSet::new();
+                        collect_expr_symbols(graph, subbed_id, &mut free_sym_ids);
+                        if free_sym_ids.len() <= 1 {
+                            let wrt_sym = free_sym_ids
+                                .into_iter()
+                                .next()
+                                .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
                             let mut cur_id = subbed_id;
                             for _ in 0..*order {
                                 cur_id = graph.diff(cur_id, wrt_sym);
@@ -208,177 +230,140 @@ impl OperationExecutor {
                                 .unwrap_or_else(|_| graph.simplify(cur_id));
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                            let mut res =
+                                OperationResult::success(unicode.clone(), latex, unicode.clone());
                             res.root_expr = Some(simp_id);
-                            res.simplified_unicode =
-                                Some(unicode_fmt.format(graph, simp_id).unwrap_or_default());
+                            res.simplified_unicode = Some(unicode);
                             res
                         } else {
-                            let mut free_sym_ids = std::collections::BTreeSet::new();
-                            collect_expr_symbols(graph, subbed_id, &mut free_sym_ids);
-                            if free_sym_ids.len() <= 1 {
-                                let wrt_sym = free_sym_ids
-                                    .into_iter()
-                                    .next()
-                                    .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
+                            let mut lines = Vec::new();
+                            for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
+                                let v_name = graph.symbols.resolve(*wrt_sym).unwrap_or_default();
                                 let mut cur_id = subbed_id;
                                 for _ in 0..*order {
-                                    cur_id = graph.diff(cur_id, wrt_sym);
+                                    cur_id = graph.diff(cur_id, *wrt_sym);
                                 }
                                 let simp_id = Simplifier::simplify(graph, cur_id)
                                     .unwrap_or_else(|_| graph.simplify(cur_id));
-                                let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
-                                let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                                let mut res =
-                                    OperationResult::success(unicode.clone(), latex, unicode.clone());
-                                res.root_expr = Some(simp_id);
-                                res.simplified_unicode = Some(unicode);
-                                res
-                            } else {
-                                let mut lines = Vec::new();
-                                for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
-                                    let v_name =
-                                        graph.symbols.resolve(*wrt_sym).unwrap_or_default();
-                                    let mut cur_id = subbed_id;
-                                    for _ in 0..*order {
-                                        cur_id = graph.diff(cur_id, *wrt_sym);
-                                    }
-                                    let simp_id = Simplifier::simplify(graph, cur_id)
-                                        .unwrap_or_else(|_| graph.simplify(cur_id));
-                                    let out_fmt =
-                                        unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                                    lines.push(format!(
-                                        "  [{}] d/d{} [{}] = {}",
-                                        i + 1,
-                                        v_name,
-                                        expression,
-                                        out_fmt
-                                    ));
-                                }
-                                let out =
-                                    format!("Derivatives for {}:\n{}", expression, lines.join("\n"));
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\text{{{}}}", out),
-                                    out,
-                                )
+                                let out_fmt =
+                                    unicode_fmt.format(graph, simp_id).unwrap_or_default();
+                                lines.push(format!(
+                                    "  [{}] d/d{} [{}] = {}",
+                                    i + 1,
+                                    v_name,
+                                    expression,
+                                    out_fmt
+                                ));
                             }
+                            let out =
+                                format!("Derivatives for {}:\n{}", expression, lines.join("\n"));
+                            OperationResult::success(out.clone(), format!("\\text{{{}}}", out), out)
                         }
                     }
-                    Err(e) => OperationResult::error(e.to_string()),
                 }
-            }
+                Err(e) => OperationResult::error(e.to_string()),
+            },
 
             MathOperation::Integrate {
                 expression,
                 variable,
                 lower,
                 upper,
-            } => {
-                match parser.parse(expression) {
-                    Ok(expr_id) => {
-                        let mut subbed_id = expr_id;
-                        for (param, &val) in &ctx.bindings {
-                            if Some(param.as_str()) != variable.as_deref() {
-                                let param_sym = graph.symbols.get_or_intern(param);
-                                let val_node = graph.float(val);
-                                subbed_id = graph.substitute(subbed_id, param_sym, val_node);
-                            }
+            } => match parser.parse(expression) {
+                Ok(expr_id) => {
+                    let mut subbed_id = expr_id;
+                    for (param, &val) in &ctx.bindings {
+                        if Some(param.as_str()) != variable.as_deref() {
+                            let param_sym = graph.symbols.get_or_intern(param);
+                            let val_node = graph.float(val);
+                            subbed_id = graph.substitute(subbed_id, param_sym, val_node);
                         }
+                    }
 
-                        if let Some(var_str) = variable {
-                            let wrt_sym = graph.symbols.get_or_intern(var_str);
-                            let int_res: Result<_, String> = match (lower, upper) {
-                                (Some(l_str), Some(u_str)) => {
-                                    match (parser.parse(l_str), parser.parse(u_str)) {
-                                        (Ok(l_id), Ok(u_id)) => graph
-                                            .integrate_definite(subbed_id, wrt_sym, l_id, u_id)
-                                            .map_err(|e| e.to_string()),
-                                        (Err(e), _) | (_, Err(e)) => Err(e.to_string()),
-                                    }
+                    if let Some(var_str) = variable {
+                        let wrt_sym = graph.symbols.get_or_intern(var_str);
+                        let int_res: Result<_, String> = match (lower, upper) {
+                            (Some(l_str), Some(u_str)) => {
+                                match (parser.parse(l_str), parser.parse(u_str)) {
+                                    (Ok(l_id), Ok(u_id)) => graph
+                                        .integrate_definite(subbed_id, wrt_sym, l_id, u_id)
+                                        .map_err(|e| e.to_string()),
+                                    (Err(e), _) | (_, Err(e)) => Err(e.to_string()),
                                 }
-                                _ => graph.integrate(subbed_id, wrt_sym).map_err(|e| e.to_string()),
-                            };
-                            match int_res {
+                            }
+                            _ => graph
+                                .integrate(subbed_id, wrt_sym)
+                                .map_err(|e| e.to_string()),
+                        };
+                        match int_res {
+                            Ok(int_id) => {
+                                let simp_id = graph.simplify(int_id);
+                                let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
+                                let unicode =
+                                    unicode_fmt.format(graph, simp_id).unwrap_or_default();
+                                let bounds_suffix = match (lower, upper) {
+                                    (Some(l), Some(u)) => format!(" along [{}, {}]", l, u),
+                                    _ => String::new(),
+                                };
+                                let text =
+                                    format!("{} (w.r.t {}{})", unicode, var_str, bounds_suffix);
+                                let mut res = OperationResult::success(text, latex, unicode);
+                                res.root_expr = Some(simp_id);
+                                res
+                            }
+                            Err(e) => OperationResult::error(e.to_string()),
+                        }
+                    } else {
+                        let mut free_sym_ids = std::collections::BTreeSet::new();
+                        collect_expr_symbols(graph, subbed_id, &mut free_sym_ids);
+                        if free_sym_ids.len() <= 1 {
+                            let wrt_sym = free_sym_ids
+                                .into_iter()
+                                .next()
+                                .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
+                            match graph.integrate(subbed_id, wrt_sym) {
                                 Ok(int_id) => {
-                                    let simp_id = graph.simplify(int_id);
-                                    let latex =
-                                        latex_fmt.format(graph, simp_id).unwrap_or_default();
+                                    let simp_id = Simplifier::simplify(graph, int_id)
+                                        .unwrap_or_else(|_| graph.simplify(int_id));
                                     let unicode =
                                         unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                                    let bounds_suffix = match (lower, upper) {
-                                        (Some(l), Some(u)) => format!(" along [{}, {}]", l, u),
-                                        _ => String::new(),
-                                    };
-                                    let text =
-                                        format!("{} (w.r.t {}{})", unicode, var_str, bounds_suffix);
-                                    let mut res = OperationResult::success(text, latex, unicode);
+                                    let latex =
+                                        latex_fmt.format(graph, simp_id).unwrap_or_default();
+                                    let wrt_name =
+                                        graph.symbols.resolve(wrt_sym).unwrap_or_default();
+                                    let out = format!("{} (w.r.t {})", unicode, wrt_name);
+                                    let mut res = OperationResult::success(out.clone(), latex, out);
                                     res.root_expr = Some(simp_id);
                                     res
                                 }
                                 Err(e) => OperationResult::error(e.to_string()),
                             }
                         } else {
-                            let mut free_sym_ids = std::collections::BTreeSet::new();
-                            collect_expr_symbols(graph, subbed_id, &mut free_sym_ids);
-                            if free_sym_ids.len() <= 1 {
-                                let wrt_sym = free_sym_ids
-                                    .into_iter()
-                                    .next()
-                                    .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
-                                match graph.integrate(subbed_id, wrt_sym) {
-                                    Ok(int_id) => {
-                                        let simp_id = Simplifier::simplify(graph, int_id)
-                                            .unwrap_or_else(|_| graph.simplify(int_id));
-                                        let unicode =
-                                            unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                                        let latex =
-                                            latex_fmt.format(graph, simp_id).unwrap_or_default();
-                                        let wrt_name =
-                                            graph.symbols.resolve(wrt_sym).unwrap_or_default();
-                                        let out = format!("{} (w.r.t {})", unicode, wrt_name);
-                                        let mut res = OperationResult::success(
-                                            out.clone(),
-                                            latex,
-                                            out,
-                                        );
-                                        res.root_expr = Some(simp_id);
-                                        res
-                                    }
-                                    Err(e) => OperationResult::error(e.to_string()),
+                            let mut lines = Vec::new();
+                            for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
+                                let v_name = graph.symbols.resolve(*wrt_sym).unwrap_or_default();
+                                if let Ok(int_id) = graph.integrate(subbed_id, *wrt_sym) {
+                                    let simp_id = Simplifier::simplify(graph, int_id)
+                                        .unwrap_or_else(|_| graph.simplify(int_id));
+                                    let out_fmt =
+                                        unicode_fmt.format(graph, simp_id).unwrap_or_default();
+                                    lines.push(format!(
+                                        "  [{}] ∫ {} d{} = {}",
+                                        i + 1,
+                                        expression,
+                                        v_name,
+                                        out_fmt
+                                    ));
                                 }
-                            } else {
-                                let mut lines = Vec::new();
-                                for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
-                                    let v_name =
-                                        graph.symbols.resolve(*wrt_sym).unwrap_or_default();
-                                    if let Ok(int_id) = graph.integrate(subbed_id, *wrt_sym) {
-                                        let simp_id = Simplifier::simplify(graph, int_id)
-                                            .unwrap_or_else(|_| graph.simplify(int_id));
-                                        let out_fmt =
-                                            unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                                        lines.push(format!(
-                                            "  [{}] ∫ {} d{} = {}",
-                                            i + 1,
-                                            expression,
-                                            v_name,
-                                            out_fmt
-                                        ));
-                                    }
-                                }
-                                let out =
-                                    format!("Integrals for {}:\n{}", expression, lines.join("\n"));
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\text{{{}}}", out),
-                                    out,
-                                )
                             }
+                            let out =
+                                format!("Integrals for {}:\n{}", expression, lines.join("\n"));
+                            OperationResult::success(out.clone(), format!("\\text{{{}}}", out), out)
                         }
                     }
-                    Err(e) => OperationResult::error(e.to_string()),
                 }
-            }
+                Err(e) => OperationResult::error(e.to_string()),
+            },
 
             MathOperation::Solve { equation, variable } => {
                 let var_name = variable.as_deref().unwrap_or("x");
@@ -390,10 +375,22 @@ impl OperationExecutor {
                             let filtered: Vec<ExprId> = solutions
                                 .into_iter()
                                 .map(|sol| {
-                                    Simplifier::simplify_with_assumptions(graph, sol, &ctx.assumptions)
-                                        .unwrap_or(sol)
+                                    Simplifier::simplify_with_assumptions(
+                                        graph,
+                                        sol,
+                                        &ctx.assumptions,
+                                    )
+                                    .unwrap_or(sol)
                                 })
-                                .filter(|&sol| solution_satisfies_assumptions(graph, sol, wrt_sym, &ctx.assumptions, &eval_ctx))
+                                .filter(|&sol| {
+                                    solution_satisfies_assumptions(
+                                        graph,
+                                        sol,
+                                        wrt_sym,
+                                        &ctx.assumptions,
+                                        &eval_ctx,
+                                    )
+                                })
                                 .collect();
                             let mut sol_strs = Vec::new();
                             let mut sol_latex = Vec::new();
@@ -406,7 +403,11 @@ impl OperationExecutor {
                             let latex = if sol_latex.is_empty() {
                                 format!("{} \\in \\emptyset", var_name)
                             } else {
-                                format!("{} \\in \\left\\{{ {} \\right\\}}", var_name, sol_latex.join(", "))
+                                format!(
+                                    "{} \\in \\left\\{{ {} \\right\\}}",
+                                    var_name,
+                                    sol_latex.join(", ")
+                                )
                             };
                             let mut res = OperationResult::success(out.clone(), latex, out);
                             if filtered.len() == 1 {
@@ -622,20 +623,24 @@ impl OperationExecutor {
                         .map(|s| s.trim().to_ascii_lowercase())
                         .as_deref()
                     {
-                        Some("+" | "right" | "r" | "+1") => crate::limits::LimitEngine::limit_directed(
-                            graph,
-                            expr_id,
-                            wrt_sym,
-                            pt_id,
-                            crate::limits::LimitDirection::FromRight,
-                        ),
-                        Some("-" | "left" | "l" | "-1") => crate::limits::LimitEngine::limit_directed(
-                            graph,
-                            expr_id,
-                            wrt_sym,
-                            pt_id,
-                            crate::limits::LimitDirection::FromLeft,
-                        ),
+                        Some("+" | "right" | "r" | "+1") => {
+                            crate::limits::LimitEngine::limit_directed(
+                                graph,
+                                expr_id,
+                                wrt_sym,
+                                pt_id,
+                                crate::limits::LimitDirection::FromRight,
+                            )
+                        }
+                        Some("-" | "left" | "l" | "-1") => {
+                            crate::limits::LimitEngine::limit_directed(
+                                graph,
+                                expr_id,
+                                wrt_sym,
+                                pt_id,
+                                crate::limits::LimitDirection::FromLeft,
+                            )
+                        }
                         _ => graph.limit(expr_id, wrt_sym, pt_id),
                     };
                     match lim_res {
@@ -707,8 +712,7 @@ impl OperationExecutor {
                             let simp_id = graph.simplify(det_id);
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                            let mut res =
-                                OperationResult::success(unicode.clone(), latex, unicode);
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
                             res.root_expr = Some(simp_id);
                             res
                         }
@@ -720,11 +724,8 @@ impl OperationExecutor {
                         .and_then(|m| m.inverse(graph))
                     {
                         Ok(inv) => {
-                            let elems: Vec<ExprId> = inv
-                                .elements
-                                .iter()
-                                .map(|&e| graph.simplify(e))
-                                .collect();
+                            let elems: Vec<ExprId> =
+                                inv.elements.iter().map(|&e| graph.simplify(e)).collect();
                             match SymbolicMatrix::new(inv.rows, inv.cols, elems) {
                                 Ok(simp_mat) => {
                                     let mat_id = simp_mat.to_expr_id(graph);
@@ -750,8 +751,7 @@ impl OperationExecutor {
                             let simp_id = graph.simplify(tr_id);
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                            let mut res =
-                                OperationResult::success(unicode.clone(), latex, unicode);
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
                             res.root_expr = Some(simp_id);
                             res
                         }
@@ -766,8 +766,7 @@ impl OperationExecutor {
                             let mat_id = tr_mat.to_expr_id(graph);
                             let latex = latex_fmt.format(graph, mat_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, mat_id).unwrap_or_default();
-                            let mut res =
-                                OperationResult::success(unicode.clone(), latex, unicode);
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
                             res.root_expr = Some(mat_id);
                             res
                         }
@@ -782,8 +781,7 @@ impl OperationExecutor {
                             let simp_id = graph.simplify(cp_id);
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, simp_id).unwrap_or_default();
-                            let mut res =
-                                OperationResult::success(unicode.clone(), latex, unicode);
+                            let mut res = OperationResult::success(unicode.clone(), latex, unicode);
                             res.root_expr = Some(simp_id);
                             res
                         }
@@ -797,11 +795,8 @@ impl OperationExecutor {
                     ) {
                         (Ok(ma), Ok(mb)) => match ma.multiply(graph, &mb) {
                             Ok(prod) => {
-                                let elems: Vec<ExprId> = prod
-                                    .elements
-                                    .iter()
-                                    .map(|&e| graph.simplify(e))
-                                    .collect();
+                                let elems: Vec<ExprId> =
+                                    prod.elements.iter().map(|&e| graph.simplify(e)).collect();
                                 match SymbolicMatrix::new(prod.rows, prod.cols, elems) {
                                     Ok(simp_mat) => {
                                         let mat_id = simp_mat.to_expr_id(graph);
@@ -826,7 +821,9 @@ impl OperationExecutor {
                     }
                 }
                 MatrixOpKind::Rref { matrix_str } => {
-                    match SymbolicMatrix::from_expr_str(graph, matrix_str).and_then(|m| m.rref(graph)) {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str)
+                        .and_then(|m| m.rref(graph))
+                    {
                         Ok((rref_mat, pivots)) => {
                             let mat_id = rref_mat.to_expr_id(graph);
                             let latex = latex_fmt.format(graph, mat_id).unwrap_or_default();
@@ -843,11 +840,14 @@ impl OperationExecutor {
                     }
                 }
                 MatrixOpKind::Rank { matrix_str } => {
-                    match SymbolicMatrix::from_expr_str(graph, matrix_str).and_then(|m| m.rank(graph)) {
+                    match SymbolicMatrix::from_expr_str(graph, matrix_str)
+                        .and_then(|m| m.rank(graph))
+                    {
                         Ok(rank) => {
                             let r_id = graph.integer(rank as i64);
-                            let latex =
-                                latex_fmt.format(graph, r_id).unwrap_or_else(|_| rank.to_string());
+                            let latex = latex_fmt
+                                .format(graph, r_id)
+                                .unwrap_or_else(|_| rank.to_string());
                             let unicode = unicode_fmt
                                 .format(graph, r_id)
                                 .unwrap_or_else(|_| rank.to_string());
@@ -879,8 +879,11 @@ impl OperationExecutor {
                                         SymbolicMatrix::new(col_vec.len(), 1, col_vec.clone())
                                     {
                                         let id = cm.to_expr_id(graph);
-                                        u_vecs.push(unicode_fmt.format(graph, id).unwrap_or_default());
-                                        l_vecs.push(latex_fmt.format(graph, id).unwrap_or_default());
+                                        u_vecs.push(
+                                            unicode_fmt.format(graph, id).unwrap_or_default(),
+                                        );
+                                        l_vecs
+                                            .push(latex_fmt.format(graph, id).unwrap_or_default());
                                     }
                                 }
                                 let text = format!("[{}]", u_vecs.join(", "));
@@ -903,9 +906,12 @@ impl OperationExecutor {
                             let mut l_vals = Vec::with_capacity(evals.len());
                             let mut last_simp = None;
                             for &ev in &evals {
-                                let simp =
-                                    Simplifier::simplify_with_assumptions(graph, ev, &ctx.assumptions)
-                                        .unwrap_or(ev);
+                                let simp = Simplifier::simplify_with_assumptions(
+                                    graph,
+                                    ev,
+                                    &ctx.assumptions,
+                                )
+                                .unwrap_or(ev);
                                 last_simp = Some(simp);
                                 u_vals.push(unicode_fmt.format(graph, simp).unwrap_or_default());
                                 l_vals.push(latex_fmt.format(graph, simp).unwrap_or_default());
@@ -1042,12 +1048,9 @@ impl OperationExecutor {
                                 } else {
                                     let unicode =
                                         unicode_fmt.format(graph, res_id).unwrap_or_default();
-                                    let latex =
-                                        latex_fmt.format(graph, res_id).unwrap_or_default();
-                                    let out = format!(
-                                        "F{{{}}}({}) = {}",
-                                        expression, freq_var, unicode
-                                    );
+                                    let latex = latex_fmt.format(graph, res_id).unwrap_or_default();
+                                    let out =
+                                        format!("F{{{}}}({}) = {}", expression, freq_var, unicode);
                                     let mut res = OperationResult::success(out, latex, unicode);
                                     res.root_expr = Some(res_id);
                                     res
@@ -1152,16 +1155,23 @@ impl OperationExecutor {
                                     .to_string(),
                             );
                         };
-                        match (UniPoly::from_expr(graph, p1, var_sym), UniPoly::from_expr(graph, p2, var_sym)) {
+                        match (
+                            UniPoly::from_expr(graph, p1, var_sym),
+                            UniPoly::from_expr(graph, p2, var_sym),
+                        ) {
                             (Ok(u1), Ok(u2)) => match u1.gcd(&u2) {
                                 Ok(g) => {
                                     let g_id = if g.is_zero() {
-                                        expr_from_rational(graph, &num_rational::BigRational::from_integer(0.into()))
+                                        expr_from_rational(
+                                            graph,
+                                            &num_rational::BigRational::from_integer(0.into()),
+                                        )
                                     } else {
                                         g.to_expr(graph, var_sym)
                                     };
                                     let simp_id = graph.simplify(g_id);
-                                    let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
+                                    let latex =
+                                        latex_fmt.format(graph, simp_id).unwrap_or_default();
                                     let unicode =
                                         unicode_fmt.format(graph, simp_id).unwrap_or_default();
                                     let mut res =
@@ -1443,9 +1453,15 @@ impl OperationExecutor {
                 NumberTheoryOpKind::IsPrimeExpr { expr_str } => {
                     let eval_int = |s: &str| -> Result<num_bigint::BigInt, String> {
                         let e = parser.parse(s).map_err(|e| e.to_string())?;
-                        let q = crate::numeric::try_eval_exact(graph, e, &std::collections::HashMap::new())
-                            .map_err(|e| e.to_string())?
-                            .ok_or_else(|| format!("Expression '{}' did not evaluate to an exact integer", s))?;
+                        let q = crate::numeric::try_eval_exact(
+                            graph,
+                            e,
+                            &std::collections::HashMap::new(),
+                        )
+                        .map_err(|e| e.to_string())?
+                        .ok_or_else(|| {
+                            format!("Expression '{}' did not evaluate to an exact integer", s)
+                        })?;
                         if q.is_integer() {
                             Ok(q.numer().clone())
                         } else {
@@ -1474,9 +1490,15 @@ impl OperationExecutor {
                 NumberTheoryOpKind::ExtendedGcdExpr { a_str, b_str } => {
                     let eval_int = |s: &str| -> Result<num_bigint::BigInt, String> {
                         let e = parser.parse(s).map_err(|e| e.to_string())?;
-                        let q = crate::numeric::try_eval_exact(graph, e, &std::collections::HashMap::new())
-                            .map_err(|e| e.to_string())?
-                            .ok_or_else(|| format!("Expression '{}' did not evaluate to an exact integer", s))?;
+                        let q = crate::numeric::try_eval_exact(
+                            graph,
+                            e,
+                            &std::collections::HashMap::new(),
+                        )
+                        .map_err(|e| e.to_string())?
+                        .ok_or_else(|| {
+                            format!("Expression '{}' did not evaluate to an exact integer", s)
+                        })?;
                         if q.is_integer() {
                             Ok(q.numer().clone())
                         } else {
@@ -1486,7 +1508,10 @@ impl OperationExecutor {
                     match (eval_int(a_str), eval_int(b_str)) {
                         (Ok(a), Ok(b)) => {
                             let (g, x, y) = crate::numbertheory::extended_gcd_big(&a, &b);
-                            let out = format!("gcd({}, {}) = {} = {}*({}) + {}*({})", a, b, g, a, x, b, y);
+                            let out = format!(
+                                "gcd({}, {}) = {} = {}*({}) + {}*({})",
+                                a, b, g, a, x, b, y
+                            );
                             OperationResult::success(out.clone(), out.clone(), out)
                         }
                         (Err(e), _) | (_, Err(e)) => OperationResult::error(e),
@@ -1495,9 +1520,15 @@ impl OperationExecutor {
                 NumberTheoryOpKind::LcmExpr { a_str, b_str } => {
                     let eval_int = |s: &str| -> Result<num_bigint::BigInt, String> {
                         let e = parser.parse(s).map_err(|e| e.to_string())?;
-                        let q = crate::numeric::try_eval_exact(graph, e, &std::collections::HashMap::new())
-                            .map_err(|e| e.to_string())?
-                            .ok_or_else(|| format!("Expression '{}' did not evaluate to an exact integer", s))?;
+                        let q = crate::numeric::try_eval_exact(
+                            graph,
+                            e,
+                            &std::collections::HashMap::new(),
+                        )
+                        .map_err(|e| e.to_string())?
+                        .ok_or_else(|| {
+                            format!("Expression '{}' did not evaluate to an exact integer", s)
+                        })?;
                         if q.is_integer() {
                             Ok(q.numer().clone())
                         } else {
@@ -1549,7 +1580,11 @@ impl OperationExecutor {
                                 res.number_system,
                                 res.classification_summary.join("\n  ")
                             );
-                            OperationResult::success(out, res.latex_equation, res.formatted_equation)
+                            OperationResult::success(
+                                out,
+                                res.latex_equation,
+                                res.formatted_equation,
+                            )
                         }
                         Err(err) => {
                             OperationResult::error(format!("Prime decomposition failed: {}", err))
@@ -2312,18 +2347,22 @@ impl OperationExecutor {
                         .replace(&prime2_pat, "__ode_d2")
                         .replace(&prime1_pat, "__ode_d1");
                     let eq_for_cls = equation
-                        .replace(&prime2_pat, &format!("diff({}, {}, 2)", dep_name, indep_name))
+                        .replace(
+                            &prime2_pat,
+                            &format!("diff({}, {}, 2)", dep_name, indep_name),
+                        )
                         .replace(&prime1_pat, &format!("diff({}, {})", dep_name, indep_name));
 
-                    let parse_side_by_side = |s: &str| -> Result<ExprId, algebra_core::parser::ParseError> {
-                        if let Some((lhs_str, rhs_str)) = s.split_once('=') {
-                            let l = parser.parse(lhs_str.trim())?;
-                            let r = parser.parse(rhs_str.trim())?;
-                            Ok(graph.sub(l, r))
-                        } else {
-                            parser.parse(s.trim())
-                        }
-                    };
+                    let parse_side_by_side =
+                        |s: &str| -> Result<ExprId, algebra_core::parser::ParseError> {
+                            if let Some((lhs_str, rhs_str)) = s.split_once('=') {
+                                let l = parser.parse(lhs_str.trim())?;
+                                let r = parser.parse(rhs_str.trim())?;
+                                Ok(graph.sub(l, r))
+                            } else {
+                                parser.parse(s.trim())
+                            }
+                        };
 
                     if let Ok(ode_res) = parse_side_by_side(&eq_for_solve) {
                         let d2_sym = graph.symbols.get_or_intern("__ode_d2");
@@ -2340,12 +2379,21 @@ impl OperationExecutor {
                             Simplifier::simplify(graph, e3).unwrap_or(e3)
                         };
                         let base = eval_coeffs(zero, zero, zero);
-                        let c2 = Simplifier::simplify(graph, graph.sub(eval_coeffs(one, zero, zero), base))
-                            .unwrap_or_else(|_| graph.sub(eval_coeffs(one, zero, zero), base));
-                        let c1 = Simplifier::simplify(graph, graph.sub(eval_coeffs(zero, one, zero), base))
-                            .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, one, zero), base));
-                        let c0 = Simplifier::simplify(graph, graph.sub(eval_coeffs(zero, zero, one), base))
-                            .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, zero, one), base));
+                        let c2 = Simplifier::simplify(
+                            graph,
+                            graph.sub(eval_coeffs(one, zero, zero), base),
+                        )
+                        .unwrap_or_else(|_| graph.sub(eval_coeffs(one, zero, zero), base));
+                        let c1 = Simplifier::simplify(
+                            graph,
+                            graph.sub(eval_coeffs(zero, one, zero), base),
+                        )
+                        .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, one, zero), base));
+                        let c0 = Simplifier::simplify(
+                            graph,
+                            graph.sub(eval_coeffs(zero, zero, one), base),
+                        )
+                        .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, zero, one), base));
 
                         let eval_ctx = EvalContext::default();
                         let solved_opt = if c2 == zero && c1 != zero {
@@ -2353,8 +2401,10 @@ impl OperationExecutor {
                                 .unwrap_or_else(|_| graph.div(c0, c1));
                             let q = Simplifier::simplify(graph, graph.div(graph.neg(base), c1))
                                 .unwrap_or_else(|_| graph.div(graph.neg(base), c1));
-                            crate::ode::SymbolicOdeSolver::solve_first_order_linear(graph, p, q, x_sym)
-                                .ok()
+                            crate::ode::SymbolicOdeSolver::solve_first_order_linear(
+                                graph, p, q, x_sym,
+                            )
+                            .ok()
                         } else if c2 != zero && base == zero {
                             if let (Ok(a_v), Ok(b_v), Ok(c_v)) = (
                                 graph.evalf(c2, &eval_ctx).map(|v| v.to_f64()),
@@ -2432,7 +2482,11 @@ impl OperationExecutor {
                                 let out = format!("Verified: {} ({})", expression, detail);
                                 let latex = format!(
                                     "\\text{{Verified ({}): }} {}",
-                                    if sym_exact { "symbolic" } else { "Schwartz-Zippel" },
+                                    if sym_exact {
+                                        "symbolic"
+                                    } else {
+                                        "Schwartz-Zippel"
+                                    },
                                     expression
                                 );
                                 OperationResult::success(out.clone(), latex, out)
@@ -2445,7 +2499,11 @@ impl OperationExecutor {
                         match verify_equivalence_pair(graph, id, zero, &ctx.assumptions) {
                             Ok((_, detail)) => {
                                 let out = format!("Verified: {} == 0 ({})", expression, detail);
-                                OperationResult::success(out.clone(), format!("\\text{{{}}}", out), out)
+                                OperationResult::success(
+                                    out.clone(),
+                                    format!("\\text{{{}}}", out),
+                                    out,
+                                )
                             }
                             Err(msg) => OperationResult::error(msg),
                         }
@@ -2477,8 +2535,12 @@ impl OperationExecutor {
                                 let out = format!("Equal: {} == {} ({})", left, right, detail);
                                 let latex = format!(
                                     "{} = {}",
-                                    latex_fmt.format(graph, lhs_id).unwrap_or_else(|_| left.clone()),
-                                    latex_fmt.format(graph, rhs_id).unwrap_or_else(|_| right.clone())
+                                    latex_fmt
+                                        .format(graph, lhs_id)
+                                        .unwrap_or_else(|_| left.clone()),
+                                    latex_fmt
+                                        .format(graph, rhs_id)
+                                        .unwrap_or_else(|_| right.clone())
                                 );
                                 OperationResult::success(out.clone(), latex, out)
                             }
@@ -2555,9 +2617,7 @@ impl OperationExecutor {
                 res
             }
 
-            MathOperation::Branch(kind) => {
-                execute_branch_op(graph, &parser, kind, ctx)
-            }
+            MathOperation::Branch(kind) => execute_branch_op(graph, &parser, kind, ctx),
 
             MathOperation::SetBuilder {
                 var_name,
@@ -3008,7 +3068,9 @@ fn extract_geometric_series(
         return None;
     }
     match &graph.get(expr_id).kind {
-        ExprKind::Pow(base, exp) if !graph.has_symbol(*base, var_sym) && graph.has_symbol(*exp, var_sym) => {
+        ExprKind::Pow(base, exp)
+            if !graph.has_symbol(*base, var_sym) && graph.has_symbol(*exp, var_sym) =>
+        {
             let lin = UniPoly::from_expr(graph, *exp, var_sym).ok()?;
             if lin.degree() != 1 {
                 return None;
@@ -3042,11 +3104,23 @@ fn extract_geometric_series(
             let mut saw_geo = false;
             for &f in factors {
                 if !graph.has_symbol(f, var_sym) {
-                    coeff_c = if coeff_c == one { f } else { graph.mul([coeff_c, f]) };
+                    coeff_c = if coeff_c == one {
+                        f
+                    } else {
+                        graph.mul([coeff_c, f])
+                    };
                 } else {
                     let (fc, fr) = extract_geometric_series(graph, f, var_sym)?;
-                    coeff_c = if coeff_c == one { fc } else { graph.mul([coeff_c, fc]) };
-                    ratio_r = if ratio_r == one { fr } else { graph.mul([ratio_r, fr]) };
+                    coeff_c = if coeff_c == one {
+                        fc
+                    } else {
+                        graph.mul([coeff_c, fc])
+                    };
+                    ratio_r = if ratio_r == one {
+                        fr
+                    } else {
+                        graph.mul([ratio_r, fr])
+                    };
                     saw_geo = true;
                 }
             }
@@ -3103,10 +3177,18 @@ fn extract_p_series(
             let mut total_p = 0i64;
             for &f in factors {
                 if !graph.has_symbol(f, var_sym) {
-                    coeff = if coeff == graph.integer(1) { f } else { graph.mul([coeff, f]) };
+                    coeff = if coeff == graph.integer(1) {
+                        f
+                    } else {
+                        graph.mul([coeff, f])
+                    };
                 } else {
                     let (fc, fp) = extract_p_series(graph, f, var_sym)?;
-                    coeff = if coeff == graph.integer(1) { fc } else { graph.mul([coeff, fc]) };
+                    coeff = if coeff == graph.integer(1) {
+                        fc
+                    } else {
+                        graph.mul([coeff, fc])
+                    };
                     total_p += fp;
                 }
             }
@@ -3168,13 +3250,12 @@ fn classify_galois_group_solvability(raw: &str) -> Result<(bool, String), String
 
     // Known named finite groups
     match norm.as_str() {
-        "trivial" | "1" | "c1" | "v4" | "klein" | "klein4" | "q8" | "f5" | "f20"
-        | "agl(1,5)" | "gl(2,2)" | "sl(2,2)" | "psl(2,2)" | "psl(2,3)" | "sl(2,3)"
-        | "gl(2,3)" => {
+        "trivial" | "1" | "c1" | "v4" | "klein" | "klein4" | "q8" | "f5" | "f20" | "agl(1,5)"
+        | "gl(2,2)" | "sl(2,2)" | "psl(2,2)" | "psl(2,3)" | "sl(2,3)" | "gl(2,3)" => {
             return Ok((true, raw.trim().to_string()));
         }
-        "m11" | "m12" | "m22" | "m23" | "m24" | "j1" | "j2" | "j3" | "j4" | "suz"
-        | "monster" | "baby" => {
+        "m11" | "m12" | "m22" | "m23" | "m24" | "j1" | "j2" | "j3" | "j4" | "suz" | "monster"
+        | "baby" => {
             return Ok((false, format!("Sporadic simple group {}", raw.trim())));
         }
         _ => {}
@@ -3198,7 +3279,13 @@ fn classify_galois_group_solvability(raw: &str) -> Result<(bool, String), String
 }
 
 fn format_complex_value(re: f64, im: f64) -> String {
-    let clean = |x: f64| if x.abs() < 1e-13 { 0.0 } else { (x * 1e12).round() / 1e12 };
+    let clean = |x: f64| {
+        if x.abs() < 1e-13 {
+            0.0
+        } else {
+            (x * 1e12).round() / 1e12
+        }
+    };
     let r = clean(re);
     let i = clean(im);
     let fmt_f = |x: f64| {
@@ -3342,7 +3429,9 @@ fn execute_branch_op(
                 BranchCutFunctionKind::ArcSin
                 | BranchCutFunctionKind::ArcCos
                 | BranchCutFunctionKind::ArcTanh => ((2.0, 0.0), "2"),
-                BranchCutFunctionKind::ArcTan | BranchCutFunctionKind::ArcSinh => ((0.0, 2.0), "2*i"),
+                BranchCutFunctionKind::ArcTan | BranchCutFunctionKind::ArcSinh => {
+                    ((0.0, 2.0), "2*i")
+                }
                 _ => ((-1.0, 0.0), "-1"),
             };
             match BranchCutManager::eval(b_kind, sample_z.0, sample_z.1, &sel) {
@@ -3495,7 +3584,7 @@ fn verify_equivalence_pair(
         return Ok((true, "expand(LHS - RHS) = 0".to_string()));
     }
 
-        let mut syms = std::collections::BTreeSet::new();
+    let mut syms = std::collections::BTreeSet::new();
     collect_expr_symbols(graph, diff, &mut syms);
     let free_vars: Vec<String> = syms
         .into_iter()
@@ -3508,7 +3597,10 @@ fn verify_equivalence_pair(
     for (p_idx, &base_val) in seeds.iter().enumerate() {
         let mut bindings = HashMap::new();
         for (v_idx, name) in free_vars.iter().enumerate() {
-            bindings.insert(name.clone(), base_val + 0.19 * (v_idx as f64) + 0.07 * (p_idx as f64));
+            bindings.insert(
+                name.clone(),
+                base_val + 0.19 * (v_idx as f64) + 0.07 * (p_idx as f64),
+            );
         }
         let ctx = EvalContext::with_bindings(15, bindings.clone());
         let (Ok(lv), Ok(rv)) = (graph.evalf(lhs, &ctx), graph.evalf(rhs, &ctx)) else {
@@ -3532,7 +3624,10 @@ fn verify_equivalence_pair(
         }
     }
     if matched > 0 {
-        Ok((false, format!("{} numerical probes agree within 1e-6", matched)))
+        Ok((
+            false,
+            format!("{} numerical probes agree within 1e-6", matched),
+        ))
     } else {
         Err("Unable to prove or evaluate equivalence".to_string())
     }
@@ -3746,9 +3841,8 @@ fn execute_solve_system(
                                 acc = graph.add([acc, term]);
                             }
                         }
-                        let s =
-                            Simplifier::simplify_with_assumptions(graph, acc, &ctx.assumptions)
-                                .unwrap_or(acc);
+                        let s = Simplifier::simplify_with_assumptions(graph, acc, &ctx.assumptions)
+                            .unwrap_or(acc);
                         expr_sols.push(s);
                     }
                 }
@@ -3761,7 +3855,11 @@ fn execute_solve_system(
                     u_parts.push(format!("{} = {}", name, u_val));
                     l_parts.push(format!("{} = {}", name, l_val));
                 }
-                let text = format!("Solutions for {}: [{{{}}}]", vars_header, u_parts.join(", "));
+                let text = format!(
+                    "Solutions for {}: [{{{}}}]",
+                    vars_header,
+                    u_parts.join(", ")
+                );
                 let latex = format!("\\left\\{{ {} \\right\\}}", l_parts.join(",\\; "));
                 let mut res = OperationResult::success(text.clone(), latex, text);
                 res.metadata.insert(

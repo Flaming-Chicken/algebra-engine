@@ -438,8 +438,10 @@ impl LimitEngine {
                 {
                     return graph.integer(0);
                 }
-                if let (ExprKind::Number(Number::Integer(b)), ExprKind::Number(Number::Integer(e))) =
-                    (&graph.get(s_base).kind, &graph.get(s_exp).kind)
+                if let (
+                    ExprKind::Number(Number::Integer(b)),
+                    ExprKind::Number(Number::Integer(e)),
+                ) = (&graph.get(s_base).kind, &graph.get(s_exp).kind)
                 {
                     if *e >= 0 {
                         return graph.integer(b.pow(*e as u32));
@@ -642,7 +644,11 @@ impl LimitEngine {
                 let top = leads.iter().map(|l| l.1).fold(f64::NEG_INFINITY, f64::max);
                 let scale = leads.iter().map(|l| l.0.abs()).fold(0.0, f64::max).max(1.0);
                 let sum_at = |e: f64| -> f64 {
-                    leads.iter().filter(|l| (l.1 - e).abs() < 1e-9).map(|l| l.0).sum()
+                    leads
+                        .iter()
+                        .filter(|l| (l.1 - e).abs() < 1e-9)
+                        .map(|l| l.0)
+                        .sum()
                 };
                 let top_sum = sum_at(top);
                 if top_sum.abs() > 1e-9 * scale {
@@ -745,7 +751,11 @@ impl LimitEngine {
     /// Covers what polynomial-ratio analysis cannot: radicals
     /// (`sqrt(x^2 + x) - x`, via rationalisation when the dominant terms
     /// cancel) and powers with a variable exponent (`x^(1/x)`).
-    fn algebraic_limit_at_infinity(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> Option<ExprId> {
+    fn algebraic_limit_at_infinity(
+        graph: &ExprGraph,
+        expr: ExprId,
+        wrt: SymbolId,
+    ) -> Option<ExprId> {
         // f^g with both depending on x: f^g = exp(g · ln f), and for
         // f ~ c·x^p, g ~ d·x^q the exponent behaves like d·x^q·(p·ln x + ln c).
         if let ExprKind::Pow(base, exp) = graph.get(expr).kind
@@ -844,7 +854,9 @@ impl LimitEngine {
         {
             return true;
         }
-        node.children().iter().any(|&c| Self::has_nonsmooth_function(graph, c))
+        node.children()
+            .iter()
+            .any(|&c| Self::has_nonsmooth_function(graph, c))
     }
 
     fn eval_pole_limit(
@@ -1101,11 +1113,7 @@ impl LimitEngine {
         }
     }
 
-    fn poly_deg_and_lc(
-        graph: &ExprGraph,
-        expr: ExprId,
-        wrt: SymbolId,
-    ) -> Option<(usize, ExprId)> {
+    fn poly_deg_and_lc(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> Option<(usize, ExprId)> {
         use num_traits::Zero as _;
         fn extract(graph: &ExprGraph, id: ExprId, wrt: SymbolId) -> Option<Vec<ExprId>> {
             let zero = graph.integer(0);
@@ -1114,7 +1122,12 @@ impl LimitEngine {
             }
             match &graph.get(id).kind {
                 ExprKind::Symbol(s) if *s == wrt => Some(vec![zero, graph.integer(1)]),
-                ExprKind::Neg(a) => Some(extract(graph, *a, wrt)?.into_iter().map(|c| graph.neg(c)).collect()),
+                ExprKind::Neg(a) => Some(
+                    extract(graph, *a, wrt)?
+                        .into_iter()
+                        .map(|c| graph.neg(c))
+                        .collect(),
+                ),
                 ExprKind::Add(ts) => {
                     let mut acc = vec![zero];
                     for &t in ts {
@@ -1124,7 +1137,13 @@ impl LimitEngine {
                         for i in 0..len {
                             let ca = *acc.get(i).unwrap_or(&zero);
                             let cb = *pt.get(i).unwrap_or(&zero);
-                            next.push(if ca == zero { cb } else if cb == zero { ca } else { graph.add([ca, cb]) });
+                            next.push(if ca == zero {
+                                cb
+                            } else if cb == zero {
+                                ca
+                            } else {
+                                graph.add([ca, cb])
+                            });
                         }
                         acc = next;
                     }
@@ -1138,7 +1157,13 @@ impl LimitEngine {
                     for i in 0..len {
                         let ca = *pa.get(i).unwrap_or(&zero);
                         let cb = *pb.get(i).unwrap_or(&zero);
-                        out.push(if cb == zero { ca } else if ca == zero { graph.neg(cb) } else { graph.sub(ca, cb) });
+                        out.push(if cb == zero {
+                            ca
+                        } else if ca == zero {
+                            graph.neg(cb)
+                        } else {
+                            graph.sub(ca, cb)
+                        });
                     }
                     Some(out)
                 }
@@ -1148,20 +1173,31 @@ impl LimitEngine {
                         let pf = extract(graph, f, wrt)?;
                         let mut next = vec![zero; acc.len() + pf.len() - 1];
                         for (i, &ca) in acc.iter().enumerate() {
-                            if ca == zero { continue; }
+                            if ca == zero {
+                                continue;
+                            }
                             for (j, &cb) in pf.iter().enumerate() {
-                                if cb == zero { continue; }
+                                if cb == zero {
+                                    continue;
+                                }
                                 let p = graph.mul([ca, cb]);
-                                next[i + j] = if next[i + j] == zero { p } else { graph.add([next[i + j], p]) };
+                                next[i + j] = if next[i + j] == zero {
+                                    p
+                                } else {
+                                    graph.add([next[i + j], p])
+                                };
                             }
                         }
                         acc = next;
                     }
                     Some(acc)
                 }
-                ExprKind::Div(n, d) if !graph.has_symbol(*d, wrt) => {
-                    Some(extract(graph, *n, wrt)?.into_iter().map(|c| graph.div(c, *d)).collect())
-                }
+                ExprKind::Div(n, d) if !graph.has_symbol(*d, wrt) => Some(
+                    extract(graph, *n, wrt)?
+                        .into_iter()
+                        .map(|c| graph.div(c, *d))
+                        .collect(),
+                ),
                 ExprKind::Pow(b, e) if !graph.has_symbol(*e, wrt) => {
                     if let ExprKind::Number(Number::Integer(p)) = graph.get(*e).kind
                         && (0..=16).contains(&p)
@@ -1171,11 +1207,19 @@ impl LimitEngine {
                         for _ in 0..p {
                             let mut next = vec![zero; acc.len() + pb.len() - 1];
                             for (i, &ca) in acc.iter().enumerate() {
-                                if ca == zero { continue; }
+                                if ca == zero {
+                                    continue;
+                                }
                                 for (j, &cb) in pb.iter().enumerate() {
-                                    if cb == zero { continue; }
+                                    if cb == zero {
+                                        continue;
+                                    }
                                     let pr = graph.mul([ca, cb]);
-                                    next[i + j] = if next[i + j] == zero { pr } else { graph.add([next[i + j], pr]) };
+                                    next[i + j] = if next[i + j] == zero {
+                                        pr
+                                    } else {
+                                        graph.add([next[i + j], pr])
+                                    };
                                 }
                             }
                             acc = next;
@@ -1200,7 +1244,10 @@ impl LimitEngine {
             let simp = crate::simplify::Simplifier::simplify(graph, last).unwrap_or(last);
             let is_const = no_syms(simp);
             let is_z = Self::is_zero_node(graph, simp)
-                || (is_const && graph.evalf(simp, &ctx).is_ok_and(|v| v.to_f64().abs() < 1e-12))
+                || (is_const
+                    && graph
+                        .evalf(simp, &ctx)
+                        .is_ok_and(|v| v.to_f64().abs() < 1e-12))
                 || simp == graph.integer(0);
             let zero_rat = is_const
                 && matches!(&graph.get(simp).kind, ExprKind::Number(n) if crate::poly::rational_from_number(n).is_ok_and(|q| q.is_zero()));

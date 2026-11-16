@@ -361,9 +361,9 @@ fn pollard_rho_u64(n: u64) -> u64 {
         let mut d = 1u64;
         let f = |v: u64| -> u64 {
             let sq = mul_mod_u64(v, v, n);
-            let sum = sq.checked_add(c_init % n).unwrap_or_else(|| {
-                ((sq as u128 + (c_init % n) as u128) % n as u128) as u64
-            });
+            let sum = sq
+                .checked_add(c_init % n)
+                .unwrap_or_else(|| ((sq as u128 + (c_init % n) as u128) % n as u128) as u64);
             sum % n
         };
         // Brent-style cycle detection with batched gcd for speed
@@ -634,8 +634,8 @@ pub fn big_prime_factors(n: &BigUint) -> Vec<(BigUint, u32)> {
     let mut cur = n.clone();
     let mut counts: BTreeMap<BigUint, u32> = BTreeMap::new();
     for p in [
-        2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79,
-        83, 89, 97,
+        2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
+        89, 97,
     ] {
         let bp = BigUint::from(p);
         let mut e = 0u32;

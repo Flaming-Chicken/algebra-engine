@@ -892,8 +892,8 @@ impl SymbolicMatrix {
                 let entry = rref.get(row_idx, free_col);
                 if !Self::is_entry_zero(graph, entry) {
                     let neg_entry = graph.neg(entry);
-                    vec[piv_col] =
-                        crate::simplify::Simplifier::simplify(graph, neg_entry).unwrap_or(neg_entry);
+                    vec[piv_col] = crate::simplify::Simplifier::simplify(graph, neg_entry)
+                        .unwrap_or(neg_entry);
                 }
             }
             basis.push(vec);

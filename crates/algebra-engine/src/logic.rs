@@ -585,10 +585,7 @@ impl SatSolver {
         Self::dpll_rec(expr.simplify(), &mut assignment).then_some(assignment)
     }
 
-    fn dpll_rec(
-        expr: BoolExpr,
-        assignment: &mut std::collections::BTreeMap<u32, bool>,
-    ) -> bool {
+    fn dpll_rec(expr: BoolExpr, assignment: &mut std::collections::BTreeMap<u32, bool>) -> bool {
         let simp = expr.simplify();
         match &simp {
             BoolExpr::True => return true,

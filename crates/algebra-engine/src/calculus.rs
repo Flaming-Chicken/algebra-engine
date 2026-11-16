@@ -744,7 +744,9 @@ impl SymbolicCalculus for ExprGraph {
                             }
                             _ => None,
                         };
-                        if let Some(rv) = real_part && rv.is_finite() {
+                        if let Some(rv) = real_part
+                            && rv.is_finite()
+                        {
                             if (rv - low_v).abs() < 1e-9 {
                                 singular_lower = true;
                             } else if (rv - up_v).abs() < 1e-9 {
@@ -763,36 +765,37 @@ impl SymbolicCalculus for ExprGraph {
 
         let f_antideriv = self.integrate(expr, wrt)?;
 
-        let eval_bound = |bound: ExprId, dir: LimitDirection, force_limit: bool| -> AlgebraResult<ExprId> {
-            let need_limit = force_limit || is_inf_bound(bound);
-            let raw = if need_limit {
-                LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
-            } else {
-                let sub = self.substitute(f_antideriv, wrt, bound);
-                let simp = crate::simplify::Simplifier::simplify(self, sub).unwrap_or(sub);
+        let eval_bound =
+            |bound: ExprId, dir: LimitDirection, force_limit: bool| -> AlgebraResult<ExprId> {
+                let need_limit = force_limit || is_inf_bound(bound);
+                let raw = if need_limit {
+                    LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
+                } else {
+                    let sub = self.substitute(f_antideriv, wrt, bound);
+                    let simp = crate::simplify::Simplifier::simplify(self, sub).unwrap_or(sub);
+                    if matches!(
+                        self.get(simp).kind,
+                        ExprKind::Number(Number::Constant(
+                            Constant::Infinity | Constant::NegInfinity | Constant::Undefined
+                        ))
+                    ) {
+                        LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
+                    } else {
+                        simp
+                    }
+                };
                 if matches!(
-                    self.get(simp).kind,
+                    self.get(raw).kind,
                     ExprKind::Number(Number::Constant(
                         Constant::Infinity | Constant::NegInfinity | Constant::Undefined
                     ))
                 ) {
-                    LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
-                } else {
-                    simp
+                    return Err(AlgebraError::EvaluationError(
+                        "Definite integral diverges at integration boundary".into(),
+                    ));
                 }
+                Ok(raw)
             };
-            if matches!(
-                self.get(raw).kind,
-                ExprKind::Number(Number::Constant(
-                    Constant::Infinity | Constant::NegInfinity | Constant::Undefined
-                ))
-            ) {
-                return Err(AlgebraError::EvaluationError(
-                    "Definite integral diverges at integration boundary".into(),
-                ));
-            }
-            Ok(raw)
-        };
 
         let lower_dir = if is_pos_inf_bound(lower) {
             LimitDirection::PositiveInfinity
@@ -928,12 +931,7 @@ impl VariationalCalculus {
     }
 }
 
-fn collect_denominators(
-    graph: &ExprGraph,
-    expr: ExprId,
-    wrt: SymbolId,
-    out: &mut Vec<ExprId>,
-) {
+fn collect_denominators(graph: &ExprGraph, expr: ExprId, wrt: SymbolId, out: &mut Vec<ExprId>) {
     match &graph.get(expr).kind {
         ExprKind::Div(n, d) => {
             if graph.has_symbol(*d, wrt) {
@@ -990,8 +988,7 @@ fn taylor_coeffs_vec(
         }
         let sub = graph.substitute(current_deriv, wrt, point);
         let c_sub = crate::limits::LimitEngine::simplify_constants(graph, sub);
-        let mut eval_deriv =
-            crate::simplify::Simplifier::simplify(graph, c_sub).unwrap_or(c_sub);
+        let mut eval_deriv = crate::simplify::Simplifier::simplify(graph, c_sub).unwrap_or(c_sub);
         if crate::limits::LimitEngine::is_indeterminate(graph, eval_deriv)
             && let ExprKind::Div(num, den) = graph.get(current_deriv).kind
             && let Ok(Some(lim)) =

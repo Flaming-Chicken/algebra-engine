@@ -64,15 +64,6 @@ pub use algebra_engine::{
     distributions::EmpiricalDistributionMut,
     exceptional_lie::{AlbertAlgebra, E8Lattice, LieOctonion},
     executor::{ExecutionContext, OperationExecutor, OperationResult},
-    query::{QueryEngine, QueryResponse, ResultPod},
-    stream::{
-        BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
-        execute_async, execute_batch_async, query_async,
-    },
-    workbench::{
-        ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,
-        EquationSystemSpec, QuiverArrow, WorkbenchEngine, WorkbenchPresets,
-    },
     geometric_dl::{ClebschGordan, CliffordLayer, SphericalHarmonics, SteerableConvLayer},
     geometry::{Circle2D, CoordinateSystem, CsgNode, Point2D, ResultantBuilder},
     gpu::{GpuKernelDescriptor, WgslShaderGenerator},
@@ -117,6 +108,7 @@ pub use algebra_engine::{
     },
     qft::{DiracGamma, PassarinoVeltman, SpinorHelicity, WeylSpinor, WickContraction},
     quantum_circuit::{Complex64, QuantumCircuit, QuantumGate},
+    query::{QueryEngine, QueryResponse, ResultPod},
     risch::{DifferentialFieldTower, ExtensionKind, HermiteReductionResult, RischIntegrator},
     series::SymbolicSeries,
     session::{SymbolSessionMeta, UraeSession},
@@ -129,6 +121,10 @@ pub use algebra_engine::{
     solver::{SolveOutcome, SymbolicSolver},
     sparse::CsrMatrix,
     special::SpecialFunctions,
+    stream::{
+        BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
+        execute_async, execute_batch_async, query_async,
+    },
     symplectic::{
         HamiltonianSystemND, HarmonicOscillator, KeplerOrbit2D, PhaseState, SymplecticIntegrator,
         SymplecticOrder, SymplecticTrajectory,
@@ -149,6 +145,10 @@ pub use algebra_engine::{
     weyl_dmodules::{
         AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
         ZeilbergerAlgorithm, ZeilbergerResult,
+    },
+    workbench::{
+        ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,
+        EquationSystemSpec, QuiverArrow, WorkbenchEngine, WorkbenchPresets,
     },
 };
 

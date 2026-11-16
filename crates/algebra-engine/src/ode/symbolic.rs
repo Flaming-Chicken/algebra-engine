@@ -152,7 +152,11 @@ impl SymbolicOdeSolver {
             };
             let c2_x = graph.mul([c2, var_x]);
             let inner = graph.add([c1, c2_x]);
-            let sol = if r.abs() < 1e-12 { inner } else { graph.mul([inner, exp_rx]) };
+            let sol = if r.abs() < 1e-12 {
+                inner
+            } else {
+                graph.mul([inner, exp_rx])
+            };
             Ok(Simplifier::simplify(graph, sol).unwrap_or(sol))
         } else if disc > 0.0 {
             // Distinct real roots
@@ -171,8 +175,16 @@ impl SymbolicOdeSolver {
                 graph.function("exp", [scale_var(r2)])
             };
 
-            let term1 = if r1.abs() < 1e-12 { c1 } else { graph.mul([c1, exp_r1]) };
-            let term2 = if r2.abs() < 1e-12 { c2 } else { graph.mul([c2, exp_r2]) };
+            let term1 = if r1.abs() < 1e-12 {
+                c1
+            } else {
+                graph.mul([c1, exp_r1])
+            };
+            let term2 = if r2.abs() < 1e-12 {
+                c2
+            } else {
+                graph.mul([c2, exp_r2])
+            };
             let sol = graph.add([term1, term2]);
             Ok(Simplifier::simplify(graph, sol).unwrap_or(sol))
         } else {

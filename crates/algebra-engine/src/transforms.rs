@@ -8,9 +8,11 @@
 //! - Bracewell, R. N. (2000). *The Fourier Transform and Its Applications* (3rd ed.). McGraw-Hill.
 //! - Oppenheim, A. V., & Schafer, R. W. (2009). *Discrete-Time Signal Processing* (3rd ed.). Prentice Hall.
 
-use algebra_core::{AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind, Number, SymbolId};
 use crate::numeric::NumericalEval;
 use crate::simplify::Simplifier;
+use algebra_core::{
+    AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind, Number, SymbolId,
+};
 
 /// Continuous or Discrete Linear Time-Invariant (LTI) Transfer Function $H(s)$ or $H(z)$.
 #[derive(Debug, Clone)]
@@ -183,8 +185,10 @@ fn match_linear(graph: &ExprGraph, expr: ExprId, v: SymbolId) -> Option<(ExprId,
             };
             let (a, b) = match_linear(graph, factors[vi], v)?;
             Some((
-                Simplifier::simplify(graph, graph.mul([c_prod, a])).unwrap_or_else(|_| graph.mul([c_prod, a])),
-                Simplifier::simplify(graph, graph.mul([c_prod, b])).unwrap_or_else(|_| graph.mul([c_prod, b])),
+                Simplifier::simplify(graph, graph.mul([c_prod, a]))
+                    .unwrap_or_else(|_| graph.mul([c_prod, a])),
+                Simplifier::simplify(graph, graph.mul([c_prod, b]))
+                    .unwrap_or_else(|_| graph.mul([c_prod, b])),
             ))
         }
         ExprKind::Div(num, den) if !graph.has_symbol(*den, v) => {
@@ -196,7 +200,11 @@ fn match_linear(graph: &ExprGraph, expr: ExprId, v: SymbolId) -> Option<(ExprId,
 }
 
 /// Match `expr` wrt `v` as `c2 * v^2 + c1 * v + c0` when possible.
-fn match_quadratic(graph: &ExprGraph, expr: ExprId, v: SymbolId) -> Option<(ExprId, ExprId, ExprId)> {
+fn match_quadratic(
+    graph: &ExprGraph,
+    expr: ExprId,
+    v: SymbolId,
+) -> Option<(ExprId, ExprId, ExprId)> {
     let simp = Simplifier::simplify(graph, expr).unwrap_or(expr);
     if let Some((c1, c0)) = match_linear(graph, simp, v) {
         return Some((graph.integer(0), c1, c0));
@@ -236,12 +244,28 @@ fn match_quadratic(graph: &ExprGraph, expr: ExprId, v: SymbolId) -> Option<(Expr
             for &f in factors {
                 let (b2, b1, b0) = match_quadratic(graph, f, v)?;
                 // Check degree of product <= 2
-                let d_acc = if acc.0 != graph.integer(0) { 2 } else if acc.1 != graph.integer(0) { 1 } else { 0 };
-                let d_b = if b2 != graph.integer(0) { 2 } else if b1 != graph.integer(0) { 1 } else { 0 };
+                let d_acc = if acc.0 != graph.integer(0) {
+                    2
+                } else if acc.1 != graph.integer(0) {
+                    1
+                } else {
+                    0
+                };
+                let d_b = if b2 != graph.integer(0) {
+                    2
+                } else if b1 != graph.integer(0) {
+                    1
+                } else {
+                    0
+                };
                 if d_acc + d_b > 2 {
                     return None;
                 }
-                let p2 = graph.add([graph.mul([acc.2, b2]), graph.mul([acc.1, b1]), graph.mul([acc.0, b0])]);
+                let p2 = graph.add([
+                    graph.mul([acc.2, b2]),
+                    graph.mul([acc.1, b1]),
+                    graph.mul([acc.0, b0]),
+                ]);
                 let p1 = graph.add([graph.mul([acc.2, b1]), graph.mul([acc.1, b0])]);
                 let p0 = graph.mul([acc.2, b0]);
                 acc = (p2, p1, p0);
@@ -564,10 +588,15 @@ impl SymbolicTransforms for ExprGraph {
                             // c / (a * s^2 + c0) = (c/a) / (s^2 + c0/a)
                             let k = Simplifier::simplify(self, self.div(c0_s, a_s))
                                 .unwrap_or_else(|_| self.div(c0_s, a_s));
-                            let k_neg = self.get(k).kind == ExprKind::Neg(match &self.get(k).kind { ExprKind::Neg(x) => *x, _ => k })
+                            let k_neg = self.get(k).kind
+                                == ExprKind::Neg(match &self.get(k).kind {
+                                    ExprKind::Neg(x) => *x,
+                                    _ => k,
+                                })
                                 || matches!(self.get(k).kind, ExprKind::Number(Number::Integer(v)) if v < 0);
                             let mag = if k_neg {
-                                Simplifier::simplify(self, self.neg(k)).unwrap_or_else(|_| self.neg(k))
+                                Simplifier::simplify(self, self.neg(k))
+                                    .unwrap_or_else(|_| self.neg(k))
                             } else {
                                 k
                             };
@@ -587,27 +616,36 @@ impl SymbolicTransforms for ExprGraph {
                             let pfd = crate::simplify::AlgebraicTransformations::partial_fractions(
                                 self, expr, s,
                             );
-                            if pfd != expr && matches!(self.get(pfd).kind, ExprKind::Add(_) | ExprKind::Sub(_, _)) {
+                            if pfd != expr
+                                && matches!(
+                                    self.get(pfd).kind,
+                                    ExprKind::Add(_) | ExprKind::Sub(_, _)
+                                )
+                            {
                                 return self.inverse_laplace_transform(pfd, s, t);
                             }
                             // Irreducible quadratic: complete the square a*((s + shift)^2 + w_sq)
                             let two = self.integer(2);
                             let four = self.integer(4);
-                            let shift = Simplifier::simplify(self, self.div(b_s, self.mul([two, a_s])))
-                                .unwrap_or_else(|_| self.div(b_s, self.mul([two, a_s])));
+                            let shift =
+                                Simplifier::simplify(self, self.div(b_s, self.mul([two, a_s])))
+                                    .unwrap_or_else(|_| self.div(b_s, self.mul([two, a_s])));
                             let w_sq_raw = self.sub(
                                 self.div(c0_s, a_s),
                                 self.div(self.pow(b_s, two), self.mul([four, self.pow(a_s, two)])),
                             );
                             let w_sq = Simplifier::simplify(self, w_sq_raw).unwrap_or(w_sq_raw);
-                            if let Ok(val) = self.evalf(w_sq, &crate::numeric::EvalContext::default())
+                            if let Ok(val) =
+                                self.evalf(w_sq, &crate::numeric::EvalContext::default())
                                 && val.to_f64() > 1e-12
                             {
                                 let w = Simplifier::simplify(self, self.function("sqrt", [w_sq]))
                                     .unwrap_or_else(|_| self.function("sqrt", [w_sq]));
-                                let amp = Simplifier::simplify(self, self.div(c, self.mul([a_s, w])))
-                                    .unwrap_or_else(|_| self.div(c, self.mul([a_s, w])));
-                                let decay = self.function("exp", [self.mul([self.neg(shift), t_sym])]);
+                                let amp =
+                                    Simplifier::simplify(self, self.div(c, self.mul([a_s, w])))
+                                        .unwrap_or_else(|_| self.div(c, self.mul([a_s, w])));
+                                let decay =
+                                    self.function("exp", [self.mul([self.neg(shift), t_sym])]);
                                 let trig = self.function("sin", [self.mul([w, t_sym])]);
                                 let res = self.mul([amp, decay, trig]);
                                 return Ok(Simplifier::simplify(self, res).unwrap_or(res));
@@ -615,10 +653,11 @@ impl SymbolicTransforms for ExprGraph {
                         }
                     }
                     // General higher-degree denominator via partial fractions: e.g. 1/(s*(s+1)*(s+2))
-                    let pfd = crate::simplify::AlgebraicTransformations::partial_fractions(
-                        self, expr, s,
-                    );
-                    if pfd != expr && matches!(self.get(pfd).kind, ExprKind::Add(_) | ExprKind::Sub(_, _)) {
+                    let pfd =
+                        crate::simplify::AlgebraicTransformations::partial_fractions(self, expr, s);
+                    if pfd != expr
+                        && matches!(self.get(pfd).kind, ExprKind::Add(_) | ExprKind::Sub(_, _))
+                    {
                         return self.inverse_laplace_transform(pfd, s, t);
                     }
                 } else if let Some((p1, p0)) = match_linear(self, *num, s)
@@ -627,10 +666,17 @@ impl SymbolicTransforms for ExprGraph {
                     && Simplifier::simplify(self, b).unwrap_or(b) == zero
                 {
                     // (p1*s + p0) / (a*s^2 + c0) -> p1/a * cos(w*t) + p0/(a*w) * sin(w*t)
-                    let cos_part = self.div(self.mul([p1, self.symbol(&self.symbols.resolve(s).unwrap_or_default())]), *den);
+                    let cos_part = self.div(
+                        self.mul([
+                            p1,
+                            self.symbol(&self.symbols.resolve(s).unwrap_or_default()),
+                        ]),
+                        *den,
+                    );
                     let sin_part = self.div(p0, *den);
                     let s_sym = self.symbol(&self.symbols.resolve(s).unwrap_or_else(|| "s".into()));
-                    let k = Simplifier::simplify(self, self.div(c0, a)).unwrap_or_else(|_| self.div(c0, a));
+                    let k = Simplifier::simplify(self, self.div(c0, a))
+                        .unwrap_or_else(|_| self.div(c0, a));
                     let w = Simplifier::simplify(self, self.function("sqrt", [k]))
                         .unwrap_or_else(|_| self.function("sqrt", [k]));
                     let mut terms = Vec::new();
@@ -646,10 +692,11 @@ impl SymbolicTransforms for ExprGraph {
                     let combined = self.add(terms);
                     return Ok(Simplifier::simplify(self, combined).unwrap_or(combined));
                 } else {
-                    let pfd = crate::simplify::AlgebraicTransformations::partial_fractions(
-                        self, expr, s,
-                    );
-                    if pfd != expr && matches!(self.get(pfd).kind, ExprKind::Add(_) | ExprKind::Sub(_, _)) {
+                    let pfd =
+                        crate::simplify::AlgebraicTransformations::partial_fractions(self, expr, s);
+                    if pfd != expr
+                        && matches!(self.get(pfd).kind, ExprKind::Add(_) | ExprKind::Sub(_, _))
+                    {
                         return self.inverse_laplace_transform(pfd, s, t);
                     }
                 }
@@ -725,7 +772,11 @@ impl SymbolicTransforms for ExprGraph {
                 if !consts.is_empty() && vars.len() == 1 {
                     let sub = self.fourier_transform(vars[0], t, omega)?;
                     if !matches!(self.get(sub).kind, ExprKind::Integral { .. }) {
-                        let c = if consts.len() == 1 { consts[0] } else { self.mul(consts) };
+                        let c = if consts.len() == 1 {
+                            consts[0]
+                        } else {
+                            self.mul(consts)
+                        };
                         return Ok(self.mul([c, sub]));
                     }
                 }
@@ -738,8 +789,10 @@ impl SymbolicTransforms for ExprGraph {
                             && args.len() == 1
                         {
                             let fn_name = self.symbols.resolve(*name).unwrap_or_default();
-                            if matches!(fn_name.as_str(), "heaviside" | "Heaviside" | "theta" | "step")
-                                && args[0] == t_sym
+                            if matches!(
+                                fn_name.as_str(),
+                                "heaviside" | "Heaviside" | "theta" | "step"
+                            ) && args[0] == t_sym
                             {
                                 heaviside_found = true;
                             } else if fn_name == "exp" {
@@ -756,16 +809,25 @@ impl SymbolicTransforms for ExprGraph {
                             .unwrap_or_else(|_| self.neg(c1));
                         let i_w = self.mul([self.constant(Constant::I), omega_sym]);
                         let denom = self.add([a, i_w]);
-                        let scale = if Simplifier::simplify(self, c0).unwrap_or(c0) == self.integer(0) {
-                            self.integer(1)
-                        } else {
-                            self.function("exp", [c0])
-                        };
+                        let scale =
+                            if Simplifier::simplify(self, c0).unwrap_or(c0) == self.integer(0) {
+                                self.integer(1)
+                            } else {
+                                self.function("exp", [c0])
+                            };
                         let numer = if consts.is_empty() {
                             scale
                         } else {
-                            let c = if consts.len() == 1 { consts[0] } else { self.mul(consts) };
-                            if scale == self.integer(1) { c } else { self.mul([c, scale]) }
+                            let c = if consts.len() == 1 {
+                                consts[0]
+                            } else {
+                                self.mul(consts)
+                            };
+                            if scale == self.integer(1) {
+                                c
+                            } else {
+                                self.mul([c, scale])
+                            }
                         };
                         return Ok(Simplifier::simplify(self, self.div(numer, denom))
                             .unwrap_or_else(|_| self.div(numer, denom)));
@@ -779,7 +841,8 @@ impl SymbolicTransforms for ExprGraph {
                     if let Some((c2, c1, c0)) = match_quadratic(self, args[0], t)
                         && Simplifier::simplify(self, c1).unwrap_or(c1) == self.integer(0)
                     {
-                        let a = Simplifier::simplify(self, self.neg(c2)).unwrap_or_else(|_| self.neg(c2));
+                        let a = Simplifier::simplify(self, self.neg(c2))
+                            .unwrap_or_else(|_| self.neg(c2));
                         if a != self.integer(0) {
                             let pi = self.constant(Constant::Pi);
                             let pre = self.function("sqrt", [self.div(pi, a)]);
@@ -796,7 +859,10 @@ impl SymbolicTransforms for ExprGraph {
                     }
                     // Check exp(-a * abs(t)) -> 2*a / (a^2 + omega^2)
                     if let ExprKind::Neg(pos) = &self.get(args[0]).kind
-                        && let ExprKind::Function { name: an, args: aargs } = &self.get(*pos).kind
+                        && let ExprKind::Function {
+                            name: an,
+                            args: aargs,
+                        } = &self.get(*pos).kind
                         && self.symbols.resolve(*an).as_deref() == Some("abs")
                         && aargs.len() == 1
                         && aargs[0] == t_sym

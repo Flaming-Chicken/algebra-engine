@@ -1,12 +1,12 @@
 use algebra_core::interval::RealInterval;
 use algebra_core::parser::{ExprParser, parse_operation};
 use algebra_core::{ExprGraph, parse_value_uncertainty_and_unit};
+use algebra_engine::SymbolicSolver;
 use algebra_engine::UraeSession;
 use algebra_engine::branch::{BranchCutFunctionKind, BranchCutManager, BranchSelection};
 use algebra_engine::executor::{ExecutionContext, OperationExecutor};
 use algebra_engine::numeric::{BigValue, EvalContext, NumericalEval, eval_uncertain};
 use algebra_engine::simplify::Simplifier;
-use algebra_engine::SymbolicSolver;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 
@@ -55,20 +55,38 @@ fn test_multivalued_powers_and_i_to_i() {
 fn test_lambert_w_all_real_and_complex_sheets() {
     let z = -0.2;
     // W_0(-0.2) and W_{-1}(-0.2) satisfy w * exp(w) == -0.2
-    let w0 = BranchCutManager::eval(BranchCutFunctionKind::LambertW, z, 0.0, &BranchSelection::Sheet(0))
-        .unwrap()
-        .primary_value();
-    let wm1 = BranchCutManager::eval(BranchCutFunctionKind::LambertW, z, 0.0, &BranchSelection::Sheet(-1))
-        .unwrap()
-        .primary_value();
-    let w1 = BranchCutManager::eval(BranchCutFunctionKind::LambertW, z, 0.0, &BranchSelection::Sheet(1))
-        .unwrap()
-        .primary_value();
+    let w0 = BranchCutManager::eval(
+        BranchCutFunctionKind::LambertW,
+        z,
+        0.0,
+        &BranchSelection::Sheet(0),
+    )
+    .unwrap()
+    .primary_value();
+    let wm1 = BranchCutManager::eval(
+        BranchCutFunctionKind::LambertW,
+        z,
+        0.0,
+        &BranchSelection::Sheet(-1),
+    )
+    .unwrap()
+    .primary_value();
+    let w1 = BranchCutManager::eval(
+        BranchCutFunctionKind::LambertW,
+        z,
+        0.0,
+        &BranchSelection::Sheet(1),
+    )
+    .unwrap()
+    .primary_value();
 
     assert!(w0.1.abs() < 1e-12);
     assert!(wm1.1.abs() < 1e-12);
     assert!(wm1.0 < -1.0 && w0.0 > -1.0 && w0.0 < 0.0);
-    assert!(w1.1.abs() > 1.0, "Sheet k=1 of LambertW(-0.2) should be non-real");
+    assert!(
+        w1.1.abs() > 1.0,
+        "Sheet k=1 of LambertW(-0.2) should be non-real"
+    );
 
     for (wr, wi) in [w0, wm1, w1] {
         let exp_r = wr.exp() * wi.cos();
@@ -136,7 +154,12 @@ fn test_branch_cut_safe_simplification_and_multibranch_solver() {
     match val {
         BigValue::Real(r) => assert!(r.abs() < 1e-10, "Expected ~0, got {}", r),
         BigValue::Complex(r, im) => {
-            assert!(r.abs() < 1e-10 && im.abs() < 1e-10, "Expected ~0, got {}+{}i", r, im);
+            assert!(
+                r.abs() < 1e-10 && im.abs() < 1e-10,
+                "Expected ~0, got {}+{}i",
+                r,
+                im
+            );
         }
     }
 
@@ -144,7 +167,10 @@ fn test_branch_cut_safe_simplification_and_multibranch_solver() {
     let x_sym = graph.symbols.get_or_intern("x");
     let eq_exp = parser.parse("exp(x) = -1").unwrap();
     let sols_exp = graph.solveset(eq_exp, x_sym).unwrap();
-    assert!(!sols_exp.is_empty(), "exp(x) = -1 should yield complex solution i*pi");
+    assert!(
+        !sols_exp.is_empty(),
+        "exp(x) = -1 should yield complex solution i*pi"
+    );
     let s_val = graph.evalf(sols_exp[0], &ctx).unwrap().as_complex();
     assert!(s_val.0.abs() < 1e-10);
     assert!((s_val.1 - PI).abs() < 1e-10);
@@ -152,7 +178,10 @@ fn test_branch_cut_safe_simplification_and_multibranch_solver() {
     // Solve sin(x) = 1/2 -> both principal and pi - principal branches
     let eq_sin = parser.parse("sin(x) = 1/2").unwrap();
     let sols_sin = graph.solveset(eq_sin, x_sym).unwrap();
-    assert!(sols_sin.len() >= 2, "sin(x) = 1/2 should return >= 2 principal period solutions");
+    assert!(
+        sols_sin.len() >= 2,
+        "sin(x) = 1/2 should return >= 2 principal period solutions"
+    );
     let sin_vals: Vec<f64> = sols_sin
         .iter()
         .map(|&s| graph.evalf(s, &ctx).unwrap().to_f64())
@@ -163,7 +192,10 @@ fn test_branch_cut_safe_simplification_and_multibranch_solver() {
     // Solve x*exp(x) = -0.2 -> both W_0(-0.2) and W_{-1}(-0.2)
     let eq_w = parser.parse("x * exp(x) = -0.2").unwrap();
     let sols_w = graph.solveset(eq_w, x_sym).unwrap();
-    assert!(sols_w.len() >= 2, "x*exp(x) = -0.2 should return both real Lambert-W branches");
+    assert!(
+        sols_w.len() >= 2,
+        "x*exp(x) = -0.2 should return both real Lambert-W branches"
+    );
 }
 
 #[test]
@@ -173,7 +205,11 @@ fn test_branch_commands_in_executor() {
 
     let op_cut = parse_operation(r#"branch_cut("sqrt", sheet = 1, cut = "(-infinity, 0]")"#);
     let res_cut = OperationExecutor::execute(&graph, &op_cut, &ctx);
-    assert!(!res_cut.is_error, "branch_cut error: {:?}", res_cut.error_msg);
+    assert!(
+        !res_cut.is_error,
+        "branch_cut error: {:?}",
+        res_cut.error_msg
+    );
     assert!(
         res_cut.output_text.contains("sqrt") && res_cut.output_text.contains("k=1"),
         "{}",
@@ -182,10 +218,26 @@ fn test_branch_commands_in_executor() {
 
     let op_branches = parse_operation("branches (-1)^(1/3)");
     let res_branches = OperationExecutor::execute(&graph, &op_branches, &ctx);
-    assert!(!res_branches.is_error, "branches error: {:?}", res_branches.error_msg);
-    assert!(res_branches.output_text.contains("k=0"), "{}", res_branches.output_text);
-    assert!(res_branches.output_text.contains("k=1"), "{}", res_branches.output_text);
-    assert!(res_branches.output_text.contains("k=2"), "{}", res_branches.output_text);
+    assert!(
+        !res_branches.is_error,
+        "branches error: {:?}",
+        res_branches.error_msg
+    );
+    assert!(
+        res_branches.output_text.contains("k=0"),
+        "{}",
+        res_branches.output_text
+    );
+    assert!(
+        res_branches.output_text.contains("k=1"),
+        "{}",
+        res_branches.output_text
+    );
+    assert!(
+        res_branches.output_text.contains("k=2"),
+        "{}",
+        res_branches.output_text
+    );
 }
 
 #[test]
@@ -211,7 +263,11 @@ fn test_interval_arithmetic_and_correlated_gum_uncertainty() {
     let diff_expr = parser.parse("a - a").unwrap();
     let uv_diff = eval_uncertain(&graph, diff_expr, &ctx).unwrap();
     assert!(uv_diff.mean.abs() < 1e-12);
-    assert!(uv_diff.std_dev < 1e-12, "Correlated a - a must cancel uncertainty, got {}", uv_diff.std_dev);
+    assert!(
+        uv_diff.std_dev < 1e-12,
+        "Correlated a - a must cancel uncertainty, got {}",
+        uv_diff.std_dev
+    );
 
     // 3. Independent quadrature: a + b -> 15 +/- 0.5
     let sum_expr = parser.parse("a + b").unwrap();
@@ -250,7 +306,11 @@ fn test_uncertainty_parsing_session_cli_and_notebook_e2e() {
     let r3 = session.execute_line("eval sqrt(a^2 + b^2)");
     assert!(!r3.is_error, "{:?}", r3.error_msg);
     // hyp = 5, d(hyp)/da = 3/5, d(hyp)/db = 4/5 -> sqrt((0.6*0.3)^2 + (0.8*0.4)^2) = sqrt(0.1348) ≈ 0.36715
-    assert!(r3.output_text.contains("5") && r3.output_text.contains('±'), "{}", r3.output_text);
+    assert!(
+        r3.output_text.contains("5") && r3.output_text.contains('±'),
+        "{}",
+        r3.output_text
+    );
 
     // 3. CLI JSON API with uncertainties & branches
     let graph = ExprGraph::new();
@@ -271,7 +331,14 @@ fn test_uncertainty_parsing_session_cli_and_notebook_e2e() {
     let branch_resp: urae_cli::UraeJsonResponse =
         serde_json::from_str(&urae_cli::process_json_request(&graph, branch_json)).unwrap();
     assert!(branch_resp.success);
-    assert!(branch_resp.branch_values.as_ref().map(|v| v.len()).unwrap_or(0) >= 3);
+    assert!(
+        branch_resp
+            .branch_values
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0)
+            >= 3
+    );
 
     // 4. NotebookState E2E with Parameter uncertainty & branch command
     let mut nb = urae_notebook::notebook::NotebookState::default();
@@ -295,5 +362,9 @@ fn test_uncertainty_parsing_session_cli_and_notebook_e2e() {
             .unwrap_or("")
             .contains("± 0.5")
     );
-    assert!(nb.parsed_lines[3].output_unicode.contains("k=0"), "{}", nb.parsed_lines[3].output_unicode);
+    assert!(
+        nb.parsed_lines[3].output_unicode.contains("k=0"),
+        "{}",
+        nb.parsed_lines[3].output_unicode
+    );
 }

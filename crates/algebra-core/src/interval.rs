@@ -510,7 +510,14 @@ pub fn parse_value_uncertainty_and_unit(raw: &str) -> Option<(f64, Option<f64>, 
     {
         let u = trimmed[b_start + 1..b_start + b_end].trim();
         let before = trimmed[..b_start].trim();
-        (before, if u.is_empty() { None } else { Some(u.to_string()) })
+        (
+            before,
+            if u.is_empty() {
+                None
+            } else {
+                Some(u.to_string())
+            },
+        )
     } else {
         (trimmed, None)
     };

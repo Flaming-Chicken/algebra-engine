@@ -493,7 +493,11 @@ impl BranchCutManager {
                 {
                     // Principal real branch on [-1/e, 0)
                     let p = (2.0 * (std::f64::consts::E * re + 1.0)).max(0.0).sqrt();
-                    let w0 = if re < -0.3 { -1.0 + p - p * p / 3.0 } else { re };
+                    let w0 = if re < -0.3 {
+                        -1.0 + p - p * p / 3.0
+                    } else {
+                        re
+                    };
                     (w0, 0.0)
                 } else if im.abs() < 1e-14 && re >= inv_e && re < 0.0 && k == -1 {
                     // Secondary real branch W_{-1} on [-1/e, 0)

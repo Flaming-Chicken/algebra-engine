@@ -768,10 +768,7 @@ impl Formatter for MathMLFormatter {
                     }
                     rows_xml.push_str("</mtr>");
                 }
-                Ok(format!(
-                    "<mo>(</mo><mtable>{}</mtable><mo>)</mo>",
-                    rows_xml
-                ))
+                Ok(format!("<mo>(</mo><mtable>{}</mtable><mo>)</mo>", rows_xml))
             }
             ExprKind::Relational { op, lhs, rhs } => {
                 let l_str = self.format(graph, *lhs)?;

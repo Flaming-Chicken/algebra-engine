@@ -206,14 +206,20 @@ impl UraeSession {
         for (name, bound) in &self.symbol_domains {
             let sym = self.graph.symbols.get_or_intern(name);
             match bound.domain_type.as_str() {
-                "Positive" => ctx.assumptions.assume(sym, crate::logic::Predicate::Positive),
+                "Positive" => ctx
+                    .assumptions
+                    .assume(sym, crate::logic::Predicate::Positive),
                 "NonNegative" | "Naturals" => {
-                    ctx.assumptions.assume(sym, crate::logic::Predicate::NonNegative);
+                    ctx.assumptions
+                        .assume(sym, crate::logic::Predicate::NonNegative);
                     if bound.domain_type == "Naturals" {
-                        ctx.assumptions.assume(sym, crate::logic::Predicate::Integer);
+                        ctx.assumptions
+                            .assume(sym, crate::logic::Predicate::Integer);
                     }
                 }
-                "Negative" => ctx.assumptions.assume(sym, crate::logic::Predicate::Negative),
+                "Negative" => ctx
+                    .assumptions
+                    .assume(sym, crate::logic::Predicate::Negative),
                 "NonPositive" => {
                     ctx.assumptions.assume(sym, crate::logic::Predicate::Real);
                     ctx.assumptions.set_bounds(
@@ -226,8 +232,12 @@ impl UraeSession {
                         },
                     );
                 }
-                "NonZero" => ctx.assumptions.assume(sym, crate::logic::Predicate::NonZero),
-                "Integers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Integer),
+                "NonZero" => ctx
+                    .assumptions
+                    .assume(sym, crate::logic::Predicate::NonZero),
+                "Integers" => ctx
+                    .assumptions
+                    .assume(sym, crate::logic::Predicate::Integer),
                 "EvenIntegers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Even),
                 "OddIntegers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Odd),
                 "Prime" => ctx.assumptions.assume(sym, crate::logic::Predicate::Prime),
@@ -235,13 +245,18 @@ impl UraeSession {
                     ctx.assumptions.assume(sym, crate::logic::Predicate::Real);
                     if let Some(min) = bound.min_val {
                         if min > 0.0 {
-                            ctx.assumptions.assume(sym, crate::logic::Predicate::Positive);
+                            ctx.assumptions
+                                .assume(sym, crate::logic::Predicate::Positive);
                         } else if min >= 0.0 {
-                            ctx.assumptions.assume(sym, crate::logic::Predicate::NonNegative);
+                            ctx.assumptions
+                                .assume(sym, crate::logic::Predicate::NonNegative);
                         }
                     }
-                    if let Some(max) = bound.max_val && max < 0.0 {
-                        ctx.assumptions.assume(sym, crate::logic::Predicate::Negative);
+                    if let Some(max) = bound.max_val
+                        && max < 0.0
+                    {
+                        ctx.assumptions
+                            .assume(sym, crate::logic::Predicate::Negative);
                     }
                 }
                 _ => {}
@@ -275,13 +290,12 @@ impl UraeSession {
     /// Register an assumption or domain bound (e.g. `"x > 0"`, `"n in Integers"`, `"x: positive"`).
     pub fn assume(&mut self, decl: &str) -> OperationResult {
         let trimmed = decl.trim();
-        let line = if trimmed.to_ascii_lowercase().starts_with("assume ")
-            || trimmed.contains(" in ")
-        {
-            trimmed.to_string()
-        } else {
-            format!("assume {}", trimmed)
-        };
+        let line =
+            if trimmed.to_ascii_lowercase().starts_with("assume ") || trimmed.contains(" in ") {
+                trimmed.to_string()
+            } else {
+                format!("assume {}", trimmed)
+            };
         self.execute_line(&line)
     }
 
@@ -411,7 +425,10 @@ impl UraeSession {
             if !lhs.contains(':')
                 && !lhs.contains('(')
                 && lhs != "ans"
-                && lhs.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                && lhs
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_')
                 && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
             {
                 let val_norm = rhs_trim.replace("\\pm", "±");
@@ -461,8 +478,7 @@ impl UraeSession {
                     let has_unc_nodes =
                         crate::numeric::expr_has_uncertainty_nodes(&self.graph, rhs_id);
                     let all_bound = syms.iter().all(|s| {
-                        self.bindings.contains_key(s)
-                            || matches!(s.as_str(), "pi" | "π" | "e")
+                        self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
                     }) && !syms.iter().any(|s| s == lhs);
 
                     if all_bound && (has_unc_syms || has_unc_nodes) {
@@ -470,7 +486,8 @@ impl UraeSession {
                             .with_uncertainties(self.uncertainties.clone())
                             .with_intervals(self.intervals.clone())
                             .with_branch_sheet(self.branch_sheet);
-                        if let Ok(u) = crate::numeric::eval_uncertain(&self.graph, rhs_id, &eval_ctx)
+                        if let Ok(u) =
+                            crate::numeric::eval_uncertain(&self.graph, rhs_id, &eval_ctx)
                         {
                             self.user_aliases.remove(lhs);
                             self.set_uncertain_binding(lhs, u.mean, u.std_dev, None);
@@ -488,7 +505,9 @@ impl UraeSession {
                             } else {
                                 format!("{}/{}", q.numer(), q.denom())
                             };
-                            if let Some(f) = q.to_f64() && f.is_finite() {
+                            if let Some(f) = q.to_f64()
+                                && f.is_finite()
+                            {
                                 self.set_binding(lhs, f);
                             }
                             if !q.is_integer() || q.numer().bits() > 53 {
@@ -522,7 +541,8 @@ impl UraeSession {
                     } else if !syms.iter().any(|s| s == lhs) {
                         // Free symbolic variables on RHS -> store as reusable symbolic alias
                         self.bindings.remove(lhs);
-                        self.user_aliases.insert(lhs.to_string(), rhs_expanded.clone());
+                        self.user_aliases
+                            .insert(lhs.to_string(), rhs_expanded.clone());
                         let u_fmt = algebra_core::format::UnicodeFormatter
                             .format(&self.graph, rhs_id)
                             .unwrap_or_else(|_| rhs_trim.to_string());
@@ -805,9 +825,7 @@ fn subst_identifiers(expr: &str, map: &HashMap<String, String>) -> String {
                 look += 1;
             }
             let is_call = look < chars.len() && chars[look].1 == '(';
-            if !is_call
-                && let Some(rep) = map.get(ident)
-            {
+            if !is_call && let Some(rep) = map.get(ident) {
                 out.push_str(rep);
                 i = end;
                 continue;

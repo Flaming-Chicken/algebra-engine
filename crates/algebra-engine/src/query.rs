@@ -107,11 +107,7 @@ pub struct QueryEngine;
 
 impl QueryEngine {
     /// Process any natural-language math query and return a structured multi-pod response.
-    pub fn query(
-        graph: &ExprGraph,
-        query_str: &str,
-        ctx: &ExecutionContext,
-    ) -> QueryResponse {
+    pub fn query(graph: &ExprGraph, query_str: &str, ctx: &ExecutionContext) -> QueryResponse {
         #[cfg(not(target_arch = "wasm32"))]
         let start_time = Instant::now();
         let query_trimmed = query_str.trim();
@@ -178,7 +174,9 @@ impl QueryEngine {
                 .with_uncertainties(ctx.uncertainties.clone())
                 .with_intervals(ctx.intervals.clone())
                 .with_branch_sheet(ctx.branch_sheet);
-            if eval_ctx.has_uncertainty() || crate::numeric::expr_has_uncertainty_nodes(graph, root_id) {
+            if eval_ctx.has_uncertainty()
+                || crate::numeric::expr_has_uncertainty_nodes(graph, root_id)
+            {
                 if let Ok(u) = crate::numeric::eval_uncertain(graph, root_id, &eval_ctx) {
                     let u_unicode = u.format_unicode();
                     let u_latex = u.format_latex();
@@ -247,7 +245,19 @@ impl QueryEngine {
                     .filter(|name| {
                         !matches!(
                             name.as_str(),
-                            "pi" | "π" | "e" | "i" | "I" | "tau" | "τ" | "oo" | "inf" | "Inf" | "infinity" | "∞" | "nan" | "NaN"
+                            "pi" | "π"
+                                | "e"
+                                | "i"
+                                | "I"
+                                | "tau"
+                                | "τ"
+                                | "oo"
+                                | "inf"
+                                | "Inf"
+                                | "infinity"
+                                | "∞"
+                                | "nan"
+                                | "NaN"
                         ) && !ctx.bindings.contains_key(name)
                     })
                     .collect();
@@ -305,7 +315,11 @@ impl QueryEngine {
                         pods.push(ResultPod::new(
                             "Roots / Zeros",
                             roots_display.clone(),
-                            format!("{} \\in \\left\\{{ {} \\right\\}}", first_v, root_tex.join(", ")),
+                            format!(
+                                "{} \\in \\left\\{{ {} \\right\\}}",
+                                first_v,
+                                root_tex.join(", ")
+                            ),
                             roots_display,
                         ));
                     }
@@ -456,7 +470,10 @@ impl QueryEngine {
                         ResultPod::new(
                             "Step-by-step solution",
                             lines.join("\n"),
-                            format!("\\begin{{aligned}} {} \\end{{aligned}}", tex_lines.join(" \\\\ ")),
+                            format!(
+                                "\\begin{{aligned}} {} \\end{{aligned}}",
+                                tex_lines.join(" \\\\ ")
+                            ),
                             lines.join("\n"),
                         )
                         .with_subpods(lines),
@@ -488,7 +505,10 @@ impl QueryEngine {
                         ResultPod::new(
                             "Step-by-step solution",
                             lines.join("\n"),
-                            format!("\\begin{{aligned}} {} \\end{{aligned}}", tex_lines.join(" \\\\ ")),
+                            format!(
+                                "\\begin{{aligned}} {} \\end{{aligned}}",
+                                tex_lines.join(" \\\\ ")
+                            ),
                             lines.join("\n"),
                         )
                         .with_subpods(lines),
@@ -515,7 +535,10 @@ impl QueryEngine {
                         ResultPod::new(
                             "Step-by-step solution",
                             lines.join("\n"),
-                            format!("\\begin{{aligned}} {} \\end{{aligned}}", tex_lines.join(" \\\\ ")),
+                            format!(
+                                "\\begin{{aligned}} {} \\end{{aligned}}",
+                                tex_lines.join(" \\\\ ")
+                            ),
                             lines.join("\n"),
                         )
                         .with_subpods(lines),

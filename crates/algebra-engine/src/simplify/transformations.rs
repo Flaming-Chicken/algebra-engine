@@ -179,8 +179,7 @@ impl AlgebraicTransformations {
         }
 
         let mut max_deg = 0u32;
-        let mut slices: std::collections::BTreeMap<u32, MvPoly> =
-            std::collections::BTreeMap::new();
+        let mut slices: std::collections::BTreeMap<u32, MvPoly> = std::collections::BTreeMap::new();
         for (mono, coeff) in poly {
             let mut deg = 0u32;
             let mut rest = Vec::new();
@@ -206,11 +205,12 @@ impl AlgebraicTransformations {
             return mv_poly_to_expr(graph, slices.get(&0).unwrap_or(&MvPoly::new()));
         }
 
-        let is_unit_coeff = |p: &MvPoly| -> bool {
-            p.len() == 1 && p.get(&Vec::new()).is_some_and(|c| c.is_one())
-        };
+        let is_unit_coeff =
+            |p: &MvPoly| -> bool { p.len() == 1 && p.get(&Vec::new()).is_some_and(|c| c.is_one()) };
         let is_neg_unit_coeff = |p: &MvPoly| -> bool {
-            p.len() == 1 && p.get(&Vec::new()).is_some_and(|c| *c == -num_rational::BigRational::one())
+            p.len() == 1
+                && p.get(&Vec::new())
+                    .is_some_and(|c| *c == -num_rational::BigRational::one())
         };
 
         let top = slices.get(&max_deg).cloned().unwrap_or_default();
@@ -233,7 +233,10 @@ impl AlgebraicTransformations {
                 && !sub.is_empty()
             {
                 let is_const_neg = sub.len() == 1
-                    && sub.iter().next().is_some_and(|(m, c)| m.is_empty() && c.is_negative());
+                    && sub
+                        .iter()
+                        .next()
+                        .is_some_and(|(m, c)| m.is_empty() && c.is_negative());
                 if is_const_neg {
                     let neg_sub: MvPoly = sub.iter().map(|(k, v)| (k.clone(), -v)).collect();
                     let rhs = mv_poly_to_expr(graph, &neg_sub);
@@ -279,7 +282,11 @@ impl AlgebraicTransformations {
                     && k < 0
                 {
                     let pk = -k;
-                    let d = if pk == 1 { *b } else { graph.pow(*b, graph.integer(pk)) };
+                    let d = if pk == 1 {
+                        *b
+                    } else {
+                        graph.pow(*b, graph.integer(pk))
+                    };
                     (graph.integer(1), d)
                 } else {
                     return expr;
@@ -314,7 +321,9 @@ impl AlgebraicTransformations {
         }
 
         // 2. Reduce rem / p_den by polynomial GCD
-        let g = rem_raw.gcd(&p_den).unwrap_or_else(|_| crate::poly::UniPoly::constant(BigRational::one()));
+        let g = rem_raw
+            .gcd(&p_den)
+            .unwrap_or_else(|_| crate::poly::UniPoly::constant(BigRational::one()));
         let rem_red = rem_raw.div_rem(&g).map(|(q, _)| q).unwrap_or(rem_raw);
         let den_red = p_den.div_rem(&g).map(|(q, _)| q).unwrap_or(p_den);
         if den_red.degree() == 0 {
@@ -327,8 +336,15 @@ impl AlgebraicTransformations {
                     let len = quot.coeffs.len().max(rem_scaled.coeffs.len());
                     (0..len)
                         .map(|i| {
-                            quot.coeffs.get(i).cloned().unwrap_or_else(BigRational::zero)
-                                + rem_scaled.coeffs.get(i).cloned().unwrap_or_else(BigRational::zero)
+                            quot.coeffs
+                                .get(i)
+                                .cloned()
+                                .unwrap_or_else(BigRational::zero)
+                                + rem_scaled
+                                    .coeffs
+                                    .get(i)
+                                    .cloned()
+                                    .unwrap_or_else(BigRational::zero)
                         })
                         .collect()
                 },
@@ -378,7 +394,11 @@ impl AlgebraicTransformations {
 
         for (fi_idx, (f_int, mult)) in irred_factors.iter().enumerate() {
             let f_q = crate::poly::UniPoly {
-                coeffs: f_int.iter().cloned().map(BigRational::from_integer).collect(),
+                coeffs: f_int
+                    .iter()
+                    .cloned()
+                    .map(BigRational::from_integer)
+                    .collect(),
             };
             let d_i = f_q.degree();
             let mut f_pow = f_q.clone();
@@ -486,12 +506,7 @@ fn is_expr_one(graph: &ExprGraph, id: ExprId) -> bool {
     }
 }
 
-fn flatten_signed_terms(
-    graph: &ExprGraph,
-    id: ExprId,
-    neg: bool,
-    out: &mut Vec<(ExprId, bool)>,
-) {
+fn flatten_signed_terms(graph: &ExprGraph, id: ExprId, neg: bool, out: &mut Vec<(ExprId, bool)>) {
     match &graph.get(id).kind {
         ExprKind::Add(terms) => {
             for &t in terms {
@@ -654,7 +669,11 @@ fn to_single_fraction(graph: &ExprGraph, expr: ExprId) -> (ExprId, ExprId) {
             {
                 let (nb, db) = to_single_fraction(graph, *base);
                 let ak = k.unsigned_abs() as i64;
-                let np = if ak == 1 { nb } else { graph.pow(nb, graph.integer(ak)) };
+                let np = if ak == 1 {
+                    nb
+                } else {
+                    graph.pow(nb, graph.integer(ak))
+                };
                 let dp = if ak == 1 {
                     db
                 } else if is_expr_one(graph, db) {
@@ -692,8 +711,7 @@ fn cancel_num_den(graph: &ExprGraph, num: ExprId, den: ExprId) -> ExprId {
         // Compute exact multivariate polynomial GCD over shared atoms
         let g = mv_poly_gcd(&pn, &pd);
         if !g.is_empty() && !(g.len() == 1 && g.contains_key(&Vec::new())) {
-            if let (Some(qn), Some(qd)) = (mv_poly_div_exact(&pn, &g), mv_poly_div_exact(&pd, &g))
-            {
+            if let (Some(qn), Some(qd)) = (mv_poly_div_exact(&pn, &g), mv_poly_div_exact(&pd, &g)) {
                 pn = qn;
                 pd = qd;
             }
@@ -892,13 +910,21 @@ fn mv_leading_term(p: &MvPoly) -> Option<(MonomialKey, num_rational::BigRational
 fn mv_div_monomial(a: &MonomialKey, b: &MonomialKey) -> Option<MonomialKey> {
     let mut out = Vec::new();
     for &(vb, eb) in b {
-        let ea = a.iter().find(|&&(va, _)| va == vb).map(|&(_, e)| e).unwrap_or(0);
+        let ea = a
+            .iter()
+            .find(|&&(va, _)| va == vb)
+            .map(|&(_, e)| e)
+            .unwrap_or(0);
         if ea < eb {
             return None;
         }
     }
     for &(va, ea) in a {
-        let eb = b.iter().find(|&&(vb, _)| vb == va).map(|&(_, e)| e).unwrap_or(0);
+        let eb = b
+            .iter()
+            .find(|&&(vb, _)| vb == va)
+            .map(|&(_, e)| e)
+            .unwrap_or(0);
         if ea > eb {
             out.push((va, ea - eb));
         }
@@ -999,7 +1025,10 @@ fn univ_to_mv(u: &[MvPoly], var: ExprId) -> MvPoly {
 
 fn mv_one() -> MvPoly {
     let mut m = MvPoly::new();
-    m.insert(Vec::new(), num_rational::BigRational::from_integer(1.into()));
+    m.insert(
+        Vec::new(),
+        num_rational::BigRational::from_integer(1.into()),
+    );
     m
 }
 
@@ -1066,7 +1095,11 @@ fn mv_poly_gcd(a: &MvPoly, b: &MvPoly) -> MvPoly {
         let mut g = MvPoly::new();
         for c in &u {
             if !c.is_empty() {
-                g = if g.is_empty() { c.clone() } else { mv_poly_gcd(&g, c) };
+                g = if g.is_empty() {
+                    c.clone()
+                } else {
+                    mv_poly_gcd(&g, c)
+                };
             }
         }
         if g.is_empty() || (g.len() == 1 && g.contains_key(&Vec::new())) {
@@ -1134,7 +1167,12 @@ fn mv_poly_gcd(a: &MvPoly, b: &MvPoly) -> MvPoly {
             let mut res = univ_to_mv(&v, var);
             res = mv_mul(&res, &content_g);
             // Strip scalar content if unit
-            if res.len() == 1 && res.iter().next().is_some_and(|(m, c)| m.is_empty() && !c.is_one()) {
+            if res.len() == 1
+                && res
+                    .iter()
+                    .next()
+                    .is_some_and(|(m, c)| m.is_empty() && !c.is_one())
+            {
                 return mv_one();
             }
             return res;
@@ -1225,7 +1263,10 @@ fn mv_mul(a: &MvPoly, b: &MvPoly) -> MvPoly {
 
 fn mv_pow(base: &MvPoly, mut exp: u32) -> MvPoly {
     let mut acc: MvPoly = std::collections::BTreeMap::new();
-    acc.insert(Vec::new(), num_rational::BigRational::from_integer(1.into()));
+    acc.insert(
+        Vec::new(),
+        num_rational::BigRational::from_integer(1.into()),
+    );
     let mut cur = base.clone();
     while exp > 0 {
         if exp & 1 == 1 {
@@ -1252,12 +1293,18 @@ fn mv_poly_from_expr(graph: &ExprGraph, expr: ExprId) -> Option<MvPoly> {
         }
         ExprKind::Symbol(_) => {
             let mut m = MvPoly::new();
-            m.insert(vec![(expr, 1)], num_rational::BigRational::from_integer(1.into()));
+            m.insert(
+                vec![(expr, 1)],
+                num_rational::BigRational::from_integer(1.into()),
+            );
             Some(m)
         }
         ExprKind::Function { .. } => {
             let mut m = MvPoly::new();
-            m.insert(vec![(expr, 1)], num_rational::BigRational::from_integer(1.into()));
+            m.insert(
+                vec![(expr, 1)],
+                num_rational::BigRational::from_integer(1.into()),
+            );
             Some(m)
         }
         ExprKind::Neg(inner) => {
@@ -1279,7 +1326,10 @@ fn mv_poly_from_expr(graph: &ExprGraph, expr: ExprId) -> Option<MvPoly> {
         }
         ExprKind::Mul(factors) => {
             let mut acc = MvPoly::new();
-            acc.insert(Vec::new(), num_rational::BigRational::from_integer(1.into()));
+            acc.insert(
+                Vec::new(),
+                num_rational::BigRational::from_integer(1.into()),
+            );
             for &f in factors {
                 let pf = mv_poly_from_expr(graph, f)?;
                 acc = mv_mul(&acc, &pf);
@@ -1305,7 +1355,10 @@ fn mv_poly_from_expr(graph: &ExprGraph, expr: ExprId) -> Option<MvPoly> {
                 return Some(mv_pow(&pb, n));
             }
             let mut m = MvPoly::new();
-            m.insert(vec![(expr, 1)], num_rational::BigRational::from_integer(1.into()));
+            m.insert(
+                vec![(expr, 1)],
+                num_rational::BigRational::from_integer(1.into()),
+            );
             Some(m)
         }
         _ => None,
@@ -1480,11 +1533,7 @@ fn distribute_binary_mul(graph: &ExprGraph, a: ExprId, b: ExprId) -> ExprId {
 // Univariate & Multivariate Polynomial Factorization over Q
 // =========================================================================
 
-fn factor_univariate_over_q(
-    graph: &ExprGraph,
-    expr: ExprId,
-    var: SymbolId,
-) -> Option<ExprId> {
+fn factor_univariate_over_q(graph: &ExprGraph, expr: ExprId, var: SymbolId) -> Option<ExprId> {
     use num::Integer as _;
     use num_bigint::BigInt;
     use num_rational::BigRational;
@@ -1541,7 +1590,11 @@ fn factor_univariate_over_q(
 
     if int_c.len() > 1 {
         // Yun-style square-free decomposition in Q[x], normalized to primitive Z[x]
-        let q_coeffs: Vec<BigRational> = int_c.iter().cloned().map(BigRational::from_integer).collect();
+        let q_coeffs: Vec<BigRational> = int_c
+            .iter()
+            .cloned()
+            .map(BigRational::from_integer)
+            .collect();
         let mut sqfree_parts = Vec::new();
         for (sq_f, mult) in square_free_decomposition(&q_coeffs) {
             let prim = make_primitive_int_poly(&sq_f);
@@ -1670,13 +1723,19 @@ fn make_primitive_int_poly(q: &[num_rational::BigRational]) -> Vec<num_bigint::B
     ints
 }
 
-fn qpoly_gcd(a: &[num_rational::BigRational], b: &[num_rational::BigRational]) -> Vec<num_rational::BigRational> {
+fn qpoly_gcd(
+    a: &[num_rational::BigRational],
+    b: &[num_rational::BigRational],
+) -> Vec<num_rational::BigRational> {
     let pa = crate::poly::UniPoly { coeffs: a.to_vec() };
     let pb = crate::poly::UniPoly { coeffs: b.to_vec() };
     pa.gcd(&pb).map(|p| p.coeffs).unwrap_or_default()
 }
 
-fn qpoly_div(a: &[num_rational::BigRational], b: &[num_rational::BigRational]) -> Vec<num_rational::BigRational> {
+fn qpoly_div(
+    a: &[num_rational::BigRational],
+    b: &[num_rational::BigRational],
+) -> Vec<num_rational::BigRational> {
     let pa = crate::poly::UniPoly { coeffs: a.to_vec() };
     let pb = crate::poly::UniPoly { coeffs: b.to_vec() };
     pa.div_rem(&pb).map(|(q, _)| q.coeffs).unwrap_or_default()
@@ -1741,8 +1800,12 @@ fn factor_sqfree_primitive_int_poly(f: &[num_bigint::BigInt]) -> Vec<Vec<num_big
         if deg <= 1 {
             break;
         }
-        let Some(c0) = cur[0].abs().to_u64() else { break };
-        let Some(cn) = cur[deg].abs().to_u64() else { break };
+        let Some(c0) = cur[0].abs().to_u64() else {
+            break;
+        };
+        let Some(cn) = cur[deg].abs().to_u64() else {
+            break;
+        };
         let p_divs = u64_divisors(c0, 64);
         let q_divs = u64_divisors(cn, 64);
 
@@ -1833,7 +1896,10 @@ fn u64_divisors(v: u64, cap: usize) -> Vec<u64> {
     small
 }
 
-fn int_poly_div_exact(a: &[num_bigint::BigInt], b: &[num_bigint::BigInt]) -> Option<Vec<num_bigint::BigInt>> {
+fn int_poly_div_exact(
+    a: &[num_bigint::BigInt],
+    b: &[num_bigint::BigInt],
+) -> Option<Vec<num_bigint::BigInt>> {
     use num::Integer as _;
     use num_bigint::BigInt;
     use num_traits::Zero as _;
@@ -2030,7 +2096,9 @@ fn fp_edf(g: Vec<u64>, d: usize, p: u64, rng: &mut u64) -> Vec<Vec<u64>> {
         loop {
             let mut a = vec![0u64; cur_deg];
             for c in &mut a {
-                *rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                *rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 *c = (*rng >> 16) % p;
             }
             fp_trim(&mut a);
@@ -2093,7 +2161,11 @@ fn zp_trim(a: &mut Vec<num_bigint::BigInt>, m: &num_bigint::BigInt) {
     }
 }
 
-fn zp_mul(a: &[num_bigint::BigInt], b: &[num_bigint::BigInt], m: &num_bigint::BigInt) -> Vec<num_bigint::BigInt> {
+fn zp_mul(
+    a: &[num_bigint::BigInt],
+    b: &[num_bigint::BigInt],
+    m: &num_bigint::BigInt,
+) -> Vec<num_bigint::BigInt> {
     use num_bigint::BigInt;
     use num_traits::Zero as _;
     if a.is_empty() || b.is_empty() {
@@ -2132,9 +2204,7 @@ fn fp_ext_gcd(a: &[u64], b: &[u64], p: u64) -> (Vec<u64>, Vec<u64>, Vec<u64>) {
     }
     if let Some(&lc) = old_r.last() {
         let inv = mod_inv_u64(lc, p);
-        let scale = |v: Vec<u64>| -> Vec<u64> {
-            fp_mul(&v, &[inv], p)
-        };
+        let scale = |v: Vec<u64>| -> Vec<u64> { fp_mul(&v, &[inv], p) };
         (scale(old_r), scale(old_s), scale(old_t))
     } else {
         (old_r, old_s, old_t)
@@ -2254,8 +2324,8 @@ fn berlekamp_zassenhaus_split(f: &[num_bigint::BigInt]) -> Vec<Vec<num_bigint::B
     let mut f_mods: Option<(u64, Vec<Vec<u64>>)> = None;
 
     for p in [
-        5u64, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
-        101,
+        5u64, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89,
+        97, 101,
     ] {
         if mod_pos(lc, p) == 0 {
             continue;
@@ -2297,7 +2367,10 @@ fn berlekamp_zassenhaus_split(f: &[num_bigint::BigInt]) -> Vec<Vec<num_bigint::B
     }
 
     let inv_lc = mod_inv_bigint(lc, &mod_m);
-    let mut f_monic: Vec<BigInt> = f.iter().map(|c| ((c * &inv_lc) % &mod_m + &mod_m) % &mod_m).collect();
+    let mut f_monic: Vec<BigInt> = f
+        .iter()
+        .map(|c| ((c * &inv_lc) % &mod_m + &mod_m) % &mod_m)
+        .collect();
     zp_trim(&mut f_monic, &mod_m);
 
     let lifted = hensel_lift_all(&f_monic, &parts, p, &mod_m);
@@ -2439,11 +2512,17 @@ fn factor_multivariate_over_q(
     }
     let content = num_rational::BigRational::new(num_gcd, den_lcm);
 
-    let mut common_exps: std::collections::BTreeMap<ExprId, u32> = std::collections::BTreeMap::new();
+    let mut common_exps: std::collections::BTreeMap<ExprId, u32> =
+        std::collections::BTreeMap::new();
     for &v in &var_ids {
         let min_e = poly
             .keys()
-            .map(|m| m.iter().find(|&&(a, _)| a == v).map(|&(_, e)| e).unwrap_or(0))
+            .map(|m| {
+                m.iter()
+                    .find(|&&(a, _)| a == v)
+                    .map(|&(_, e)| e)
+                    .unwrap_or(0)
+            })
             .min()
             .unwrap_or(0);
         if min_e > 0 {
@@ -2480,7 +2559,11 @@ fn factor_multivariate_over_q(
         out_factors.push(crate::poly::expr_from_rational(graph, &content));
     }
     for (v, e) in common_exps {
-        out_factors.push(if e == 1 { v } else { graph.pow(v, graph.integer(e as i64)) });
+        out_factors.push(if e == 1 {
+            v
+        } else {
+            graph.pow(v, graph.integer(e as i64))
+        });
     }
 
     if prim_vars.is_empty() {
@@ -2581,13 +2664,9 @@ fn factor_multivariate_over_q(
     if prim.len() == 4 {
         let terms: Vec<(MonomialKey, num_rational::BigRational)> = prim.into_iter().collect();
         for &(i1, i2, j1, j2) in &[(0usize, 1usize, 2usize, 3usize), (0, 2, 1, 3), (0, 3, 1, 2)] {
-            if let Some(grouped) = try_group_four_terms(
-                graph,
-                &terms[i1],
-                &terms[i2],
-                &terms[j1],
-                &terms[j2],
-            ) {
+            if let Some(grouped) =
+                try_group_four_terms(graph, &terms[i1], &terms[i2], &terms[j1], &terms[j2])
+            {
                 out_factors.push(grouped);
                 return Some(if out_factors.len() == 1 {
                     out_factors[0]
@@ -2633,7 +2712,11 @@ fn hom_int_poly_to_expr(
         } else if ky > 1 {
             parts.push(graph.pow(y_var, graph.integer(ky as i64)));
         }
-        if parts.len() == 1 { parts[0] } else { graph.mul(parts) }
+        if parts.len() == 1 {
+            parts[0]
+        } else {
+            graph.mul(parts)
+        }
     };
 
     let (kx0, ky0, ref c0) = terms[0];
@@ -2676,7 +2759,11 @@ fn try_group_four_terms(
     let div_mono = |a: &MonomialKey, g: &MonomialKey| -> MonomialKey {
         let mut out = Vec::new();
         for &(va, ea) in a {
-            let eg = g.iter().find(|&&(vg, _)| vg == va).map(|&(_, e)| e).unwrap_or(0);
+            let eg = g
+                .iter()
+                .find(|&&(vg, _)| vg == va)
+                .map(|&(_, e)| e)
+                .unwrap_or(0);
             if ea > eg {
                 out.push((va, ea - eg));
             }
@@ -2691,7 +2778,11 @@ fn try_group_four_terms(
     let v0 = div_mono(&t2.0, &g2);
     let v1 = div_mono(&t3.0, &g2);
 
-    let check = |va: &MonomialKey, vb: &MonomialKey, c2: &num_rational::BigRational, c3: &num_rational::BigRational| -> Option<num_rational::BigRational> {
+    let check = |va: &MonomialKey,
+                 vb: &MonomialKey,
+                 c2: &num_rational::BigRational,
+                 c3: &num_rational::BigRational|
+     -> Option<num_rational::BigRational> {
         if *va == u0 && *vb == u1 {
             let r = c2 / &t0.1;
             if !r.is_zero() && (&t1.1 * &r) == *c3 {

@@ -146,8 +146,14 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
 
     // Route CAS / CLI commands through process_input_with_full_context
     const CLI_ONLY_PREFIXES: &[&str] = &[
-        "agent ", "ask ", "embed ", "similarity ", "embed_sim ", "proof_search ",
-        "proof-depth ", "proof_depth ",
+        "agent ",
+        "ask ",
+        "embed ",
+        "similarity ",
+        "embed_sim ",
+        "proof_search ",
+        "proof-depth ",
+        "proof_depth ",
     ];
     let parsed_op = algebra_core::parse_operation(text_clean);
     let is_cli_op = !matches!(

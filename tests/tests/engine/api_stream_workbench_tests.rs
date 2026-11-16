@@ -200,17 +200,16 @@ fn test_stream_and_file_pipelines() {
 
     // 2. NDJSON stream (Execute, Query, malformed line)
     let ndjson = concat!(
-        r#"{"id":"1","input":"diff x^2, x","mode":"execute"}"#, "\n",
-        r#"{"id":"2","input":"integrate x, x","mode":"query"}"#, "\n",
+        r#"{"id":"1","input":"diff x^2, x","mode":"execute"}"#,
+        "\n",
+        r#"{"id":"2","input":"integrate x, x","mode":"query"}"#,
+        "\n",
         "not valid json\n"
     );
     let mut ndjson_out = Vec::new();
-    let nd_summary = StreamProcessor::process_ndjson_stream(
-        &g,
-        Cursor::new(ndjson.as_bytes()),
-        &mut ndjson_out,
-    )
-    .expect("ndjson stream");
+    let nd_summary =
+        StreamProcessor::process_ndjson_stream(&g, Cursor::new(ndjson.as_bytes()), &mut ndjson_out)
+            .expect("ndjson stream");
     assert_eq!(nd_summary.processed, 3);
     assert_eq!(nd_summary.succeeded, 2);
     assert_eq!(nd_summary.failed, 1);
@@ -282,7 +281,11 @@ fn test_stream_and_file_pipelines() {
         StreamProcessor::eval_csv_file(&g, "x * y + 1", "res", &csv_in_path, &csv_out_path)
             .unwrap();
     assert_eq!(fc_sum.succeeded, 1);
-    assert!(std::fs::read_to_string(&csv_out_path).unwrap().contains("2,5,11"));
+    assert!(
+        std::fs::read_to_string(&csv_out_path)
+            .unwrap()
+            .contains("2,5,11")
+    );
 }
 
 #[test]

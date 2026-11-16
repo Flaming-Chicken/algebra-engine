@@ -278,7 +278,9 @@ impl WorkbenchUiState {
         ui.separator();
 
         match self.sub_mode {
-            WorkbenchSubMode::Equations => self.render_equations_workbench(ui, palette, graph, &mut action),
+            WorkbenchSubMode::Equations => {
+                self.render_equations_workbench(ui, palette, graph, &mut action)
+            }
             WorkbenchSubMode::Differentials => {
                 self.render_differentials_workbench(ui, palette, graph, &mut action);
             }
@@ -307,7 +309,10 @@ impl WorkbenchUiState {
                 .selected_text(cur_name)
                 .show_ui(ui, |ui| {
                     for (idx, p) in presets.iter().enumerate() {
-                        if ui.selectable_label(self.eq_selected_preset == idx, &p.name).clicked() {
+                        if ui
+                            .selectable_label(self.eq_selected_preset == idx, &p.name)
+                            .clicked()
+                        {
                             self.eq_selected_preset = idx;
                             self.eq_spec = p.clone();
                             needs_eval = true;
@@ -538,7 +543,10 @@ impl WorkbenchUiState {
                 .selected_text(cur_name)
                 .show_ui(ui, |ui| {
                     for (idx, p) in presets.iter().enumerate() {
-                        if ui.selectable_label(self.de_selected_preset == idx, &p.name).clicked() {
+                        if ui
+                            .selectable_label(self.de_selected_preset == idx, &p.name)
+                            .clicked()
+                        {
                             self.de_selected_preset = idx;
                             self.de_spec = p.clone();
                             needs_eval = true;
@@ -557,16 +565,31 @@ impl WorkbenchUiState {
                     }
                 });
             ui.checkbox(&mut self.show_time_series, "Time Series y(t)");
-            ui.checkbox(&mut self.show_phase_portrait, "Phase Portrait + Vector Field");
+            ui.checkbox(
+                &mut self.show_phase_portrait,
+                "Phase Portrait + Vector Field",
+            );
             if ui.button("⚡ Integrate & Analyze").clicked() {
                 needs_eval = true;
             }
             if ui.button("➕ Export to Notepad").clicked() {
                 let first = format!(
                     "solve_ode {}' = {}, {}, {}",
-                    self.de_spec.state_vars.first().cloned().unwrap_or_else(|| "y".into()),
-                    self.de_spec.rhs_expressions.first().cloned().unwrap_or_else(|| "0".into()),
-                    self.de_spec.state_vars.first().cloned().unwrap_or_else(|| "y".into()),
+                    self.de_spec
+                        .state_vars
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "y".into()),
+                    self.de_spec
+                        .rhs_expressions
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "0".into()),
+                    self.de_spec
+                        .state_vars
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "y".into()),
                     self.de_spec.t_var
                 );
                 *action = WorkbenchAction::InsertToNotepad(first);

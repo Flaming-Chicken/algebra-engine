@@ -10,9 +10,9 @@ use algebra_core::vm::{BytecodeVM, VmCompiler};
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::executor::ExecutionContext;
 use algebra_engine::ode::{NumericalOdeConfig, NumericalOdeMethod, NumericalOdeSolver};
+use algebra_engine::query::QueryEngine;
 use algebra_engine::simplify::Simplifier;
 use algebra_engine::solver::SymbolicSolver;
-use algebra_engine::query::QueryEngine;
 use wasm_bindgen::prelude::*;
 
 /// Natural-language multi-pod structured query engine on WebAssembly edge.
@@ -328,11 +328,14 @@ pub fn wasm_ode_solve_json(
 pub fn wasm_analyze_equation_system(spec_json: &str) -> String {
     let spec: algebra_engine::EquationSystemSpec = match serde_json::from_str(spec_json) {
         Ok(s) => s,
-        Err(e) => return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string(),
+        Err(e) => {
+            return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string();
+        }
     };
     let graph = ExprGraph::new();
     let res = algebra_engine::WorkbenchEngine::analyze_equation_system(&graph, &spec);
-    serde_json::to_string(&res).unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
+    serde_json::to_string(&res)
+        .unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
 }
 
 /// Solve, integrate, and analyze linearized Jacobian eigenvalues & phase quiver field for an ODE system.
@@ -340,11 +343,14 @@ pub fn wasm_analyze_equation_system(spec_json: &str) -> String {
 pub fn wasm_analyze_differential_system(spec_json: &str) -> String {
     let spec: algebra_engine::DifferentialSystemSpec = match serde_json::from_str(spec_json) {
         Ok(s) => s,
-        Err(e) => return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string(),
+        Err(e) => {
+            return serde_json::json!({ "success": false, "error_msg": e.to_string() }).to_string();
+        }
     };
     let graph = ExprGraph::new();
     let res = algebra_engine::WorkbenchEngine::analyze_differential_system(&graph, &spec);
-    serde_json::to_string(&res).unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
+    serde_json::to_string(&res)
+        .unwrap_or_else(|e| format!("{{\"success\":false,\"error_msg\":\"{e}\"}}"))
 }
 
 /// Return built-in equation and differential system presets for the interactive Systems Workbench.
@@ -412,7 +418,8 @@ mod tests {
 
     #[test]
     fn test_wasm_pad_eval_session_and_solve() {
-        let script = "f(x, y) = x^2 + y^2\ng(x) = exp(x) + x\nf(3, 4)\ng(0)\ndiff x^3, x\nintegrate ans, x";
+        let script =
+            "f(x, y) = x^2 + y^2\ng(x) = exp(x) + x\nf(3, 4)\ng(0)\ndiff x^3, x\nintegrate ans, x";
         let json_str = wasm_pad_eval_session(script);
         let rows: Vec<serde_json::Value> = serde_json::from_str(&json_str).expect("valid JSON");
         assert_eq!(rows.len(), 6);
@@ -420,11 +427,16 @@ mod tests {
         assert!(!rows[3]["is_error"].as_bool().unwrap_or(true));
         let last_latex = rows[5]["latex"].as_str().unwrap_or("");
         assert!(
-            last_latex.contains("{x}^{3}") || last_latex.contains("x^{3}") || last_latex.contains("x^3"),
+            last_latex.contains("{x}^{3}")
+                || last_latex.contains("x^{3}")
+                || last_latex.contains("x^3"),
             "expected x^3 from integrate ans, got {last_latex}"
         );
 
         let solved = wasm_solve("x^2 - 4 = 0", "x");
-        assert!(solved.contains('2') && solved.contains("-2"), "got {solved}");
+        assert!(
+            solved.contains('2') && solved.contains("-2"),
+            "got {solved}"
+        );
     }
 }

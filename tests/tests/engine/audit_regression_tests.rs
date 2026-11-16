@@ -2,9 +2,9 @@
 //! URAE Nov 2026 audit fixes across formatting, calculus, solving, factoring,
 //! limits, simplification, exact eval, number theory, parser, and JSON API.
 
-use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
-use algebra_core::parser::{parse_operation, ExprParser};
 use algebra_core::ExprGraph;
+use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
+use algebra_core::parser::{ExprParser, parse_operation};
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::executor::{ExecutionContext, OperationExecutor};
 use algebra_engine::numbertheory::{
@@ -16,7 +16,7 @@ use algebra_engine::solver::SymbolicSolver;
 use num_bigint::{BigInt, BigUint};
 use serde::Deserialize;
 use std::collections::HashMap;
-use urae_cli::json_api::{process_json_request, UraeJsonResponse};
+use urae_cli::json_api::{UraeJsonResponse, process_json_request};
 
 #[derive(Deserialize)]
 struct AuditExactItem {
@@ -109,7 +109,11 @@ fn test_audit_oracles_from_json() {
 
     for item in &oracles.exact_arithmetic {
         let res = run_cli(&format!("eval {}", item.expr));
-        assert!(!res.is_error, "eval {} failed: {:?}", item.expr, res.error_msg);
+        assert!(
+            !res.is_error,
+            "eval {} failed: {:?}",
+            item.expr, res.error_msg
+        );
         assert_eq!(res.output_text.trim(), item.expected, "eval {}", item.expr);
     }
 
@@ -142,7 +146,11 @@ fn test_audit_oracles_from_json() {
 
     for det_item in &oracles.determinants {
         let res = run_cli(&format!("det {}", det_item.matrix));
-        assert!(!res.is_error, "det {} failed: {:?}", det_item.matrix, res.error_msg);
+        assert!(
+            !res.is_error,
+            "det {} failed: {:?}",
+            det_item.matrix, res.error_msg
+        );
         assert_eq!(res.output_text.trim(), det_item.expected);
     }
 
@@ -154,7 +162,13 @@ fn test_audit_oracles_from_json() {
         let sym = graph.symbols.get_or_intern(&lim.var);
         let ans = graph.limit(e, sym, p).unwrap();
         let val = graph.evalf(ans, &EvalContext::default()).unwrap().to_f64();
-        assert!((val - lim.expected).abs() < 1e-9, "lim {} = {}, expected {}", lim.expr, val, lim.expected);
+        assert!(
+            (val - lim.expected).abs() < 1e-9,
+            "lim {} = {}, expected {}",
+            lim.expr,
+            val,
+            lim.expected
+        );
     }
 
     for di in &oracles.definite_integrals {
@@ -164,7 +178,13 @@ fn test_audit_oracles_from_json() {
         let sym = graph.symbols.get_or_intern(&di.var);
         let ans = graph.integrate_definite(e, sym, l, u).unwrap();
         let val = graph.evalf(ans, &EvalContext::default()).unwrap().to_f64();
-        assert!((val - di.expected).abs() < 1e-9, "int {} = {}, expected {}", di.expr, val, di.expected);
+        assert!(
+            (val - di.expected).abs() < 1e-9,
+            "int {} = {}, expected {}",
+            di.expr,
+            val,
+            di.expected
+        );
     }
 }
 
@@ -184,7 +204,11 @@ fn test_audit_printer_parenthesization_and_missing_symbol() {
     let e2 = parser.parse("(x - 3)*(x - 2)").unwrap();
     let s2 = uni.format(&graph, e2).unwrap();
     assert!(!s2.contains("+ -"), "unexpected '+ -' in {}", s2);
-    assert!(s2.contains("(x - 3)") || s2.contains("(x − 3)"), "got {}", s2);
+    assert!(
+        s2.contains("(x - 3)") || s2.contains("(x − 3)"),
+        "got {}",
+        s2
+    );
 
     // 3. Nested power must parenthesize base: (x^a)^b
     let x = graph.symbol("x");
@@ -204,7 +228,11 @@ fn test_audit_printer_parenthesization_and_missing_symbol() {
     let e5 = parser.parse("(a + b)/(c - d)^2").unwrap();
     let s5_uni = uni.format(&graph, e5).unwrap();
     let s5_tex = tex.format(&graph, e5).unwrap();
-    assert!(!s5_uni.contains("+ -") && s5_uni.contains("(c"), "got {}", s5_uni);
+    assert!(
+        !s5_uni.contains("+ -") && s5_uni.contains("(c"),
+        "got {}",
+        s5_uni
+    );
     assert!(s5_tex.contains("\\frac"), "got {}", s5_tex);
 }
 
@@ -295,7 +323,11 @@ fn test_audit_solver_roots_and_edge_cases() {
     // sqrt(x) = -1 -> [] (no real solution)
     let eq2 = parser.parse("sqrt(x) + 1").unwrap();
     let r2 = graph.solveset(eq2, x_sym).unwrap();
-    assert!(r2.is_empty(), "sqrt(x) = -1 must have no solutions, got {:?}", r2);
+    assert!(
+        r2.is_empty(),
+        "sqrt(x) = -1 must have no solutions, got {:?}",
+        r2
+    );
 
     // 1/x = 0 -> []
     let eq3 = parser.parse("1/x").unwrap();
@@ -322,7 +354,11 @@ fn test_audit_solver_roots_and_edge_cases() {
     assert_eq!(r6.len(), 2);
     for &root in &r6 {
         let s = uni.format(&graph, root).unwrap();
-        assert!(s.contains('a') && s.contains('b') && s.contains('c'), "unexpected root: {}", s);
+        assert!(
+            s.contains('a') && s.contains('b') && s.contains('c'),
+            "unexpected root: {}",
+            s
+        );
     }
 
     // x^4 + x^3 + x^2 + x + 1 = 0 -> exact radical roots (no rational float approximations)
@@ -331,7 +367,11 @@ fn test_audit_solver_roots_and_edge_cases() {
     assert_eq!(r7.len(), 4);
     for &root in &r7 {
         let s = uni.format(&graph, root).unwrap();
-        assert!(!s.contains("416020"), "must use exact radicals, not convergent float ratio: {}", s);
+        assert!(
+            !s.contains("416020"),
+            "must use exact radicals, not convergent float ratio: {}",
+            s
+        );
     }
 }
 
@@ -358,7 +398,10 @@ fn test_audit_factor_expand_roundtrip_property() {
         b.insert("y".to_string(), -2.3);
         let ctx = EvalContext::with_bindings(12, b);
         let val = graph.evalf(diff_zero, &ctx).unwrap().to_f64();
-        assert!(val.abs() < 1e-8, "expand(factor({poly_s})) != {poly_s}: residual={val}");
+        assert!(
+            val.abs() < 1e-8,
+            "expand(factor({poly_s})) != {poly_s}: residual={val}"
+        );
     }
 }
 
@@ -401,8 +444,17 @@ fn test_audit_simplify_identities_limits_and_no_stubs() {
     // Commands that previously returned fake placeholders now compute real answers
     assert_eq!(run_cli("det [[1,2],[3,4]]").output_text.trim(), "-2");
     assert_eq!(run_cli("trace [[1,2],[3,4]]").output_text.trim(), "5");
-    assert!(!run_cli("sat A and not A").output_text.to_lowercase().contains("satisfiable (true)"));
-    assert!(run_cli("sat A and not A").output_text.contains("Unsatisfiable"));
+    assert!(
+        !run_cli("sat A and not A")
+            .output_text
+            .to_lowercase()
+            .contains("satisfiable (true)")
+    );
+    assert!(
+        run_cli("sat A and not A")
+            .output_text
+            .contains("Unsatisfiable")
+    );
     assert!(run_cli("galois S5").output_text.contains("false"));
     assert!(run_cli("galois A4").output_text.contains("true"));
     assert_eq!(run_cli("sum k^2, k, 1, 10").output_text.trim(), "385");
@@ -419,20 +471,43 @@ fn test_audit_parser_implicit_mul_factorial_mod_and_json_api() {
     // JSON API must route commands cleanly, not try to parse "det ..." as Expr
     let resp_raw = process_json_request(&graph, r#"{"input": "det [[1,2],[3,4]]"}"#);
     let resp_det: UraeJsonResponse = serde_json::from_str(&resp_raw).expect("parse json response");
-    assert!(resp_det.success, "json det failed: {:?}", resp_det.error_msg);
+    assert!(
+        resp_det.success,
+        "json det failed: {:?}",
+        resp_det.error_msg
+    );
     assert_eq!(resp_det.output_unicode.trim(), "-2");
 
     // JSON API implicit mul + modulo + factorial + 2-arg log + expression gcd
     assert!(run_cli("eval 2x + 3").is_error); // free symbol x
-    assert_eq!(run_cli("diff 2x^3, x").output_text, run_cli("diff 2*x^3, x").output_text);
-    assert_eq!(run_cli("expand (x+1)(x-1)").output_text, run_cli("expand (x+1)*(x-1)").output_text);
+    assert_eq!(
+        run_cli("diff 2x^3, x").output_text,
+        run_cli("diff 2*x^3, x").output_text
+    );
+    assert_eq!(
+        run_cli("expand (x+1)(x-1)").output_text,
+        run_cli("expand (x+1)*(x-1)").output_text
+    );
     assert_eq!(run_cli("eval 5!").output_text.trim(), "120");
     assert_eq!(run_cli("eval 10 % 3").output_text.trim(), "1");
     assert_eq!(run_cli("eval log(8, 2)").output_text.trim(), "3");
-    assert!(run_cli("gcd 2^67 - 1, 193707721").output_text.contains("gcd(147573952589676412927, 193707721) = 193707721"));
+    assert!(
+        run_cli("gcd 2^67 - 1, 193707721")
+            .output_text
+            .contains("gcd(147573952589676412927, 193707721) = 193707721")
+    );
     assert!(run_cli("is_prime 2^89 - 1").output_text.contains("= true"));
-    assert!(run_cli("prime_factors 2^67 - 1").output_text.contains("193707721 * 761838257287"));
-    assert!(run_cli("lim (1+1/x)^x, x, oo").output_text.trim().ends_with("= e"));
+    assert!(
+        run_cli("prime_factors 2^67 - 1")
+            .output_text
+            .contains("193707721 * 761838257287")
+    );
+    assert!(
+        run_cli("lim (1+1/x)^x, x, oo")
+            .output_text
+            .trim()
+            .ends_with("= e")
+    );
     assert!(!run_cli("matmul [[1,2],[3,4]], [[5,6],[7,8]]").is_error);
 }
 
@@ -535,7 +610,9 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
         let hi = parser.parse(hi_s).unwrap();
         let ans = graph
             .integrate_definite(e, x_sym, lo, hi)
-            .unwrap_or_else(|err| panic!("def int {} [{}, {}] failed: {:?}", expr_s, lo_s, hi_s, err));
+            .unwrap_or_else(|err| {
+                panic!("def int {} [{}, {}] failed: {:?}", expr_s, lo_s, hi_s, err)
+            });
         let val = graph.evalf(ans, &EvalContext::default()).unwrap().to_f64();
         assert!(
             (val - expected).abs() < 1e-7,
@@ -567,24 +644,44 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
     let zero = graph.integer(0);
     let laur = graph.laurent_series(sin_x, x_sym, zero, 0, 3).unwrap();
     let laur_s = uni.format(&graph, laur).unwrap();
-    assert!(!laur_s.contains("^0"), "laurent(sin(x)) leaked zero term: {}", laur_s);
+    assert!(
+        !laur_s.contains("^0"),
+        "laurent(sin(x)) leaked zero term: {}",
+        laur_s
+    );
     let sinc = parser.parse("sin(x)/x").unwrap();
     let tay = graph.taylor_series(sinc, x_sym, zero, 4);
     let tay_val = eval_at(&graph, tay, "x", 0.2);
     let tay_expected = 1.0 - 0.2_f64.powi(2) / 6.0 + 0.2_f64.powi(4) / 120.0;
-    assert!((tay_val - tay_expected).abs() < 1e-10, "taylor(sin(x)/x) = {}", tay_val);
+    assert!(
+        (tay_val - tay_expected).abs() < 1e-10,
+        "taylor(sin(x)/x) = {}",
+        tay_val
+    );
 
     let lim_rad = run_cli("lim (sqrt(x+1) - 1)/x, x, 0");
     assert!(!lim_rad.is_error, "{:?}", lim_rad.error_msg);
-    assert!(lim_rad.output_text.contains("1/2"), "got {}", lim_rad.output_text);
+    assert!(
+        lim_rad.output_text.contains("1/2"),
+        "got {}",
+        lim_rad.output_text
+    );
     let inv_x = parser.parse("1/x").unwrap();
-    let r_lim = LimitEngine::limit_directed(&graph, inv_x, x_sym, zero, LimitDirection::FromRight).unwrap();
-    let l_lim = LimitEngine::limit_directed(&graph, inv_x, x_sym, zero, LimitDirection::FromLeft).unwrap();
-    assert!(uni.format(&graph, r_lim).unwrap().contains("∞") || uni.format(&graph, r_lim).unwrap().contains("oo"));
+    let r_lim =
+        LimitEngine::limit_directed(&graph, inv_x, x_sym, zero, LimitDirection::FromRight).unwrap();
+    let l_lim =
+        LimitEngine::limit_directed(&graph, inv_x, x_sym, zero, LimitDirection::FromLeft).unwrap();
+    assert!(
+        uni.format(&graph, r_lim).unwrap().contains("∞")
+            || uni.format(&graph, r_lim).unwrap().contains("oo")
+    );
     assert!(uni.format(&graph, l_lim).unwrap().contains("-"));
 
     // 5. Symbolic sums (Faulhaber, geometric, p-series)
-    assert_eq!(run_cli("sum k^2, k, 1, 100000").output_text.trim(), "333338333350000");
+    assert_eq!(
+        run_cli("sum k^2, k, 1, 100000").output_text.trim(),
+        "333338333350000"
+    );
     let sum_k5_num = run_cli("sum k^5, k, 1, 5");
     assert_eq!(sum_k5_num.output_text.trim(), "4425");
     let sum_k5_sym = run_cli("sum k^5, k, 1, n");
@@ -593,7 +690,11 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
     assert_eq!(sum_geo.output_text.trim(), "2");
     let sum_basel = run_cli("sum 1/k^2, k, 1, oo");
     assert!(!sum_basel.is_error, "{:?}", sum_basel.error_msg);
-    assert!(sum_basel.output_text.contains("π") || sum_basel.output_text.contains("pi"), "got {}", sum_basel.output_text);
+    assert!(
+        sum_basel.output_text.contains("π") || sum_basel.output_text.contains("pi"),
+        "got {}",
+        sum_basel.output_text
+    );
 
     // 6. Solver: radical extraneous root filtering, log combination, difference of squares, assumptions
     let rad_eq = parser.parse("sqrt(x + 2) = x").unwrap();
@@ -620,23 +721,41 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
         .iter()
         .map(|&s| uni.format(&graph, s).unwrap())
         .collect();
-    assert!(diff_sq_strs.contains(&"y".to_string()), "got {:?}", diff_sq_strs);
-    assert!(diff_sq_strs.contains(&"-y".to_string()), "got {:?}", diff_sq_strs);
+    assert!(
+        diff_sq_strs.contains(&"y".to_string()),
+        "got {:?}",
+        diff_sq_strs
+    );
+    assert!(
+        diff_sq_strs.contains(&"-y".to_string()),
+        "got {:?}",
+        diff_sq_strs
+    );
 
     let mut ctx = ExecutionContext::new();
     ctx.assumptions.assume(x_sym, Predicate::Positive);
     let op_solve = parse_operation("solve x^2 - 4 = 0, x");
     let solve_pos = OperationExecutor::execute(&graph, &op_solve, &ctx);
-    assert!(solve_pos.output_text.contains("[2]"), "expected only [2], got {}", solve_pos.output_text);
+    assert!(
+        solve_pos.output_text.contains("[2]"),
+        "expected only [2], got {}",
+        solve_pos.output_text
+    );
 
     // 7. Transforms & Exact Trig Evaluation
     let s_sym = graph.symbols.get_or_intern("s");
     let t_sym = graph.symbols.get_or_intern("t");
     let w_sym = graph.symbols.get_or_intern("w");
     let ilap_in = parser.parse("1 / (s * (s + 1))").unwrap();
-    let ilap_out = graph.inverse_laplace_transform(ilap_in, s_sym, t_sym).unwrap();
+    let ilap_out = graph
+        .inverse_laplace_transform(ilap_in, s_sym, t_sym)
+        .unwrap();
     let ilap_val = eval_at(&graph, ilap_out, "t", 1.0);
-    assert!((ilap_val - (1.0 - (-1.0_f64).exp())).abs() < 1e-8, "inv_laplace = {}", ilap_val);
+    assert!(
+        (ilap_val - (1.0 - (-1.0_f64).exp())).abs() < 1e-8,
+        "inv_laplace = {}",
+        ilap_val
+    );
 
     let f_in = parser.parse("exp(-a*t)*heaviside(t)").unwrap();
     let f_out = graph.fourier_transform(f_in, t_sym, w_sym).unwrap();
@@ -647,7 +766,12 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
     let f_val = graph.evalf(f_out, &f_ctx).unwrap();
     match f_val {
         algebra_engine::numeric::BigValue::Complex(re, im) => {
-            assert!((re - 2.0 / 13.0).abs() < 1e-8 && (im + 3.0 / 13.0).abs() < 1e-8, "got ({}, {})", re, im);
+            assert!(
+                (re - 2.0 / 13.0).abs() < 1e-8 && (im + 3.0 / 13.0).abs() < 1e-8,
+                "got ({}, {})",
+                re,
+                im
+            );
         }
         other => panic!("expected complex 1/(2+3i), got {:?}", other),
     }
@@ -663,7 +787,11 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
     let resp_infer: UraeJsonResponse = serde_json::from_str(&raw_infer).unwrap();
     assert!(resp_infer.success);
     let d_tex = resp_infer.derivative_latex.unwrap_or_default();
-    assert!(d_tex.contains('t') && d_tex.contains('2') && d_tex.contains('3'), "got {}", d_tex);
+    assert!(
+        d_tex.contains('t') && d_tex.contains('2') && d_tex.contains('3'),
+        "got {}",
+        d_tex
+    );
 
     for src in ["(x - 3)*(x - 2)", "(a + b)/(c - d)^2"] {
         let e = parser.parse(src).unwrap();
@@ -680,7 +808,14 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
         let c = EvalContext::with_bindings(15, b);
         let v1 = graph.evalf(e, &c).unwrap().to_f64();
         let v2 = graph.evalf(reparsed, &c).unwrap().to_f64();
-        assert!((v1 - v2).abs() < 1e-10, "roundtrip mismatch {} -> {} ({} vs {})", src, formatted, v1, v2);
+        assert!(
+            (v1 - v2).abs() < 1e-10,
+            "roundtrip mismatch {} -> {} ({} vs {})",
+            src,
+            formatted,
+            v1,
+            v2
+        );
     }
 
     let poly = parser.parse("x^2 - 5*x + 6").unwrap();
@@ -689,34 +824,84 @@ fn test_audit_depth_overhaul_steps_1_to_4() {
     for &pt in &[-2.0, 0.5, 4.0] {
         let v1 = eval_at(&graph, poly, "x", pt);
         let v2 = eval_at(&graph, expanded, "x", pt);
-        assert!((v1 - v2).abs() < 1e-10, "expand(factor(p)) mismatch at {}", pt);
+        assert!(
+            (v1 - v2).abs() < 1e-10,
+            "expand(factor(p)) mismatch at {}",
+            pt
+        );
     }
 
     // 9. End-to-end depth parity: comma-args inside fn calls, trig/ln/Euler simplification,
     // exact integer eval for ln(e^5)/i^2, trig solve simplification, Proof/Compare, and ODE solving.
-    assert!(run_cli("diff log(x, 2), x").output_text.contains("ln(2)"), "got {}", run_cli("diff log(x, 2), x").output_text);
+    assert!(
+        run_cli("diff log(x, 2), x").output_text.contains("ln(2)"),
+        "got {}",
+        run_cli("diff log(x, 2), x").output_text
+    );
     assert_eq!(run_cli("simplify sin(pi/6)").output_text.trim(), "1/2");
     assert_eq!(run_cli("simplify exp(i*pi)").output_text.trim(), "-1");
     assert_eq!(run_cli("eval ln(e^5)").output_text.trim(), "5");
     assert_eq!(run_cli("eval i^2").output_text.trim(), "-1");
-    assert!(run_cli("integrate sin(x), x, 0, pi").output_text.starts_with("2 "), "got {}", run_cli("integrate sin(x), x, 0, pi").output_text);
-    assert!(run_cli("integrate 1/x, x, 1, e").output_text.starts_with("1 "), "got {}", run_cli("integrate 1/x, x, 1, e").output_text);
+    assert!(
+        run_cli("integrate sin(x), x, 0, pi")
+            .output_text
+            .starts_with("2 "),
+        "got {}",
+        run_cli("integrate sin(x), x, 0, pi").output_text
+    );
+    assert!(
+        run_cli("integrate 1/x, x, 1, e")
+            .output_text
+            .starts_with("1 "),
+        "got {}",
+        run_cli("integrate 1/x, x, 1, e").output_text
+    );
 
     let solve_sin = run_cli("solve sin(x) = 0, x");
-    assert!(!solve_sin.output_text.contains("asin("), "unsimplified solve sin(x)=0: {}", solve_sin.output_text);
+    assert!(
+        !solve_sin.output_text.contains("asin("),
+        "unsimplified solve sin(x)=0: {}",
+        solve_sin.output_text
+    );
     let solve_cos = run_cli("solve cos(x) = 1/2, x");
-    assert!(solve_cos.output_text.contains("π / 3") || solve_cos.output_text.contains("pi / 3"), "got {}", solve_cos.output_text);
+    assert!(
+        solve_cos.output_text.contains("π / 3") || solve_cos.output_text.contains("pi / 3"),
+        "got {}",
+        solve_cos.output_text
+    );
 
     let prove_ok = run_cli("prove sin(x)^2 + cos(x)^2 = 1");
-    assert!(!prove_ok.is_error && prove_ok.output_text.contains("Verified"), "got {}", prove_ok.output_text);
+    assert!(
+        !prove_ok.is_error && prove_ok.output_text.contains("Verified"),
+        "got {}",
+        prove_ok.output_text
+    );
     let prove_false = run_cli("prove sin(x) = 0");
-    assert!(prove_false.is_error, "false identity must error, got: {}", prove_false.output_text);
+    assert!(
+        prove_false.is_error,
+        "false identity must error, got: {}",
+        prove_false.output_text
+    );
 
     let cmp_eq = run_cli("compare (x + 1)^2, x^2 + 2*x + 1");
-    assert!(!cmp_eq.is_error && cmp_eq.output_text.starts_with("Equal:"), "got {}", cmp_eq.output_text);
+    assert!(
+        !cmp_eq.is_error && cmp_eq.output_text.starts_with("Equal:"),
+        "got {}",
+        cmp_eq.output_text
+    );
 
     let ode1 = run_cli("solve_ode y' + y = 0, y, x");
-    assert!(!ode1.is_error && ode1.output_text.contains("exp(-x)") && ode1.output_text.contains("C1"), "got {}", ode1.output_text);
+    assert!(
+        !ode1.is_error && ode1.output_text.contains("exp(-x)") && ode1.output_text.contains("C1"),
+        "got {}",
+        ode1.output_text
+    );
     let ode2 = run_cli("solve_ode y'' + y = 0, y, x");
-    assert!(!ode2.is_error && ode2.output_text.contains("cos(x)") && ode2.output_text.contains("sin(x)"), "got {}", ode2.output_text);
+    assert!(
+        !ode2.is_error
+            && ode2.output_text.contains("cos(x)")
+            && ode2.output_text.contains("sin(x)"),
+        "got {}",
+        ode2.output_text
+    );
 }

@@ -336,22 +336,52 @@ impl<'g> Sym<'g> {
         self.as_expr().pow(exp)
     }
 
-    pub fn sin(&self) -> Expr<'g> { self.as_expr().sin() }
-    pub fn cos(&self) -> Expr<'g> { self.as_expr().cos() }
-    pub fn tan(&self) -> Expr<'g> { self.as_expr().tan() }
-    pub fn asin(&self) -> Expr<'g> { self.as_expr().asin() }
-    pub fn acos(&self) -> Expr<'g> { self.as_expr().acos() }
-    pub fn atan(&self) -> Expr<'g> { self.as_expr().atan() }
-    pub fn sinh(&self) -> Expr<'g> { self.as_expr().sinh() }
-    pub fn cosh(&self) -> Expr<'g> { self.as_expr().cosh() }
-    pub fn tanh(&self) -> Expr<'g> { self.as_expr().tanh() }
-    pub fn exp(&self) -> Expr<'g> { self.as_expr().exp() }
-    pub fn ln(&self) -> Expr<'g> { self.as_expr().ln() }
-    pub fn sqrt(&self) -> Expr<'g> { self.as_expr().sqrt() }
-    pub fn abs(&self) -> Expr<'g> { self.as_expr().abs() }
+    pub fn sin(&self) -> Expr<'g> {
+        self.as_expr().sin()
+    }
+    pub fn cos(&self) -> Expr<'g> {
+        self.as_expr().cos()
+    }
+    pub fn tan(&self) -> Expr<'g> {
+        self.as_expr().tan()
+    }
+    pub fn asin(&self) -> Expr<'g> {
+        self.as_expr().asin()
+    }
+    pub fn acos(&self) -> Expr<'g> {
+        self.as_expr().acos()
+    }
+    pub fn atan(&self) -> Expr<'g> {
+        self.as_expr().atan()
+    }
+    pub fn sinh(&self) -> Expr<'g> {
+        self.as_expr().sinh()
+    }
+    pub fn cosh(&self) -> Expr<'g> {
+        self.as_expr().cosh()
+    }
+    pub fn tanh(&self) -> Expr<'g> {
+        self.as_expr().tanh()
+    }
+    pub fn exp(&self) -> Expr<'g> {
+        self.as_expr().exp()
+    }
+    pub fn ln(&self) -> Expr<'g> {
+        self.as_expr().ln()
+    }
+    pub fn sqrt(&self) -> Expr<'g> {
+        self.as_expr().sqrt()
+    }
+    pub fn abs(&self) -> Expr<'g> {
+        self.as_expr().abs()
+    }
 
-    pub fn diff(&self, wrt: &Sym<'g>) -> Expr<'g> { self.as_expr().diff(wrt) }
-    pub fn integrate(&self, wrt: &Sym<'g>) -> AlgebraResult<Expr<'g>> { self.as_expr().integrate(wrt) }
+    pub fn diff(&self, wrt: &Sym<'g>) -> Expr<'g> {
+        self.as_expr().diff(wrt)
+    }
+    pub fn integrate(&self, wrt: &Sym<'g>) -> AlgebraResult<Expr<'g>> {
+        self.as_expr().integrate(wrt)
+    }
     pub fn integrate_definite<L: IntoExpr<'g>, U: IntoExpr<'g>>(
         &self,
         wrt: &Sym<'g>,
@@ -366,7 +396,9 @@ impl<'g> Sym<'g> {
     pub fn series<P: IntoExpr<'g>>(&self, wrt: &Sym<'g>, point: P, order: u32) -> Expr<'g> {
         self.as_expr().series(wrt, point, order)
     }
-    pub fn solve(&self, wrt: &Sym<'g>) -> AlgebraResult<Vec<Expr<'g>>> { self.as_expr().solve(wrt) }
+    pub fn solve(&self, wrt: &Sym<'g>) -> AlgebraResult<Vec<Expr<'g>>> {
+        self.as_expr().solve(wrt)
+    }
     pub fn subs<V: IntoExpr<'g>>(&self, target: &Sym<'g>, val: V) -> Expr<'g> {
         self.as_expr().subs(target, val)
     }
@@ -448,21 +480,51 @@ impl<'g> Expr<'g> {
         }
     }
 
-    pub fn sin(&self) -> Self { self.func("sin") }
-    pub fn cos(&self) -> Self { self.func("cos") }
-    pub fn tan(&self) -> Self { self.func("tan") }
-    pub fn asin(&self) -> Self { self.func("asin") }
-    pub fn acos(&self) -> Self { self.func("acos") }
-    pub fn atan(&self) -> Self { self.func("atan") }
-    pub fn sinh(&self) -> Self { self.func("sinh") }
-    pub fn cosh(&self) -> Self { self.func("cosh") }
-    pub fn tanh(&self) -> Self { self.func("tanh") }
-    pub fn exp(&self) -> Self { self.func("exp") }
-    pub fn ln(&self) -> Self { self.func("ln") }
-    pub fn sqrt(&self) -> Self { self.func("sqrt") }
-    pub fn abs(&self) -> Self { self.func("abs") }
-    pub fn gamma(&self) -> Self { self.func("gamma") }
-    pub fn erf(&self) -> Self { self.func("erf") }
+    pub fn sin(&self) -> Self {
+        self.func("sin")
+    }
+    pub fn cos(&self) -> Self {
+        self.func("cos")
+    }
+    pub fn tan(&self) -> Self {
+        self.func("tan")
+    }
+    pub fn asin(&self) -> Self {
+        self.func("asin")
+    }
+    pub fn acos(&self) -> Self {
+        self.func("acos")
+    }
+    pub fn atan(&self) -> Self {
+        self.func("atan")
+    }
+    pub fn sinh(&self) -> Self {
+        self.func("sinh")
+    }
+    pub fn cosh(&self) -> Self {
+        self.func("cosh")
+    }
+    pub fn tanh(&self) -> Self {
+        self.func("tanh")
+    }
+    pub fn exp(&self) -> Self {
+        self.func("exp")
+    }
+    pub fn ln(&self) -> Self {
+        self.func("ln")
+    }
+    pub fn sqrt(&self) -> Self {
+        self.func("sqrt")
+    }
+    pub fn abs(&self) -> Self {
+        self.func("abs")
+    }
+    pub fn gamma(&self) -> Self {
+        self.func("gamma")
+    }
+    pub fn erf(&self) -> Self {
+        self.func("erf")
+    }
 
     /// Exponentiation `self^exp`.
     pub fn pow<R: IntoExpr<'g>>(&self, exp: R) -> Self {
@@ -524,7 +586,9 @@ impl<'g> Expr<'g> {
     ) -> AlgebraResult<Self> {
         let l = lower.into_expr(self.graph);
         let u = upper.into_expr(self.graph);
-        let raw = self.graph.integrate_definite(self.id, wrt.sym_id, l.id, u.id)?;
+        let raw = self
+            .graph
+            .integrate_definite(self.id, wrt.sym_id, l.id, u.id)?;
         let simp = Simplifier::simplify(self.graph, raw).unwrap_or(raw);
         Ok(Self {
             graph: self.graph,
@@ -582,8 +646,8 @@ impl<'g> Expr<'g> {
 
     /// Simplification under explicit logical/domain assumptions (`x > 0`, etc.).
     pub fn simplify_with(&self, assumptions: &AssumptionsContext) -> Self {
-        let simp =
-            Simplifier::simplify_with_assumptions(self.graph, self.id, assumptions).unwrap_or(self.id);
+        let simp = Simplifier::simplify_with_assumptions(self.graph, self.id, assumptions)
+            .unwrap_or(self.id);
         Self {
             graph: self.graph,
             id: simp,
@@ -720,7 +784,10 @@ impl<'g> Expr<'g> {
     }
 
     /// Attempt exact arbitrary-precision rational evaluation.
-    pub fn eval_exact(&self, bindings: &HashMap<String, f64>) -> AlgebraResult<Option<BigRational>> {
+    pub fn eval_exact(
+        &self,
+        bindings: &HashMap<String, f64>,
+    ) -> AlgebraResult<Option<BigRational>> {
         try_eval_exact(self.graph, self.id, bindings)
     }
 
@@ -776,7 +843,10 @@ impl<'g> Expr<'g> {
                 );
             }
             let ctx = EvalContext::with_bindings(15, bindings);
-            if let (Ok(lv), Ok(rv)) = (self.graph.evalf(self.id, &ctx), self.graph.evalf(other.id, &ctx)) {
+            if let (Ok(lv), Ok(rv)) = (
+                self.graph.evalf(self.id, &ctx),
+                self.graph.evalf(other.id, &ctx),
+            ) {
                 let (lr, li) = lv.as_complex();
                 let (rr, ri) = rv.as_complex();
                 if (lr - rr).hypot(li - ri) > 1e-6 {
@@ -790,41 +860,63 @@ impl<'g> Expr<'g> {
 
     /// Render expression in LaTeX notation.
     pub fn to_latex(&self) -> String {
-        LatexFormatter.format(self.graph, self.id).unwrap_or_default()
+        LatexFormatter
+            .format(self.graph, self.id)
+            .unwrap_or_default()
     }
 
     /// Render expression in 2D Unicode notation.
     pub fn to_unicode(&self) -> String {
-        UnicodeFormatter.format(self.graph, self.id).unwrap_or_default()
+        UnicodeFormatter
+            .format(self.graph, self.id)
+            .unwrap_or_default()
     }
 }
 
 impl<'g> IntoExpr<'g> for Expr<'g> {
-    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> { self }
+    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> {
+        self
+    }
 }
 impl<'g> IntoExpr<'g> for &Expr<'g> {
-    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> { *self }
+    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> {
+        *self
+    }
 }
 impl<'g> IntoExpr<'g> for Sym<'g> {
-    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> { self.as_expr() }
+    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> {
+        self.as_expr()
+    }
 }
 impl<'g> IntoExpr<'g> for &Sym<'g> {
-    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> { self.as_expr() }
+    fn into_expr(self, _graph: &'g ExprGraph) -> Expr<'g> {
+        self.as_expr()
+    }
 }
 impl<'g> IntoExpr<'g> for i64 {
-    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> { Expr::int(graph, self) }
+    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> {
+        Expr::int(graph, self)
+    }
 }
 impl<'g> IntoExpr<'g> for i32 {
-    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> { Expr::int(graph, self as i64) }
+    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> {
+        Expr::int(graph, self as i64)
+    }
 }
 impl<'g> IntoExpr<'g> for f64 {
-    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> { Expr::real(graph, self) }
+    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> {
+        Expr::real(graph, self)
+    }
 }
 impl<'g> IntoExpr<'g> for (i64, i64) {
-    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> { Expr::rational(graph, self.0, self.1) }
+    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> {
+        Expr::rational(graph, self.0, self.1)
+    }
 }
 impl<'g> IntoExpr<'g> for ConstRational {
-    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> { self.intern(graph) }
+    fn into_expr(self, graph: &'g ExprGraph) -> Expr<'g> {
+        self.intern(graph)
+    }
 }
 
 impl fmt::Debug for Sym<'_> {
@@ -928,10 +1020,22 @@ macro_rules! impl_scalar_lhs_op {
     };
 }
 
-#[inline] fn g_add(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId { g.add([a, b]) }
-#[inline] fn g_sub(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId { g.sub(a, b) }
-#[inline] fn g_mul(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId { g.mul([a, b]) }
-#[inline] fn g_div(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId { g.div(a, b) }
+#[inline]
+fn g_add(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId {
+    g.add([a, b])
+}
+#[inline]
+fn g_sub(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId {
+    g.sub(a, b)
+}
+#[inline]
+fn g_mul(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId {
+    g.mul([a, b])
+}
+#[inline]
+fn g_div(g: &ExprGraph, a: ExprId, b: ExprId) -> ExprId {
+    g.div(a, b)
+}
 
 macro_rules! impl_all_ops_for_op {
     ($trait:ident, $method:ident, $graph_fn:ident) => {
@@ -964,15 +1068,21 @@ impl<'g> Neg for Expr<'g> {
 }
 impl<'g> Neg for &Expr<'g> {
     type Output = Expr<'g>;
-    fn neg(self) -> Expr<'g> { -(*self) }
+    fn neg(self) -> Expr<'g> {
+        -(*self)
+    }
 }
 impl<'g> Neg for Sym<'g> {
     type Output = Expr<'g>;
-    fn neg(self) -> Expr<'g> { -(self.as_expr()) }
+    fn neg(self) -> Expr<'g> {
+        -(self.as_expr())
+    }
 }
 impl<'g> Neg for &Sym<'g> {
     type Output = Expr<'g>;
-    fn neg(self) -> Expr<'g> { -(self.as_expr()) }
+    fn neg(self) -> Expr<'g> {
+        -(self.as_expr())
+    }
 }
 
 /// Shorthand constructor for a single symbolic variable.
@@ -1107,9 +1217,15 @@ impl<'g> SymMat<'g> {
         })
     }
 
-    pub fn rows(&self) -> usize { self.inner.rows }
-    pub fn cols(&self) -> usize { self.inner.cols }
-    pub fn shape(&self) -> (usize, usize) { (self.inner.rows, self.inner.cols) }
+    pub fn rows(&self) -> usize {
+        self.inner.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.inner.cols
+    }
+    pub fn shape(&self) -> (usize, usize) {
+        (self.inner.rows, self.inner.cols)
+    }
 
     /// Immutable entry access returning [`Expr<'g>`].
     pub fn get(&self, r: usize, c: usize) -> AlgebraResult<Expr<'g>> {
@@ -1125,7 +1241,9 @@ impl<'g> SymMat<'g> {
     /// Extract row slice `r`.
     pub fn row(&self, r: usize) -> AlgebraResult<Vec<Expr<'g>>> {
         if r >= self.inner.rows {
-            return Err(AlgebraError::DimensionMismatch(format!("Row {r} out of bounds")));
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Row {r} out of bounds"
+            )));
         }
         Ok((0..self.inner.cols)
             .map(|c| Expr::from_id(self.graph, self.inner.get(r, c)))
@@ -1135,7 +1253,9 @@ impl<'g> SymMat<'g> {
     /// Extract column slice `c`.
     pub fn col(&self, c: usize) -> AlgebraResult<Vec<Expr<'g>>> {
         if c >= self.inner.cols {
-            return Err(AlgebraError::DimensionMismatch(format!("Column {c} out of bounds")));
+            return Err(AlgebraError::DimensionMismatch(format!(
+                "Column {c} out of bounds"
+            )));
         }
         Ok((0..self.inner.rows)
             .map(|r| Expr::from_id(self.graph, self.inner.get(r, c)))
@@ -1159,7 +1279,9 @@ impl<'g> SymMat<'g> {
     /// Mutable in-place row swap (`&mut self`).
     pub fn swap_rows(&mut self, r1: usize, r2: usize) -> AlgebraResult<()> {
         if r1 >= self.inner.rows || r2 >= self.inner.rows {
-            return Err(AlgebraError::DimensionMismatch("Row swap index out of bounds".into()));
+            return Err(AlgebraError::DimensionMismatch(
+                "Row swap index out of bounds".into(),
+            ));
         }
         if r1 != r2 {
             let cols = self.inner.cols;
@@ -1173,7 +1295,9 @@ impl<'g> SymMat<'g> {
     /// Mutable in-place row scaling $R_r \leftarrow k \cdot R_r$ (`&mut self`).
     pub fn scale_row<K: IntoExpr<'g>>(&mut self, r: usize, factor: K) -> AlgebraResult<()> {
         if r >= self.inner.rows {
-            return Err(AlgebraError::DimensionMismatch("Row index out of bounds".into()));
+            return Err(AlgebraError::DimensionMismatch(
+                "Row index out of bounds".into(),
+            ));
         }
         let k = factor.into_expr(self.graph);
         let cols = self.inner.cols;
@@ -1194,7 +1318,9 @@ impl<'g> SymMat<'g> {
         factor: K,
     ) -> AlgebraResult<()> {
         if dst >= self.inner.rows || src >= self.inner.rows {
-            return Err(AlgebraError::DimensionMismatch("Row index out of bounds".into()));
+            return Err(AlgebraError::DimensionMismatch(
+                "Row index out of bounds".into(),
+            ));
         }
         let k = factor.into_expr(self.graph);
         let cols = self.inner.cols;
@@ -1239,7 +1365,10 @@ impl<'g> SymMat<'g> {
     }
 
     pub fn transpose(&self) -> AlgebraResult<Self> {
-        Ok(Self::from_inner(self.graph, self.inner.transpose(self.graph)?))
+        Ok(Self::from_inner(
+            self.graph,
+            self.inner.transpose(self.graph)?,
+        ))
     }
 
     pub fn det(&self) -> AlgebraResult<Expr<'g>> {
@@ -1277,7 +1406,11 @@ impl<'g> SymMat<'g> {
         let basis = self.inner.nullspace(self.graph)?;
         Ok(basis
             .into_iter()
-            .map(|col| col.into_iter().map(|id| Expr::from_id(self.graph, id)).collect())
+            .map(|col| {
+                col.into_iter()
+                    .map(|id| Expr::from_id(self.graph, id))
+                    .collect()
+            })
             .collect())
     }
 
@@ -1329,7 +1462,13 @@ impl<'g> SymMat<'g> {
 
 impl fmt::Debug for SymMat<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SymMat({}x{}: {})", self.rows(), self.cols(), self.to_unicode())
+        write!(
+            f,
+            "SymMat({}x{}: {})",
+            self.rows(),
+            self.cols(),
+            self.to_unicode()
+        )
     }
 }
 impl fmt::Display for SymMat<'_> {
@@ -1341,19 +1480,22 @@ impl fmt::Display for SymMat<'_> {
 impl<'g> Add<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
     fn add(self, rhs: &SymMat<'g>) -> SymMat<'g> {
-        self.try_add(rhs).unwrap_or_else(|e| panic!("SymMat add failed: {e}"))
+        self.try_add(rhs)
+            .unwrap_or_else(|e| panic!("SymMat add failed: {e}"))
     }
 }
 impl<'g> Sub<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
     fn sub(self, rhs: &SymMat<'g>) -> SymMat<'g> {
-        self.try_sub(rhs).unwrap_or_else(|e| panic!("SymMat sub failed: {e}"))
+        self.try_sub(rhs)
+            .unwrap_or_else(|e| panic!("SymMat sub failed: {e}"))
     }
 }
 impl<'g> Mul<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
     fn mul(self, rhs: &SymMat<'g>) -> SymMat<'g> {
-        self.try_mul(rhs).unwrap_or_else(|e| panic!("SymMat mul failed: {e}"))
+        self.try_mul(rhs)
+            .unwrap_or_else(|e| panic!("SymMat mul failed: {e}"))
     }
 }
 
@@ -1424,7 +1566,9 @@ impl NumMat {
     /// Generate samples `[start, start + step, ...)` strictly below `stop`.
     pub fn arange(start: f64, stop: f64, step: f64) -> AlgebraResult<Self> {
         if step == 0.0 || !step.is_finite() {
-            return Err(AlgebraError::EvaluationError("arange step must be finite and non-zero".into()));
+            return Err(AlgebraError::EvaluationError(
+                "arange step must be finite and non-zero".into(),
+            ));
         }
         let mut data = Vec::new();
         let mut cur = start;
@@ -1441,16 +1585,28 @@ impl NumMat {
         })
     }
 
-    pub fn rows(&self) -> usize { self.buf.rows }
-    pub fn cols(&self) -> usize { self.buf.cols }
-    pub fn as_slice(&self) -> &[f64] { &self.buf.data }
-    pub fn as_mut_slice(&mut self) -> &mut [f64] { &mut self.buf.data }
+    pub fn rows(&self) -> usize {
+        self.buf.rows
+    }
+    pub fn cols(&self) -> usize {
+        self.buf.cols
+    }
+    pub fn as_slice(&self) -> &[f64] {
+        &self.buf.data
+    }
+    pub fn as_mut_slice(&mut self) -> &mut [f64] {
+        &mut self.buf.data
+    }
     pub fn rref(&self, tol: f64) -> (Self, Vec<usize>) {
         let (r, p) = self.buf.rref(tol);
         (Self { buf: r }, p)
     }
-    pub fn rank(&self, tol: f64) -> usize { self.buf.rank(tol) }
-    pub fn nullspace(&self, tol: f64) -> Vec<Vec<f64>> { self.buf.nullspace(tol) }
+    pub fn rank(&self, tol: f64) -> usize {
+        self.buf.rank(tol)
+    }
+    pub fn nullspace(&self, tol: f64) -> Vec<Vec<f64>> {
+        self.buf.nullspace(tol)
+    }
     pub fn norm_fro(&self) -> f64 {
         self.buf.data.iter().map(|&v| v * v).sum::<f64>().sqrt()
     }

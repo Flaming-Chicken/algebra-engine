@@ -190,15 +190,9 @@ impl NumericalEval for ExprGraph {
                         "tau" | "τ" => Ok(BigValue::Real(2.0 * consts::PI)),
                         "e" | "E" => Ok(BigValue::Real(consts::E)),
                         "i" | "I" => Ok(BigValue::Complex(0.0, 1.0)),
-                        "phi" | "φ" | "GoldenRatio" => {
-                            Ok(BigValue::Real(1.618033988749895))
-                        }
-                        "gamma" | "EulerGamma" => {
-                            Ok(BigValue::Real(0.5772156649015329))
-                        }
-                        "oo" | "inf" | "infinity" | "Infinity" => {
-                            Ok(BigValue::Real(f64::INFINITY))
-                        }
+                        "phi" | "φ" | "GoldenRatio" => Ok(BigValue::Real(1.618033988749895)),
+                        "gamma" | "EulerGamma" => Ok(BigValue::Real(0.5772156649015329)),
+                        "oo" | "inf" | "infinity" | "Infinity" => Ok(BigValue::Real(f64::INFINITY)),
                         _ => Err(AlgebraError::EvaluationError(format!(
                             "Cannot evaluate free symbol '{}' numerically",
                             name
@@ -742,17 +736,13 @@ pub fn try_eval_exact(
                 }
                 Some(acc)
             }
-            ExprKind::Sub(a, b) => {
-                Some(pi_multiple_rational(g, *a, bindings)? - pi_multiple_rational(g, *b, bindings)?)
-            }
+            ExprKind::Sub(a, b) => Some(
+                pi_multiple_rational(g, *a, bindings)? - pi_multiple_rational(g, *b, bindings)?,
+            ),
             ExprKind::Div(a, b) => {
                 let pa = pi_multiple_rational(g, *a, bindings)?;
                 let rb = eval_node(g, *b, bindings).ok()??;
-                if rb.is_zero() {
-                    None
-                } else {
-                    Some(pa / rb)
-                }
+                if rb.is_zero() { None } else { Some(pa / rb) }
             }
             ExprKind::Mul(factors) => {
                 let mut pi_count = 0usize;
@@ -767,11 +757,7 @@ pub fn try_eval_exact(
                         return None;
                     }
                 }
-                if pi_count == 1 {
-                    Some(coeff)
-                } else {
-                    None
-                }
+                if pi_count == 1 { Some(coeff) } else { None }
             }
             _ => None,
         }
@@ -826,7 +812,10 @@ pub fn try_eval_exact(
                             domain: "Rationals".into(),
                         })
                     } else {
-                        Ok(Some(BigRational::new(BigInt::from(*num), BigInt::from(*den))))
+                        Ok(Some(BigRational::new(
+                            BigInt::from(*num),
+                            BigInt::from(*den),
+                        )))
                     }
                 }
                 Number::BigRational(r) => Ok(Some((**r).clone())),
@@ -854,7 +843,8 @@ pub fn try_eval_exact(
                 }
                 Ok(Some(sum))
             }
-            ExprKind::Sub(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?) {
+            ExprKind::Sub(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?)
+            {
                 (Some(ra), Some(rb)) => Ok(Some(ra - rb)),
                 _ => Ok(None),
             },
@@ -868,7 +858,8 @@ pub fn try_eval_exact(
                 }
                 Ok(Some(prod))
             }
-            ExprKind::Div(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?) {
+            ExprKind::Div(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?)
+            {
                 (Some(ra), Some(rb)) => {
                     if rb.is_zero() {
                         Err(AlgebraError::DivisionByZero {
@@ -900,67 +891,75 @@ pub fn try_eval_exact(
                     }
                 }
                 match (eval_node(g, *b, bindings)?, eval_node(g, *e, bindings)?) {
-                (Some(rb), Some(re)) => {
-                    if re.is_integer() {
-                        let Some(exp_i64) = re.numer().to_i64() else {
-                            return Ok(None);
-                        };
-                        if exp_i64 < 0 && rb.is_zero() {
-                            return Err(AlgebraError::DivisionByZero {
-                                domain: "Rationals".into(),
-                            });
-                        }
-                        if exp_i64 == 0 {
-                            return Ok(Some(BigRational::from_integer(BigInt::from(1u8))));
-                        }
-                        let abs_exp = exp_i64.unsigned_abs();
-                        if abs_exp > 100_000 {
-                            return Ok(None);
-                        }
-                        let base_bits = rb.numer().bits().max(rb.denom().bits()).max(1);
-                        if base_bits.saturating_mul(abs_exp) > 2_000_000 {
-                            return Ok(None);
-                        }
-                        let Ok(exp_u32) = u32::try_from(abs_exp) else {
-                            return Ok(None);
-                        };
-                        let res = if exp_i64 > 0 {
-                            BigRational::new(rb.numer().pow(exp_u32), rb.denom().pow(exp_u32))
+                    (Some(rb), Some(re)) => {
+                        if re.is_integer() {
+                            let Some(exp_i64) = re.numer().to_i64() else {
+                                return Ok(None);
+                            };
+                            if exp_i64 < 0 && rb.is_zero() {
+                                return Err(AlgebraError::DivisionByZero {
+                                    domain: "Rationals".into(),
+                                });
+                            }
+                            if exp_i64 == 0 {
+                                return Ok(Some(BigRational::from_integer(BigInt::from(1u8))));
+                            }
+                            let abs_exp = exp_i64.unsigned_abs();
+                            if abs_exp > 100_000 {
+                                return Ok(None);
+                            }
+                            let base_bits = rb.numer().bits().max(rb.denom().bits()).max(1);
+                            if base_bits.saturating_mul(abs_exp) > 2_000_000 {
+                                return Ok(None);
+                            }
+                            let Ok(exp_u32) = u32::try_from(abs_exp) else {
+                                return Ok(None);
+                            };
+                            let res = if exp_i64 > 0 {
+                                BigRational::new(rb.numer().pow(exp_u32), rb.denom().pow(exp_u32))
+                            } else {
+                                BigRational::new(rb.denom().pow(exp_u32), rb.numer().pow(exp_u32))
+                            };
+                            Ok(Some(res))
+                        } else if *re.denom() == BigInt::from(2u8)
+                            && !rb.is_negative()
+                            && let (Some(nu), Some(du)) =
+                                (rb.numer().to_biguint(), rb.denom().to_biguint())
+                            && let (Some(sn), Some(sd)) =
+                                (perfect_square_biguint(&nu), perfect_square_biguint(&du))
+                        {
+                            let sqrt_q = BigRational::new(BigInt::from(sn), BigInt::from(sd));
+                            let Some(exp_i64) = re.numer().to_i64() else {
+                                return Ok(None);
+                            };
+                            if exp_i64 < 0 && sqrt_q.is_zero() {
+                                return Err(AlgebraError::DivisionByZero {
+                                    domain: "Rationals".into(),
+                                });
+                            }
+                            let Ok(exp_u32) = u32::try_from(exp_i64.unsigned_abs()) else {
+                                return Ok(None);
+                            };
+                            if exp_u32 > 10_000 {
+                                return Ok(None);
+                            }
+                            let res = if exp_i64 >= 0 {
+                                BigRational::new(
+                                    sqrt_q.numer().pow(exp_u32),
+                                    sqrt_q.denom().pow(exp_u32),
+                                )
+                            } else {
+                                BigRational::new(
+                                    sqrt_q.denom().pow(exp_u32),
+                                    sqrt_q.numer().pow(exp_u32),
+                                )
+                            };
+                            Ok(Some(res))
                         } else {
-                            BigRational::new(rb.denom().pow(exp_u32), rb.numer().pow(exp_u32))
-                        };
-                        Ok(Some(res))
-                    } else if *re.denom() == BigInt::from(2u8)
-                        && !rb.is_negative()
-                        && let (Some(nu), Some(du)) = (rb.numer().to_biguint(), rb.denom().to_biguint())
-                        && let (Some(sn), Some(sd)) = (perfect_square_biguint(&nu), perfect_square_biguint(&du))
-                    {
-                        let sqrt_q = BigRational::new(BigInt::from(sn), BigInt::from(sd));
-                        let Some(exp_i64) = re.numer().to_i64() else {
-                            return Ok(None);
-                        };
-                        if exp_i64 < 0 && sqrt_q.is_zero() {
-                            return Err(AlgebraError::DivisionByZero {
-                                domain: "Rationals".into(),
-                            });
+                            Ok(None)
                         }
-                        let Ok(exp_u32) = u32::try_from(exp_i64.unsigned_abs()) else {
-                            return Ok(None);
-                        };
-                        if exp_u32 > 10_000 {
-                            return Ok(None);
-                        }
-                        let res = if exp_i64 >= 0 {
-                            BigRational::new(sqrt_q.numer().pow(exp_u32), sqrt_q.denom().pow(exp_u32))
-                        } else {
-                            BigRational::new(sqrt_q.denom().pow(exp_u32), sqrt_q.numer().pow(exp_u32))
-                        };
-                        Ok(Some(res))
-                    } else {
-                        Ok(None)
                     }
-                }
-                _ => Ok(None),
+                    _ => Ok(None),
                 }
             }
             ExprKind::Function { name, args } => {
@@ -991,7 +990,10 @@ pub fn try_eval_exact(
                         {
                             return Ok(Some(q_exp));
                         }
-                        if let ExprKind::Function { name: inner_n, args: inner_a } = g.get(args[0]).kind
+                        if let ExprKind::Function {
+                            name: inner_n,
+                            args: inner_a,
+                        } = g.get(args[0]).kind
                             && g.symbols.resolve(inner_n).as_deref() == Some("exp")
                             && inner_a.len() == 1
                             && let Some(q_exp) = eval_node(g, inner_a[0], bindings)?
@@ -1038,7 +1040,9 @@ pub fn try_eval_exact(
                             Ok(Some(BigRational::from_integer(BigInt::from(1u8))))
                         }
                         "ln" | "log" => {
-                            if *arg.numer() == BigInt::from(1u8) && *arg.denom() == BigInt::from(1u8) {
+                            if *arg.numer() == BigInt::from(1u8)
+                                && *arg.denom() == BigInt::from(1u8)
+                            {
                                 Ok(Some(BigRational::zero()))
                             } else {
                                 Ok(None)
@@ -1098,7 +1102,11 @@ pub fn try_eval_exact(
                             // Check if a = b^k or a = b^(-k) for small integer k
                             let inv = a < BigRational::one();
                             let target = if inv { a.recip() } else { a.clone() };
-                            let step = if b < BigRational::one() { b.recip() } else { b.clone() };
+                            let step = if b < BigRational::one() {
+                                b.recip()
+                            } else {
+                                b.clone()
+                            };
                             let flip = b < BigRational::one();
                             let mut cur = BigRational::one();
                             for k in 0i64..=128 {
@@ -1186,13 +1194,15 @@ fn eval_unary_fn(
 ) -> AlgebraResult<BigValue> {
     match (fn_name, &arg_val) {
         ("sin", BigValue::Real(r)) => Ok(BigValue::Real(r.sin())),
-        ("sin", BigValue::Complex(re, im)) => {
-            Ok(BigValue::from_complex(re.sin() * im.cosh(), re.cos() * im.sinh()))
-        }
+        ("sin", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.sin() * im.cosh(),
+            re.cos() * im.sinh(),
+        )),
         ("cos", BigValue::Real(r)) => Ok(BigValue::Real(r.cos())),
-        ("cos", BigValue::Complex(re, im)) => {
-            Ok(BigValue::from_complex(re.cos() * im.cosh(), -re.sin() * im.sinh()))
-        }
+        ("cos", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.cos() * im.cosh(),
+            -re.sin() * im.sinh(),
+        )),
         ("tan", BigValue::Real(r)) => Ok(BigValue::Real(r.tan())),
         ("tan", BigValue::Complex(_, _)) => {
             let s = eval_unary_fn("sin", arg_val.clone(), default_sel)?;
@@ -1216,13 +1226,15 @@ fn eval_unary_fn(
             big_value_div(c, s)
         }
         ("sinh", BigValue::Real(r)) => Ok(BigValue::Real(r.sinh())),
-        ("sinh", BigValue::Complex(re, im)) => {
-            Ok(BigValue::from_complex(re.sinh() * im.cos(), re.cosh() * im.sin()))
-        }
+        ("sinh", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.sinh() * im.cos(),
+            re.cosh() * im.sin(),
+        )),
         ("cosh", BigValue::Real(r)) => Ok(BigValue::Real(r.cosh())),
-        ("cosh", BigValue::Complex(re, im)) => {
-            Ok(BigValue::from_complex(re.cosh() * im.cos(), re.sinh() * im.sin()))
-        }
+        ("cosh", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.cosh() * im.cos(),
+            re.sinh() * im.sin(),
+        )),
         ("tanh", BigValue::Real(r)) => Ok(BigValue::Real(r.tanh())),
         ("tanh", BigValue::Complex(_, _)) => {
             let s = eval_unary_fn("sinh", arg_val.clone(), default_sel)?;
@@ -1339,11 +1351,21 @@ fn eval_unary_fn(
         }
         ("abs" | "Abs", BigValue::Real(r)) => Ok(BigValue::Real(r.abs())),
         ("abs" | "Abs", BigValue::Complex(r, i)) => Ok(BigValue::Real(r.hypot(*i))),
-        ("sign" | "sgn" | "signum", BigValue::Real(r)) => {
-            Ok(BigValue::Real(if *r > 0.0 { 1.0 } else if *r < 0.0 { -1.0 } else { 0.0 }))
-        }
+        ("sign" | "sgn" | "signum", BigValue::Real(r)) => Ok(BigValue::Real(if *r > 0.0 {
+            1.0
+        } else if *r < 0.0 {
+            -1.0
+        } else {
+            0.0
+        })),
         ("heaviside" | "Heaviside" | "step", BigValue::Real(r)) => {
-            Ok(BigValue::Real(if *r > 0.0 { 1.0 } else if *r < 0.0 { 0.0 } else { 0.5 }))
+            Ok(BigValue::Real(if *r > 0.0 {
+                1.0
+            } else if *r < 0.0 {
+                0.0
+            } else {
+                0.5
+            }))
         }
         ("re" | "real" | "Re", BigValue::Real(r)) => Ok(BigValue::Real(*r)),
         ("re" | "real" | "Re", BigValue::Complex(r, _)) => Ok(BigValue::Real(*r)),
@@ -1578,9 +1600,8 @@ pub fn eval_interval(
         ExprKind::Pow(b, e) => {
             let bv = eval_interval(graph, *b, env)?;
             let ev = eval_interval(graph, *e, env)?;
-            bv.pow_interval(&ev).ok_or_else(|| {
-                AlgebraError::EvaluationError("Interval power domain error".into())
-            })
+            bv.pow_interval(&ev)
+                .ok_or_else(|| AlgebraError::EvaluationError("Interval power domain error".into()))
         }
         ExprKind::Function { name, args } => {
             let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
@@ -1731,21 +1752,42 @@ pub fn eval_uncertain(
                 }
                 let mut new_args = Vec::with_capacity(args.len());
                 for &a in args {
-                    new_args.push(desugar(graph, a, base_ctx, bindings, uncertainties, counter)?);
+                    new_args.push(desugar(
+                        graph,
+                        a,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
                 }
                 Ok(graph.function(&fn_name, new_args))
             }
             ExprKind::Add(terms) => {
                 let mut new_terms = Vec::with_capacity(terms.len());
                 for &t in terms {
-                    new_terms.push(desugar(graph, t, base_ctx, bindings, uncertainties, counter)?);
+                    new_terms.push(desugar(
+                        graph,
+                        t,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
                 }
                 Ok(graph.add(new_terms))
             }
             ExprKind::Mul(factors) => {
                 let mut new_factors = Vec::with_capacity(factors.len());
                 for &f in factors {
-                    new_factors.push(desugar(graph, f, base_ctx, bindings, uncertainties, counter)?);
+                    new_factors.push(desugar(
+                        graph,
+                        f,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
                 }
                 Ok(graph.mul(new_factors))
             }
@@ -1818,11 +1860,17 @@ pub fn eval_uncertain(
                     let mut dn_b = base_bindings.clone();
                     dn_b.insert(sym_name.clone(), x0 - h);
                     let f_up = graph
-                        .evalf(desugared, &EvalContext::with_bindings(ctx.precision_digits, up_b))
+                        .evalf(
+                            desugared,
+                            &EvalContext::with_bindings(ctx.precision_digits, up_b),
+                        )
                         .map(|v| v.to_f64())
                         .unwrap_or(nominal);
                     let f_dn = graph
-                        .evalf(desugared, &EvalContext::with_bindings(ctx.precision_digits, dn_b))
+                        .evalf(
+                            desugared,
+                            &EvalContext::with_bindings(ctx.precision_digits, dn_b),
+                        )
                         .map(|v| v.to_f64())
                         .unwrap_or(nominal);
                     (f_up - f_dn) / (2.0 * h)

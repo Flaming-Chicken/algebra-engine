@@ -17,9 +17,9 @@
 use crate::executor::{ExecutionContext, OperationExecutor, OperationResult};
 use crate::query::{QueryEngine, QueryResponse, ResultPod};
 use crate::session::UraeSession;
+use algebra_core::ExprGraph;
 use algebra_core::parser::{ExprParser, parse_operation};
 use algebra_core::vm::{BytecodeVM, VmCompiler};
-use algebra_core::ExprGraph;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -126,7 +126,11 @@ impl<T> Future for ComputeFuture<T> {
 }
 
 /// Evaluate a structured multi-pod query asynchronously against a shared [`ExprGraph`].
-pub fn query_async(graph: &ExprGraph, query: &str, ctx: &ExecutionContext) -> ComputeFuture<QueryResponse> {
+pub fn query_async(
+    graph: &ExprGraph,
+    query: &str,
+    ctx: &ExecutionContext,
+) -> ComputeFuture<QueryResponse> {
     let g = graph.clone();
     let q = query.to_string();
     let c = ctx.clone();
@@ -302,7 +306,12 @@ impl StreamProcessor {
             let res = session.execute_line(trimmed);
             if res.is_error {
                 summary.failed += 1;
-                writeln!(writer, "ERR | {} => {}", trimmed, res.error_msg.unwrap_or(res.output_text))?;
+                writeln!(
+                    writer,
+                    "ERR | {} => {}",
+                    trimmed,
+                    res.error_msg.unwrap_or(res.output_text)
+                )?;
             } else {
                 summary.succeeded += 1;
                 writeln!(writer, "OK  | {} => {}", trimmed, res.output_text)?;
@@ -401,7 +410,10 @@ impl StreamProcessor {
                 continue;
             }
             summary.processed += 1;
-            let fields: Vec<&str> = trimmed.split(',').map(|s| s.trim().trim_matches('"')).collect();
+            let fields: Vec<&str> = trimmed
+                .split(',')
+                .map(|s| s.trim().trim_matches('"'))
+                .collect();
             let mut vals = Vec::with_capacity(headers.len());
             let mut parse_ok = fields.len() >= headers.len();
             if parse_ok {

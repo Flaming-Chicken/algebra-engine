@@ -558,7 +558,49 @@ impl ExprGraph {
             }
             ExprKind::Neg(inner) => self.has_symbol(*inner, target),
             ExprKind::Function { args, .. } => args.iter().any(|&a| self.has_symbol(a, target)),
-            _ => false,
+            ExprKind::Derivative { expr, wrt, .. } => {
+                *wrt == target || self.has_symbol(*expr, target)
+            }
+            ExprKind::Integral {
+                expr,
+                wrt,
+                lower,
+                upper,
+            } => {
+                (*wrt != target && self.has_symbol(*expr, target))
+                    || lower.is_some_and(|l| self.has_symbol(l, target))
+                    || upper.is_some_and(|u| self.has_symbol(u, target))
+                    || (lower.is_none()
+                        && upper.is_none()
+                        && (*wrt == target || self.has_symbol(*expr, target)))
+            }
+            ExprKind::Matrix { elements, .. } => {
+                elements.iter().any(|&e| self.has_symbol(e, target))
+            }
+            ExprKind::Relational { lhs, rhs, .. } => {
+                self.has_symbol(*lhs, target) || self.has_symbol(*rhs, target)
+            }
+            ExprKind::SetOperation { args, .. } => args.iter().any(|&a| self.has_symbol(a, target)),
+            ExprKind::Sum {
+                body,
+                var,
+                lower,
+                upper,
+            }
+            | ExprKind::Product {
+                body,
+                var,
+                lower,
+                upper,
+            } => {
+                (*var != target && self.has_symbol(*body, target))
+                    || lower.is_some_and(|l| self.has_symbol(l, target))
+                    || upper.is_some_and(|u| self.has_symbol(u, target))
+            }
+            ExprKind::TensorContraction {
+                tensor_a, tensor_b, ..
+            } => self.has_symbol(*tensor_a, target) || self.has_symbol(*tensor_b, target),
+            ExprKind::Number(_) => false,
         }
     }
 

@@ -2,7 +2,7 @@
 
 [![Rust Workspace](https://img.shields.io/badge/Rust-1.85%2B%20%7C%202024%20Edition-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE.md)
-[![Tests Passing](https://img.shields.io/badge/Tests-480%2B%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-720%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20Warnings-brightgreen.svg)](Cargo.toml)
 [![WASM Ready](https://img.shields.io/badge/WebAssembly-Cloudflare%20Pages%20%7C%20PWA-9cf?logo=webassembly)](crates/urae-wasm)
 
@@ -121,18 +121,18 @@ graph TD
 
 ---
 
-## 📊 Feature Matrix (URAE vs. SymPy vs. Symbolica)
+## 📊 Architecture & Capability Matrix
 
-| Capability Area | URAE (`algebra-engine`) | SymPy (Python) | Symbolica (Rust/Python) |
-| :--- | :--- | :--- | :--- |
-| **Core Expression Representation** | Arena-allocated hash-consed DAG (`ExprGraph`) + `egg` E-Graph equality saturation | Python immutable tree objects | Term-rewriting arena DAG in Rust |
-| **Symbolic Calculus & Steps** | `diff`, `diff_with_steps`, `integrate`, `integrate_with_steps`, Risch-Bronstein heuristics, Gruntz limits, Taylor/Laurent/Puiseux | Full Risch / Meijer-G / manual steps via third-party tools | Differentiation, series, rational integration |
-| **Equation & Outcome Classification** | `solveset`, `solveset_certified` (Schwartz-Zippel), typed `SolveOutcome::{Solved, IncompleteCoverage, Unsupported}` | `solve` / `solveset` (implicit sets) | Explicit coverage-checked solvers |
-| **Polynomials & Ideals** | Univariate/multivariate polynomials, Gröbner bases (`Buchberger` / `F4`), resultants, Sturm chains | Extensive (`Poly`, `groebner`, factorization) | Fast multivariate GCD & rational polynomials |
-| **Linear Algebra** | Symbolic `SymbolicMatrix` (`N <= 8` cofactor det, adjugate inverse, charpoly), Lie Cartan matrices, `MatrixBuffer` (`rref`, `rank`, `nullspace`, Bareiss det) | Full symbolic matrices (`Matrix`, `rref`, `nullspace`, `charpoly`) | Matrix operations over rational polynomials |
-| **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines (`solve_diffusion_reaction_mol`, `solve_burgers_1d_mol`), FDM wave, 1D FEM Poisson | Numerical helpers via `lambdify` + `SciPy` | Fast evaluation / bytecode export |
-| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), overflow-safe `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean4/Coq proofs | Geometry module; physics submodules | Physics/QFT-oriented tensor & gamma algebra |
-| **Frontends & Targets** | Native `egui` Notebook (`urae-notebook`, 32 gallery examples), CLI REPL (`urae-cli`), Python bindings (`urae-py`), Jupyter v5.3 kernel (`urae-kernel`), WebAssembly (`urae-wasm`), LSP (`urae-lsp`), C ABI (`urae-ffi`) | Python REPL, Jupyter via IPython, `mpmath` | Rust API + Python wheel (`symbolica`) |
+| Subsystem | URAE (`algebra-engine`) Implementation | Key Algorithms & Primitives |
+| :--- | :--- | :--- |
+| **Core Expression Representation** | Arena-allocated hash-consed DAG (`ExprGraph`) + `egg` E-Graph equality saturation | Structural deduplication, AC congruence closure, cost-guided extraction |
+| **Symbolic Calculus & Steps** | `diff`, `diff_with_steps`, `integrate`, `integrate_with_steps`, `limit`, `series` | Transcendental Risch / Hermite / Rothstein-Trager integration, Gruntz MRV limits, Puiseux/Laurent series |
+| **Equation & System Solving** | `solveset`, `solveset_certified` (Schwartz-Zippel), `SolveSystem`, `SolveOutcome` | Exact radicals (deg $\le 4$), Lambert $W$, Bareiss/Gauss-Jordan linear elimination, lexicographic Gröbner variety triangularization |
+| **Polynomials & Ideals** | Sparse univariate/multivariate polynomials, Gröbner bases, resultants, Sturm chains | Yun square-free decomposition, subresultant GCD, Buchberger + Gebauer-Möller criteria |
+| **Linear Algebra** | `SymbolicMatrix` (`det`, `inv`, `rref`, `rank`, `nullspace`, `charpoly`, `eigenvalues`), Lie Cartan matrices | Bareiss elimination, Faddeev-LeVerrier / cofactor expansion, exact RREF |
+| **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines, FDM/FEM | Adaptive embedded RK5(4), stiff implicit Runge-Kutta, symplectic Hamiltonian integration |
+| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proofs | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
+| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 export |
 
 ---
 
@@ -353,6 +353,18 @@ overflow-checks = false
   ```bash
   RUSTFLAGS="-C target-feature=+simd128" trunk build --release
   ```
+
+---
+
+## 📚 Primary Mathematical & Algorithmic References
+
+URAE builds on peer-reviewed algorithms and standard mathematical handbooks:
+- **Computer Algebra & Integration**: Geddes, Czapor, & Labahn (1992), *Algorithms for Computer Algebra*; von zur Gathen & Gerhard (2013), *Modern Computer Algebra*; Bronstein (2005), *Symbolic Integration I: Transcendental Functions*; Risch (1969); Rothstein (1976) & Trager (1976).
+- **Asymptotic Limits & Series**: Gruntz (1996), *On Computing Limits in a Symbolic Manipulation System*; Shackell (2004).
+- **Polynomials, Ideals & Real Geometry**: Buchberger (1965); Gebauer & Möller (1988); Cox, Little, & O'Shea (2015), *Ideals, Varieties, and Algorithms*; Collins (1975) & McCallum (1988), Cylindrical Algebraic Decomposition; Sturm (1829); Yun (1976); Cantor & Zassenhaus (1981).
+- **Equality Saturation & Verification**: Willsey et al. (2021), *`egg`: Fast and Extensible Equality Saturation*; Nelson & Oppen (1980); Schwartz (1980); Bareiss (1968).
+- **Numerical Analysis, Interval Arithmetic & ODEs**: Hairer, Nørsett, & Wanner (1993/1996), *Solving Ordinary Differential Equations I & II*; Dormand & Prince (1980); Tsitouras (2011); Butcher (2016); Moore, Kearfott, & Cloud (2009), *Introduction to Interval Analysis*.
+- **Special Functions & Number Theory**: Olver et al. (2010), *NIST Handbook of Mathematical Functions* (DLMF); Corless et al. (1996); Rabin (1980); Pollard (1975); Lenstra (1987).
 
 ---
 

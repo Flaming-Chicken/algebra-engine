@@ -26,10 +26,21 @@ impl IdentityGroup for TrigIdentityGroup {
     fn rules() -> Vec<Rewrite<SymbolicLang, ()>> {
         vec![
             // Pythagorean identities: sin^2(x) + cos^2(x) = 1
+            rewrite!("trig-pythagorean-pow-1"; "(+ (^ (fn sin ?x) 2) (^ (fn cos ?x) 2))" => "1"),
+            rewrite!("trig-pythagorean-pow-2"; "(+ (^ (fn cos ?x) 2) (^ (fn sin ?x) 2))" => "1"),
+            rewrite!("trig-pythagorean-1-cos2"; "(- 1 (^ (fn cos ?x) 2))" => "(^ (fn sin ?x) 2)"),
+            rewrite!("trig-pythagorean-1-sin2"; "(- 1 (^ (fn sin ?x) 2))" => "(^ (fn cos ?x) 2)"),
+            rewrite!("trig-sec-tan-sq"; "(- (^ (fn sec ?x) 2) (^ (fn tan ?x) 2))" => "1"),
+            rewrite!("trig-csc-cot-sq"; "(- (^ (fn csc ?x) 2) (^ (fn cot ?x) 2))" => "1"),
+            rewrite!("trig-pythagorean-mul-sum"; "(+ (* (fn sin ?x) (fn sin ?x)) (* (fn cos ?x) (fn cos ?x)))" => "1"),
             rewrite!("trig-pythagorean-sin-cos"; "(* (fn sin ?x) (fn sin ?x))" => "(- 1 (* (fn cos ?x) (fn cos ?x)))"),
             rewrite!("trig-pythagorean-cos-sin"; "(* (fn cos ?x) (fn cos ?x))" => "(- 1 (* (fn sin ?x) (fn sin ?x)))"),
-            // Fundamental definitions: tan(x) = sin(x) / cos(x)
+            // Fundamental definitions & quotients
             rewrite!("trig-tan-def"; "(fn tan ?x)" => "(/ (fn sin ?x) (fn cos ?x))"),
+            rewrite!("trig-sin-cos-div"; "(/ (fn sin ?x) (fn cos ?x))" => "(fn tan ?x)"),
+            rewrite!("trig-tan-cos"; "(* (fn tan ?x) (fn cos ?x))" => "(fn sin ?x)"),
+            rewrite!("trig-cos-tan"; "(* (fn cos ?x) (fn tan ?x))" => "(fn sin ?x)"),
+            rewrite!("trig-cot-sin"; "(* (fn cot ?x) (fn sin ?x))" => "(fn cos ?x)"),
             rewrite!("trig-sec-def"; "(fn sec ?x)" => "(/ 1 (fn cos ?x))"),
             rewrite!("trig-csc-def"; "(fn csc ?x)" => "(/ 1 (fn sin ?x))"),
             rewrite!("trig-cot-def"; "(fn cot ?x)" => "(/ (fn cos ?x) (fn sin ?x))"),
@@ -53,8 +64,13 @@ impl IdentityGroup for HyperbolicIdentityGroup {
         vec![
             // Hyperbolic Pythagorean: cosh^2(x) - sinh^2(x) = 1
             rewrite!("hyper-pythagorean"; "(- (* (fn cosh ?x) (fn cosh ?x)) (* (fn sinh ?x) (fn sinh ?x)))" => "1"),
-            // tanh definition
+            rewrite!("hyper-pythagorean-pow"; "(- (^ (fn cosh ?x) 2) (^ (fn sinh ?x) 2))" => "1"),
+            rewrite!("hyper-sech-tanh-sq"; "(+ (^ (fn sech ?x) 2) (^ (fn tanh ?x) 2))" => "1"),
+            rewrite!("hyper-coth-csch-sq"; "(- (^ (fn coth ?x) 2) (^ (fn csch ?x) 2))" => "1"),
+            // tanh definition & products
             rewrite!("hyper-tanh-def"; "(fn tanh ?x)" => "(/ (fn sinh ?x) (fn cosh ?x))"),
+            rewrite!("hyper-tanh-cosh"; "(* (fn tanh ?x) (fn cosh ?x))" => "(fn sinh ?x)"),
+            rewrite!("hyper-cosh-tanh"; "(* (fn cosh ?x) (fn tanh ?x))" => "(fn sinh ?x)"),
             rewrite!("hyper-sech-def"; "(fn sech ?x)" => "(/ 1 (fn cosh ?x))"),
             rewrite!("hyper-csch-def"; "(fn csch ?x)" => "(/ 1 (fn sinh ?x))"),
             rewrite!("hyper-coth-def"; "(fn coth ?x)" => "(/ (fn cosh ?x) (fn sinh ?x))"),

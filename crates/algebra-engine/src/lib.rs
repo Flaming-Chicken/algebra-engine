@@ -10,6 +10,7 @@
 //! and centralized operation execution.
 
 pub mod analysis;
+pub mod api;
 pub mod autodiff;
 pub mod branch;
 pub mod cad;
@@ -56,6 +57,7 @@ pub mod pipeline;
 pub mod poly;
 pub mod qft;
 pub mod quantum_circuit;
+pub mod query;
 pub mod risch;
 pub mod series;
 pub mod session;
@@ -65,6 +67,7 @@ pub mod smt;
 pub mod solver;
 pub mod sparse;
 pub mod special;
+pub mod stream;
 pub mod symplectic;
 pub mod systems;
 pub mod tda;
@@ -75,11 +78,12 @@ pub mod tropical;
 pub mod urscript_pose;
 pub mod visualizer;
 pub mod weyl_dmodules;
-pub mod wolfram;
+pub mod workbench;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,
 };
+pub use api::{ConstPoly, ConstRational, Expr, IntoExpr, NumMat, Sym, SymMat, parse_expr, sym};
 pub use autodiff::{Dual, ForwardGradient, HyperDual, TapeFreeVjp};
 pub use branch::{
     BranchCutFunctionKind, BranchCutGeometry, BranchCutManager, BranchSelection, MultiValuedResult,
@@ -93,6 +97,7 @@ pub use cad::{
 };
 pub use calculus::{FractionalCalculus, SymbolicCalculus, VariationalCalculus};
 pub use cartan::{DifferentialForm, FormBasis, VectorField};
+pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use cft::{KacMoodyAlgebra, OperatorProductExpansion, VirasoroAlgebra};
 pub use combinatorics::{
     bell_number, catalan_number, combinations, derangements, factorial, integer_partitions,
@@ -159,6 +164,7 @@ pub use poly::{
 };
 pub use qft::{DiracGamma, PassarinoVeltman, SpinorHelicity, WeylSpinor, WickContraction};
 pub use quantum_circuit::{Complex64, QuantumCircuit, QuantumGate};
+pub use query::{QueryEngine, QueryResponse, ResultPod};
 pub use risch::{DifferentialFieldTower, ExtensionKind, HermiteReductionResult, RischIntegrator};
 pub use series::SymbolicSeries;
 pub use session::{SymbolSessionMeta, UraeSession};
@@ -168,6 +174,10 @@ pub use smt::{ProofCertificate, SmtExpr, SmtLogic, SmtProblem, SmtSort};
 pub use solver::{SolveOutcome, SymbolicSolver};
 pub use sparse::CsrMatrix;
 pub use special::SpecialFunctions;
+pub use stream::{
+    BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
+    execute_async, execute_batch_async, query_async,
+};
 pub use symplectic::{
     HamiltonianSystemND, HarmonicOscillator, KeplerOrbit2D, PhaseState, SymplecticIntegrator,
     SymplecticOrder, SymplecticTrajectory,
@@ -190,5 +200,7 @@ pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
 };
-pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
-pub use wolfram::{WolframAlphaEngine, WolframAlphaResponse, WolframPod};
+pub use workbench::{
+    ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,
+    EquationSystemSpec, QuiverArrow, WorkbenchEngine, WorkbenchPresets,
+};

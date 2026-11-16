@@ -100,8 +100,10 @@ pub enum BranchCutFunctionKind {
     Sqrt,
     /// $n$-th root $\sqrt\[n\]{z}$ (branch points: $0, \infty$).
     Root(u32),
-    /// Complex power $z^\alpha$ (branch points: $0, \infty$).
+    /// Complex power $z^\alpha$ with default exponent (branch points: $0, \infty$).
     Power,
+    /// Complex power $z^{\alpha}$ with explicit complex exponent $\alpha = a + bi$ stored via IEEE-754 bit patterns.
+    PowerWithExponent { exp_re_bits: u64, exp_im_bits: u64 },
     /// Inverse sine $\arcsin(z)$ (branch points: $\pm 1, \infty$).
     ArcSin,
     /// Inverse cosine $\arccos(z)$ (branch points: $\pm 1, \infty$).
@@ -128,7 +130,10 @@ impl BranchCutManager {
             BranchCutFunctionKind::Log
             | BranchCutFunctionKind::Sqrt
             | BranchCutFunctionKind::Root(_)
-            | BranchCutFunctionKind::Power => BranchCutGeometry::NegativeRealAxis,
+            | BranchCutFunctionKind::Power
+            | BranchCutFunctionKind::PowerWithExponent { .. } => {
+                BranchCutGeometry::NegativeRealAxis
+            }
             BranchCutFunctionKind::ArcSin | BranchCutFunctionKind::ArcCos => {
                 BranchCutGeometry::RealComplementIntervals { threshold: 1.0 }
             }
@@ -196,6 +201,18 @@ impl BranchCutManager {
                 let n = match kind {
                     BranchCutFunctionKind::Sqrt => 2,
                     BranchCutFunctionKind::Root(deg) => deg as usize,
+                    BranchCutFunctionKind::PowerWithExponent {
+                        exp_re_bits,
+                        exp_im_bits,
+                    } => {
+                        let exp_re = f64::from_bits(exp_re_bits);
+                        let exp_im = f64::from_bits(exp_im_bits);
+                        if exp_im.abs() < 1e-12 {
+                            infer_rational_denom(exp_re, *max_branches)
+                        } else {
+                            *max_branches
+                        }
+                    }
                     _ => *max_branches,
                 };
                 let mut results = Vec::with_capacity(n);
@@ -217,6 +234,45 @@ impl BranchCutManager {
         }
     }
 
+    /// Evaluates complex power $z^w = \exp(w \cdot \ln_k(z))$ under the given `BranchSelection`.
+    pub fn eval_power(
+        base_re: f64,
+        base_im: f64,
+        exp_re: f64,
+        exp_im: f64,
+        selection: &BranchSelection,
+    ) -> AlgebraResult<MultiValuedResult> {
+        let r = base_re.hypot(base_im);
+        if r < 1e-15 {
+            if exp_re.abs() < 1e-15 && exp_im.abs() < 1e-15 {
+                return Ok(MultiValuedResult::Single {
+                    re: 1.0,
+                    im: 0.0,
+                    sheet: 0,
+                });
+            }
+            if exp_re > 0.0 && exp_im.abs() < 1e-15 {
+                return Ok(MultiValuedResult::Single {
+                    re: 0.0,
+                    im: 0.0,
+                    sheet: 0,
+                });
+            }
+            return Err(AlgebraError::SingularityEncountered(
+                "Zero base raised to non-positive or complex exponent".into(),
+            ));
+        }
+        Self::eval(
+            BranchCutFunctionKind::PowerWithExponent {
+                exp_re_bits: exp_re.to_bits(),
+                exp_im_bits: exp_im.to_bits(),
+            },
+            base_re,
+            base_im,
+            selection,
+        )
+    }
+
     /// Evaluates on a single specified sheet $k \in \mathbb{Z}$.
     fn eval_single_sheet(
         kind: BranchCutFunctionKind,
@@ -226,15 +282,42 @@ impl BranchCutManager {
         custom_cut: Option<&BranchCutGeometry>,
     ) -> AlgebraResult<(f64, f64)> {
         let r = re.hypot(im);
-        if r < 1e-15
-            && matches!(
-                kind,
-                BranchCutFunctionKind::Log | BranchCutFunctionKind::Power
-            )
-        {
-            return Err(AlgebraError::SingularityEncountered(
-                "Essential logarithmic branch point at z = 0".into(),
-            ));
+        if r < 1e-15 {
+            match kind {
+                BranchCutFunctionKind::Log | BranchCutFunctionKind::Power => {
+                    return Err(AlgebraError::SingularityEncountered(
+                        "Essential logarithmic branch point at z = 0".into(),
+                    ));
+                }
+                BranchCutFunctionKind::PowerWithExponent {
+                    exp_re_bits,
+                    exp_im_bits,
+                } => {
+                    let ere = f64::from_bits(exp_re_bits);
+                    let eim = f64::from_bits(exp_im_bits);
+                    if ere.abs() < 1e-15 && eim.abs() < 1e-15 {
+                        return Ok((1.0, 0.0));
+                    } else if ere > 0.0 && eim.abs() < 1e-15 {
+                        return Ok((0.0, 0.0));
+                    } else {
+                        return Err(AlgebraError::SingularityEncountered(
+                            "Zero base raised to non-positive or complex exponent".into(),
+                        ));
+                    }
+                }
+                BranchCutFunctionKind::Sqrt | BranchCutFunctionKind::Root(_) => {
+                    return Ok((0.0, 0.0));
+                }
+                BranchCutFunctionKind::LambertW => {
+                    if k == 0 {
+                        return Ok((0.0, 0.0));
+                    }
+                    return Err(AlgebraError::SingularityEncountered(
+                        "Non-principal Lambert W_k(0) diverges to infinity".into(),
+                    ));
+                }
+                _ => {}
+            }
         }
 
         // Standard polar angle theta in (-pi, pi]
@@ -277,17 +360,30 @@ impl BranchCutManager {
                 Ok((root_r * phi_k.cos(), root_r * phi_k.sin()))
             }
             BranchCutFunctionKind::Power => {
-                // Default z^alpha for alpha in R: exp(alpha * ln_k(z))
+                // Default z^alpha for alpha = 2.0: exp(2.0 * ln_k(z))
                 let log_r = r.ln();
                 let arg_k = theta + 2.0 * PI * (k as f64);
-                // Assume alpha = 2.0 for testing generic power or use exp
                 let exp_re = (2.0 * log_r).exp() * (2.0 * arg_k).cos();
                 let exp_im = (2.0 * log_r).exp() * (2.0 * arg_k).sin();
                 Ok((exp_re, exp_im))
             }
+            BranchCutFunctionKind::PowerWithExponent {
+                exp_re_bits,
+                exp_im_bits,
+            } => {
+                let alpha_re = f64::from_bits(exp_re_bits);
+                let alpha_im = f64::from_bits(exp_im_bits);
+                let log_r = r.ln();
+                let arg_k = theta + 2.0 * PI * (k as f64);
+                // w = alpha * ln_k(z) = (alpha_re*log_r - alpha_im*arg_k) + i*(alpha_re*arg_k + alpha_im*log_r)
+                let w_re = alpha_re * log_r - alpha_im * arg_k;
+                let w_im = alpha_re * arg_k + alpha_im * log_r;
+                let mag = w_re.exp();
+                Ok((mag * w_im.cos(), mag * w_im.sin()))
+            }
             BranchCutFunctionKind::ArcSin => {
-                // arcsin(z) = -i * ln(i*z + sqrt(1 - z^2)) + 2*pi*k
-                // 1 - z^2 = 1 - (re + i*im)^2 = 1 - re^2 + im^2 - 2*i*re*im
+                // Principal arcsin_0(z) = -i * ln(i*z + sqrt(1 - z^2))
+                // All Riemann sheets: w_k = (-1)^k * w_0 + pi * k
                 let one_minus_z2_re = 1.0 - re * re + im * im;
                 let one_minus_z2_im = -2.0 * re * im;
                 let (sq_re, sq_im) = Self::eval_single_sheet(
@@ -298,25 +394,32 @@ impl BranchCutManager {
                     None,
                 )?;
 
-                // iz + sqrt(1 - z^2) = (-im + sq_re) + i(re + sq_im)
                 let arg_log_re = -im + sq_re;
                 let arg_log_im = re + sq_im;
                 let (log_re, log_im) = Self::eval_single_sheet(
                     BranchCutFunctionKind::Log,
                     arg_log_re,
                     arg_log_im,
-                    k,
+                    0,
                     None,
                 )?;
-
-                // -i * (log_re + i*log_im) = log_im - i*log_re
-                Ok((log_im, -log_re))
+                let (w0_re, w0_im) = (log_im, -log_re);
+                let sign = if k.rem_euclid(2) == 0 { 1.0 } else { -1.0 };
+                Ok((sign * w0_re + PI * (k as f64), sign * w0_im))
             }
             BranchCutFunctionKind::ArcCos => {
-                // arccos(z) = pi/2 - arcsin(z)
+                // Principal arccos_0(z) = pi/2 - arcsin_0(z)
+                // All Riemann sheets: even k -> w0 + 2*pi*(k/2), odd k -> -w0 + 2*pi*((k+1)/2)
                 let (asin_re, asin_im) =
-                    Self::eval_single_sheet(BranchCutFunctionKind::ArcSin, re, im, k, custom_cut)?;
-                Ok((PI / 2.0 - asin_re, -asin_im))
+                    Self::eval_single_sheet(BranchCutFunctionKind::ArcSin, re, im, 0, custom_cut)?;
+                let (w0_re, w0_im) = (PI / 2.0 - asin_re, -asin_im);
+                if k.rem_euclid(2) == 0 {
+                    let m = k.div_euclid(2);
+                    Ok((w0_re + 2.0 * PI * (m as f64), w0_im))
+                } else {
+                    let m = (k + 1).div_euclid(2);
+                    Ok((-w0_re + 2.0 * PI * (m as f64), -w0_im))
+                }
             }
             BranchCutFunctionKind::ArcTan => {
                 // arctan(z) = i/2 * (ln(1 - iz) - ln(1 + iz)) + pi*k
@@ -384,44 +487,85 @@ impl BranchCutManager {
                 Ok((res_re, res_im))
             }
             BranchCutFunctionKind::LambertW => {
-                // High-precision iterative evaluation for W_k(z)
-                // W_0(z) vs W_{-1}(z)
-                let mut w_re = if k == 0 {
-                    if r < 1.0 { re } else { r.ln() }
+                // High-precision Halley iteration for W_k(z) using Corless et al. (1996) initial approximations
+                let inv_e = -(-1.0f64).exp(); // -1/e
+                let (mut w_re, mut w_im) = if im.abs() < 1e-14 && re >= inv_e && re < 0.0 && k == 0
+                {
+                    // Principal real branch on [-1/e, 0)
+                    let p = (2.0 * (std::f64::consts::E * re + 1.0)).max(0.0).sqrt();
+                    let w0 = if re < -0.3 {
+                        -1.0 + p - p * p / 3.0
+                    } else {
+                        re
+                    };
+                    (w0, 0.0)
+                } else if im.abs() < 1e-14 && re >= inv_e && re < 0.0 && k == -1 {
+                    // Secondary real branch W_{-1} on [-1/e, 0)
+                    let l1 = (-re).ln();
+                    let l2 = (-l1).max(1e-6).ln();
+                    (l1 - l2, 0.0)
+                } else if k == 0 && r < 1.0 {
+                    (re, im)
                 } else {
-                    // W_{-1}(z) initial approximation
-                    -2.0
+                    // General Corless asymptotic initial guess: L1 - L2 + L2/L1 where L1 = ln_k(z)
+                    let l1_re = r.ln();
+                    let l1_im = theta + 2.0 * PI * (k as f64);
+                    let l1_mag = l1_re.hypot(l1_im).max(1e-12);
+                    let l2_re = l1_mag.ln();
+                    let l2_im = l1_im.atan2(l1_re);
+                    let denom = l1_re * l1_re + l1_im * l1_im;
+                    let ratio_re = (l2_re * l1_re + l2_im * l1_im) / denom;
+                    let ratio_im = (l2_im * l1_re - l2_re * l1_im) / denom;
+                    (l1_re - l2_re + ratio_re, l1_im - l2_im + ratio_im)
                 };
-                let mut w_im = if k == 0 { im } else { -PI };
 
-                // Halley's iteration for W(z) e^W(z) = z
-                for _ in 0..30 {
-                    // e^W
-                    let ew_re = w_re.exp() * w_im.cos();
-                    let ew_im = w_re.exp() * w_im.sin();
+                // Halley's method for f(w) = w e^w - z = 0:
+                // w_{n+1} = w_n - f / (e^w (w+1) - (w+2)*f / (2*(w+1)))
+                for _ in 0..50 {
+                    let mag_e = w_re.exp();
+                    let ew_re = mag_e * w_im.cos();
+                    let ew_im = mag_e * w_im.sin();
 
-                    // f(w) = w * e^w - z
-                    let w_ew_re = w_re * ew_re - w_im * ew_im;
-                    let w_ew_im = w_re * ew_im + w_im * ew_re;
-                    let f_re = w_ew_re - re;
-                    let f_im = w_ew_im - im;
+                    let f_re = (w_re * ew_re - w_im * ew_im) - re;
+                    let f_im = (w_re * ew_im + w_im * ew_re) - im;
 
-                    // f'(w) = e^w * (w + 1)
-                    let fp_re = ew_re * (w_re + 1.0) - ew_im * w_im;
-                    let fp_im = ew_re * w_im + ew_im * (w_re + 1.0);
+                    let wp1_re = w_re + 1.0;
+                    let wp1_im = w_im;
+                    let fp_re = ew_re * wp1_re - ew_im * wp1_im;
+                    let fp_im = ew_re * wp1_im + ew_im * wp1_re;
 
-                    // delta = f / f'
-                    let den = fp_re * fp_re + fp_im * fp_im;
-                    if den.abs() < 1e-16 {
+                    // f''(w) = e^w * (w + 2)
+                    let wp2_re = w_re + 2.0;
+                    let wp2_im = w_im;
+                    let fpp_re = ew_re * wp2_re - ew_im * wp2_im;
+                    let fpp_im = ew_re * wp2_im + ew_im * wp2_re;
+
+                    // denom = fp - f * fpp / (2 * fp)
+                    let fp2 = fp_re * fp_re + fp_im * fp_im;
+                    if fp2 < 1e-30 {
                         break;
                     }
-                    let delta_re = (f_re * fp_re + f_im * fp_im) / den;
-                    let delta_im = (f_im * fp_re - f_re * fp_im) / den;
+                    // q = f / fp
+                    let q_re = (f_re * fp_re + f_im * fp_im) / fp2;
+                    let q_im = (f_im * fp_re - f_re * fp_im) / fp2;
+                    // fpp / (2 * fp)
+                    let r_re = 0.5 * (fpp_re * fp_re + fpp_im * fp_im) / fp2;
+                    let r_im = 0.5 * (fpp_im * fp_re - fpp_re * fp_im) / fp2;
+                    // halley_den = 1 - q * r
+                    let hden_re = 1.0 - (q_re * r_re - q_im * r_im);
+                    let hden_im = -(q_re * r_im + q_im * r_re);
+                    let hden2 = hden_re * hden_re + hden_im * hden_im;
+                    if hden2 < 1e-30 {
+                        w_re -= q_re;
+                        w_im -= q_im;
+                        continue;
+                    }
+                    let step_re = (q_re * hden_re + q_im * hden_im) / hden2;
+                    let step_im = (q_im * hden_re - q_re * hden_im) / hden2;
+                    w_re -= step_re;
+                    w_im -= step_im;
 
-                    w_re -= delta_re;
-                    w_im -= delta_im;
-
-                    if delta_re.hypot(delta_im) < 1e-12 {
+                    if step_re.hypot(step_im) < 1e-14 {
                         break;
                     }
                 }
@@ -477,9 +621,24 @@ impl BranchCutManager {
             prev_theta = cur_theta;
         }
 
-        let last_pt = path.last().unwrap();
+        let last_pt = match path.last() {
+            Some(pt) => pt,
+            None => return Err(AlgebraError::EvaluationError("Path cannot be empty".into())),
+        };
         let (final_re, final_im) =
             Self::eval_single_sheet(kind, last_pt.0, last_pt.1, current_sheet, None)?;
         Ok((final_re, final_im, current_sheet))
     }
+}
+
+/// Infer small denominator `q` if `x` is close to a rational `p/q`, capped by `max_branches`.
+fn infer_rational_denom(x: f64, max_branches: usize) -> usize {
+    let cap = max_branches.clamp(1, 64);
+    for q in 1..=cap {
+        let scaled = x * (q as f64);
+        if (scaled - scaled.round()).abs() < 1e-9 {
+            return q;
+        }
+    }
+    cap
 }

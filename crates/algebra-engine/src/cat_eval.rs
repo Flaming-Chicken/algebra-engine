@@ -315,27 +315,43 @@ mod tests {
     #[test]
     fn test_cat_eval_four_fidelities_and_hold() {
         let graph = ExprGraph::new();
-        let expr = ExprParser::new(&graph)
-            .parse("(x + 1) * 2")
-            .expect("parse");
+        let expr = ExprParser::new(&graph).parse("(x + 1) * 2").expect("parse");
         let input = CatEvalInput::new(graph, expr).with_var("x", Some(3.0));
         let evaluator = CatExprEvaluator::new();
         let budget = AnytimeBudget::default();
 
         let r0 = evaluator
-            .eval_with_fidelity(&input, FidelityMode::NumericalApprox, EvalForm::Canonical, &budget)
+            .eval_with_fidelity(
+                &input,
+                FidelityMode::NumericalApprox,
+                EvalForm::Canonical,
+                &budget,
+            )
             .expect("tier 0");
         assert_eq!(r0.mode_used, FidelityMode::NumericalApprox);
         assert!((r0.value.numeric_value.expect("val") - 8.0).abs() < 1e-12);
 
         let r1 = evaluator
-            .eval_with_fidelity(&input, FidelityMode::SymbolicApprox, EvalForm::Canonical, &budget)
+            .eval_with_fidelity(
+                &input,
+                FidelityMode::SymbolicApprox,
+                EvalForm::Canonical,
+                &budget,
+            )
             .expect("tier 1");
         assert_eq!(r1.mode_used, FidelityMode::SymbolicApprox);
-        assert!(matches!(r1.enclosure.kind, UncertaintyKind::Asymptotic { order: 3, .. }));
+        assert!(matches!(
+            r1.enclosure.kind,
+            UncertaintyKind::Asymptotic { order: 3, .. }
+        ));
 
         let r2 = evaluator
-            .eval_with_fidelity(&input, FidelityMode::SymbolicExact, EvalForm::Canonical, &budget)
+            .eval_with_fidelity(
+                &input,
+                FidelityMode::SymbolicExact,
+                EvalForm::Canonical,
+                &budget,
+            )
             .expect("tier 2");
         assert_eq!(r2.mode_used, FidelityMode::SymbolicExact);
         assert!(r2.value.term.is_some());

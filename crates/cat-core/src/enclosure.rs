@@ -157,8 +157,20 @@ impl UncertaintyKind {
                     weighted_points,
                 }
             }
-            (Self::SetOrMultiset { intervals, weighted_points }, Self::WorstCaseBall(b))
-            | (Self::WorstCaseBall(b), Self::SetOrMultiset { intervals, weighted_points }) => {
+            (
+                Self::SetOrMultiset {
+                    intervals,
+                    weighted_points,
+                },
+                Self::WorstCaseBall(b),
+            )
+            | (
+                Self::WorstCaseBall(b),
+                Self::SetOrMultiset {
+                    intervals,
+                    weighted_points,
+                },
+            ) => {
                 let shifted = intervals.iter().map(|iv| iv.add(b)).collect();
                 Self::SetOrMultiset {
                     intervals: shifted,
@@ -181,8 +193,20 @@ impl UncertaintyKind {
                     _ => None,
                 },
             },
-            (Self::Asymptotic { order, constant_bound }, _)
-            | (_, Self::Asymptotic { order, constant_bound }) => Self::Asymptotic {
+            (
+                Self::Asymptotic {
+                    order,
+                    constant_bound,
+                },
+                _,
+            )
+            | (
+                _,
+                Self::Asymptotic {
+                    order,
+                    constant_bound,
+                },
+            ) => Self::Asymptotic {
                 order: *order,
                 constant_bound: *constant_bound,
             },
@@ -202,10 +226,9 @@ impl UncertaintyKind {
             Self::Exact => Some(0.0),
             Self::WorstCaseBall(b) => Some(b.radius()),
             Self::ProbabilisticSpread { std_dev, .. } => Some(3.0 * std_dev),
-            Self::SetOrMultiset { intervals, .. } => intervals
-                .iter()
-                .map(UniversalBall::radius)
-                .reduce(f64::max),
+            Self::SetOrMultiset { intervals, .. } => {
+                intervals.iter().map(UniversalBall::radius).reduce(f64::max)
+            }
             Self::Asymptotic { .. } => None,
         }
     }

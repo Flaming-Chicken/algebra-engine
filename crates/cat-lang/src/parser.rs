@@ -1,5 +1,5 @@
 //! Unified Polyglot Parser for CatScript (`.cat`) and CatPad (`.pad`),
-//! backed by `algebra_core::ExprParser` so URAE math/LaTeX/MATLAB/Desmos syntax
+//! backed by `algebra_core::ExprParser` so URAE math, LaTeX, semicolon-matrix, and interactive pad syntax
 //! and CatScript share a single canonical frontend.
 
 use crate::ast::{CatExpr, CatScriptAst, CatStatement};
@@ -83,7 +83,10 @@ impl CatScriptParser {
             },
             ExprKind::Function { name, args } => CatExpr::Call {
                 func: graph.symbols.resolve(*name).unwrap_or_default(),
-                args: args.iter().map(|&a| Self::expr_id_to_cat(graph, a)).collect(),
+                args: args
+                    .iter()
+                    .map(|&a| Self::expr_id_to_cat(graph, a))
+                    .collect(),
             },
             _ => CatExpr::Call {
                 func: "opaque".to_string(),

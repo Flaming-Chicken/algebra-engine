@@ -13,6 +13,7 @@ use algebra_core::lemma_miner::{
     ExpressionGeneratorConfig, FormalEquivalenceProver, LearnedLemma, LemmaMiner, LemmaRegistry,
 };
 use algebra_core::{ExprGraph, ExprId, ExprKind};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 /// Formal algebraic equivalence prover backed by polynomial expansion and Gröbner basis ideal reduction.

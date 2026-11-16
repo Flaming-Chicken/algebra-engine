@@ -1,7 +1,11 @@
-//! Generalized Tensor Algebra Engine competing with SymPy tensor modules.
+//! Generalized Tensor Algebra Engine.
 //!
-//! Supports mixed-valence tensors (r, s), Einstein summation contractions,
-//! tensor products, symmetrizations, and arbitrary dimension spaces.
+//! Supports mixed-valence tensors $(r, s)$, Einstein summation contractions,
+//! tensor products, symmetrizations, and arbitrary-dimension vector spaces
+//! following classical Ricci calculus conventions.
+//!
+//! ## References
+//! - Penrose, R., & Rindler, W. (1984). *Spinors and Space-Time, Vol. 1*. Cambridge University Press.
 
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;

@@ -68,13 +68,18 @@ impl LinearSystemSolver {
                 break;
             }
 
-            // Find non-zero pivot
+            // Find non-zero pivot (prefer numeric non-zero entries over symbolic parameters)
             let mut pivot_row = None;
             for r in row..m {
                 let elem = aug[r * cols + col];
-                if elem != zero {
-                    pivot_row = Some(r);
-                    break;
+                if !SymbolicMatrix::is_entry_zero(graph, elem) {
+                    if SymbolicMatrix::is_entry_numeric(graph, elem) {
+                        pivot_row = Some(r);
+                        break;
+                    }
+                    if pivot_row.is_none() {
+                        pivot_row = Some(r);
+                    }
                 }
             }
 
@@ -119,7 +124,7 @@ impl LinearSystemSolver {
         // Check consistency: zero row in A must have zero in RHS b
         for r in rank..m {
             let rhs = aug[r * cols + n];
-            if rhs != zero {
+            if !SymbolicMatrix::is_entry_zero(graph, rhs) {
                 return Err(AlgebraError::EvaluationError(
                     "Inconsistent linear system: no solution exists".into(),
                 ));

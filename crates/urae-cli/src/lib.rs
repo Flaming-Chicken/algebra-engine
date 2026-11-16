@@ -67,7 +67,7 @@ pub fn run_repl() {
     );
     println!("Type 'exit' or 'quit' to exit. Enter expressions to parse and evaluate.\n");
 
-    let graph = ExprGraph::new();
+    let mut session = algebra_engine::UraeSession::new();
     let formatter = LatexFormatter;
     let mut ai_config = load_ai_config_from_env();
 
@@ -93,7 +93,7 @@ pub fn run_repl() {
         }
 
         if input.starts_with('{') || input.starts_with('[') {
-            let resp_json = process_json_request(&graph, input);
+            let resp_json = process_json_request(&session.graph, input);
             println!("= {}\n", resp_json);
             continue;
         }
@@ -109,9 +109,46 @@ pub fn run_repl() {
             continue;
         }
 
-        match process_input_with_ai_config(&graph, &formatter, input, &mut ai_config) {
-            Ok(result) => println!("= {}\n", result),
-            Err(err) => eprintln!("Error: {}\n", err),
+        let lower = input.to_ascii_lowercase();
+        if lower.starts_with("agent ")
+            || lower.starts_with("ask ")
+            || lower.starts_with("preset ")
+            || lower.starts_with("embed ")
+        {
+            let summary: Vec<(String, String, f64, String)> = session
+                .symbol_metadata
+                .values()
+                .map(|m| {
+                    let extra = match (m.uncertainty, &m.unit_str) {
+                        (Some(u), Some(unit)) => format!("± {:.6} [{}]", u, unit),
+                        (Some(u), None) => format!("± {:.6}", u),
+                        (None, Some(unit)) => format!("[{}]", unit),
+                        (None, None) => String::new(),
+                    };
+                    (m.name.clone(), format!("{:?}", m.role), m.cur_val, extra)
+                })
+                .collect();
+            match process_input_with_full_context(
+                &session.graph,
+                &formatter,
+                input,
+                &mut ai_config,
+                Some(&session.bindings),
+                Some(&session.uncertainties),
+                Some(&session.intervals),
+                session.branch_sheet,
+                Some(&summary),
+            ) {
+                Ok(result) => println!("= {}\n", result),
+                Err(err) => eprintln!("Error: {}\n", err),
+            }
+        } else {
+            let res = session.execute_line(input);
+            if res.is_error {
+                eprintln!("Error: {}\n", res.error_msg.unwrap_or(res.output_text));
+            } else {
+                println!("= {}\n", res.output_text);
+            }
         }
     }
 }
@@ -193,6 +230,62 @@ pub fn process_input_with_context(
     bindings: Option<&HashMap<String, f64>>,
     symbol_summary: Option<&[(String, String, f64, String)]>,
 ) -> Result<String, String> {
+    process_input_with_full_context(
+        graph,
+        formatter,
+        input,
+        ai_config,
+        bindings,
+        None,
+        None,
+        None,
+        symbol_summary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn process_input_with_full_context(
+    graph: &ExprGraph,
+    formatter: &LatexFormatter,
+    input: &str,
+    ai_config: &mut AiConfig,
+    bindings: Option<&HashMap<String, f64>>,
+    uncertainties: Option<&HashMap<String, f64>>,
+    intervals: Option<&HashMap<String, algebra_core::RealInterval>>,
+    branch_sheet: Option<i64>,
+    symbol_summary: Option<&[(String, String, f64, String)]>,
+) -> Result<String, String> {
+    let result = execute_input_with_full_context(
+        graph,
+        formatter,
+        input,
+        ai_config,
+        bindings,
+        uncertainties,
+        intervals,
+        branch_sheet,
+        symbol_summary,
+    );
+    if result.is_error {
+        Err(result.error_msg.unwrap_or(result.output_text))
+    } else {
+        Ok(result.output_text)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_input_with_full_context(
+    graph: &ExprGraph,
+    formatter: &LatexFormatter,
+    input: &str,
+    ai_config: &mut AiConfig,
+    bindings: Option<&HashMap<String, f64>>,
+    uncertainties: Option<&HashMap<String, f64>>,
+    intervals: Option<&HashMap<String, algebra_core::RealInterval>>,
+    branch_sheet: Option<i64>,
+    symbol_summary: Option<&[(String, String, f64, String)]>,
+) -> algebra_engine::executor::OperationResult {
+    use algebra_engine::executor::OperationResult;
     let input = input.trim();
     let _ = formatter;
 
@@ -204,18 +297,18 @@ pub fn process_input_with_context(
         let prompt = agent_cmd.trim();
 
         if prompt.eq_ignore_ascii_case("status") {
-            return Ok(ai_config.status_summary());
+            let s = ai_config.status_summary();
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
         if prompt.eq_ignore_ascii_case("enable") {
             ai_config.enabled = true;
-            return Ok(format!(
-                "AI Copilot Enabled. Status: {}",
-                ai_config.status_summary()
-            ));
+            let s = format!("AI Copilot Enabled. Status: {}", ai_config.status_summary());
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
         if prompt.eq_ignore_ascii_case("disable") {
             ai_config.enabled = false;
-            return Ok("AI Copilot Disabled.".to_string());
+            let s = "AI Copilot Disabled.".to_string();
+            return OperationResult::success(s.clone(), s.clone(), s);
         }
 
         if let Some(cfg_cmd) = prompt.strip_prefix("config ") {
@@ -224,62 +317,73 @@ pub fn process_input_with_context(
                 match parts[0].to_lowercase().as_str() {
                     "provider" => {
                         match parts[1].to_lowercase().as_str() {
-                            "googleai" | "google" | "gemini" => ai_config.provider = AiProvider::GoogleAi,
+                            "googleai" | "google" | "gemini" => {
+                                ai_config.provider = AiProvider::GoogleAi
+                            }
                             "anthropic" | "claude" => ai_config.provider = AiProvider::Anthropic,
                             "lmstudio" | "lm-studio" => ai_config.provider = AiProvider::LmStudio,
                             "opencode" => ai_config.provider = AiProvider::OpenCode,
                             "openrouter" => ai_config.provider = AiProvider::OpenRouter,
-                            _ => return Err("Supported providers: googleai, anthropic, lmstudio, opencode, openrouter".to_string()),
+                            _ => {
+                                return OperationResult::error(
+                                    "Supported providers: googleai, anthropic, lmstudio, opencode, openrouter",
+                                );
+                            }
                         }
-                        return Ok(format!(
+                        let s = format!(
                             "Provider set to {}. Status: {}",
                             ai_config.provider.name(),
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "key" => {
                         ai_config.api_key = Some(parts[1].to_string());
-                        return Ok(format!(
-                            "API key updated. Status: {}",
-                            ai_config.status_summary()
-                        ));
+                        let s = format!("API key updated. Status: {}", ai_config.status_summary());
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "url" => {
                         ai_config.access_url = Some(parts[1].to_string());
-                        return Ok(format!(
+                        let s = format!(
                             "Access URL updated to {}. Status: {}",
                             parts[1],
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "model" => {
                         ai_config.model_name = Some(parts[1].to_string());
-                        return Ok(format!(
+                        let s = format!(
                             "Model updated to {}. Status: {}",
                             parts[1],
                             ai_config.status_summary()
-                        ));
+                        );
+                        return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     _ => {
-                        return Err(
-                            "Usage: agent config <provider|key|url|model> <value>".to_string()
+                        return OperationResult::error(
+                            "Usage: agent config <provider|key|url|model> <value>",
                         );
                     }
                 }
             }
-            return Err("Usage: agent config <provider|key|url|model> <value>".to_string());
+            return OperationResult::error("Usage: agent config <provider|key|url|model> <value>");
         }
 
         let agent = AlgebraAgentInterface::new();
-        return agent.query(ai_config, prompt, graph);
+        return match agent.query(ai_config, prompt, graph) {
+            Ok(s) => OperationResult::success(s.clone(), s.clone(), s),
+            Err(e) => OperationResult::error(e),
+        };
     }
 
     // 2. Neural Expression Embedding & AST Proof-Search Depth Commands
     if let Some(expr_str) = input.strip_prefix("embed ") {
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id = parser
-            .parse(expr_str.trim())
-            .map_err(|e| format!("Parse error: {}", e))?;
+        let id = match parser.parse(expr_str.trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error: {}", e)),
+        };
         let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
         let vec = embedder.embed_expression(graph, id);
         let depth = algebra_engine::heuristic::compute_ast_depth(graph, id);
@@ -306,7 +410,7 @@ pub fn process_input_with_context(
         ));
         out.push_str(&format!("  * Vector Preview: [{preview}, ...]\n"));
         out.push_str(&format!("  * Embedding Hash: 0x{hex_sample}"));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     if let Some(args_str) = input
@@ -315,15 +419,17 @@ pub fn process_input_with_context(
     {
         let parts: Vec<&str> = args_str.split(',').collect();
         if parts.len() != 2 {
-            return Err("Usage: similarity <expr1>, <expr2>".to_string());
+            return OperationResult::error("Usage: similarity <expr1>, <expr2>");
         }
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id1 = parser
-            .parse(parts[0].trim())
-            .map_err(|e| format!("Parse error in expr1: {}", e))?;
-        let id2 = parser
-            .parse(parts[1].trim())
-            .map_err(|e| format!("Parse error in expr2: {}", e))?;
+        let id1 = match parser.parse(parts[0].trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error in expr1: {}", e)),
+        };
+        let id2 = match parser.parse(parts[1].trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error in expr2: {}", e)),
+        };
         let embedder = algebra_engine::heuristic::NeuralExpressionEmbedder::default();
         let v1 = embedder.embed_expression(graph, id1);
         let v2 = embedder.embed_expression(graph, id2);
@@ -349,7 +455,7 @@ pub fn process_input_with_context(
             "  * Expr 2 AST Depth : {}",
             algebra_engine::heuristic::compute_ast_depth(graph, id2)
         ));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     if let Some(expr_str) = input
@@ -358,9 +464,10 @@ pub fn process_input_with_context(
         .or_else(|| input.strip_prefix("proof_depth "))
     {
         let parser = algebra_core::parser::ExprParser::new(graph);
-        let id = parser
-            .parse(expr_str.trim())
-            .map_err(|e| format!("Parse error: {}", e))?;
+        let id = match parser.parse(expr_str.trim()) {
+            Ok(id) => id,
+            Err(e) => return OperationResult::error(format!("Parse error: {}", e)),
+        };
         let search_engine =
             algebra_engine::heuristic::HeuristicSearchEngine::with_default_neural_guidance(
                 algebra_core::EngineConfig::default(),
@@ -402,7 +509,7 @@ pub fn process_input_with_context(
             "  * Neural Embedding [{}d]: [{emb_preview}, ...]",
             indicator.neural_embedding.len()
         ));
-        return Ok(out);
+        return OperationResult::success(out.clone(), out.clone(), out);
     }
 
     // 3. Parse text into structured MathOperation
@@ -413,17 +520,19 @@ pub fn process_input_with_context(
     if let Some(b) = bindings {
         exec_ctx.bindings = b.clone();
     }
+    if let Some(u) = uncertainties {
+        exec_ctx.uncertainties = u.clone();
+    }
+    if let Some(ivs) = intervals {
+        exec_ctx.intervals = ivs.clone();
+    }
+    exec_ctx.branch_sheet = branch_sheet;
     if let Some(s) = symbol_summary {
         exec_ctx.symbol_summary = s.to_vec();
     }
 
     // 5. Central execution via OperationExecutor
-    let result = OperationExecutor::execute(graph, &op, &exec_ctx);
-    if result.is_error {
-        Err(result.error_msg.unwrap_or(result.output_text))
-    } else {
-        Ok(result.output_text)
-    }
+    OperationExecutor::execute(graph, &op, &exec_ctx)
 }
 
 pub fn get_help_text() -> String {
@@ -453,15 +562,17 @@ pub fn get_help_text() -> String {
     help.push_str("  stability 2x2              Control system stability\n");
     help.push_str("  context / mathcontext       Inspect ambient mathematical context\n");
     help.push_str("  set <algebra|calculus|logic> <val>  Configure ambient mathematical system\n");
-    help.push_str("  vars / params              List active notebook variables and parameters\n");
+    help.push_str("  vars / params              List active notebook variables, parameters, and uncertainties\n");
+    help.push_str("  a = 5.0 +/- 0.1 [m]        Define parameter with 1-sigma GUM uncertainty (also ± or +-)\n");
+    help.push_str(
+        "  branch_cut / branches      Inspect Riemann sheets and multivalued function branches\n",
+    );
     help.push_str(
         "  agent <prompt> / ask        Ask AI Agent Copilot (Requires setup, off by default)\n",
     );
     help.push_str("  agent status / config      Configure AI copilot provider, key, and model\n");
     help.push_str("  preset <name>              Load preset math templates (quadratic, oscillator, calculus)\n");
-    help.push_str(
-        "  export <tex|py|lean>       Export session to LaTeX, Python SymPy, or Lean 4\n",
-    );
+    help.push_str("  export <tex|py|lean>       Export session to LaTeX, Python, or Lean 4\n");
     help.push_str("  log <off|error|warn|info|debug|trace>  Adjust live logging verbosity level\n");
     help.push_str("  proof <expr>               Export formal Lean 4 and Coq proof trace\n");
     help.push_str("  help                       Display this command guide\n");

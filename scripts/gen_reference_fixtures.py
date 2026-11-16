@@ -111,14 +111,47 @@ def build_fixtures() -> dict:
         },
     }
 
+    audit_oracles = {
+        "exact_arithmetic": [
+            {"expr": "10^20 + 1 - 10^20", "expected": "1"},
+            {"expr": "2^100", "expected": str(2**100)},
+            {"expr": "5!", "expected": "120"},
+            {"expr": "10 % 3", "expected": "1"},
+            {"expr": "log(8, 2)", "expected": "3"},
+        ],
+        "number_theory": {
+            "primes": [2, 101, 2**61 - 1],
+            "composites": [1, 4, 2**67 - 1],
+            "big_factorizations": [
+                {"n": str(2**67 - 1), "factors": ["193707721", "761838257287"]},
+            ],
+            "gcds": [
+                {"a": str(2**67 - 1), "b": "193707721", "gcd": "193707721"},
+            ],
+        },
+        "determinants": [
+            {"matrix": "[[1,2],[3,4]]", "expected": "-2"},
+            {"matrix": "[[2,1,0],[0,3,1],[1,0,2]]", "expected": "13"},
+        ],
+        "limits": [
+            {"expr": "(x^2 + 1)/(2*x^2 - 3)", "var": "x", "point": "oo", "expected": 0.5},
+            {"expr": "(1 + 1/x)^x", "var": "x", "point": "oo", "expected": math.e},
+        ],
+        "definite_integrals": [
+            {"expr": "1/(x^2 + 1)", "var": "x", "lower": "0", "upper": "1", "expected": math.pi / 4.0},
+            {"expr": "x^2", "var": "x", "lower": "0", "upper": "3", "expected": 9.0},
+        ],
+    }
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "lyndon_ab_len4": lyndon_ab_4,
         "stirling_second_kind": stirling_table,
         "bell_numbers": bell_numbers,
         "riemann_contractions": riemann_oracles,
         "transforms": transform_oracles,
         "ito_colombeau": ito_colombeau_oracles,
+        "audit_oracles": audit_oracles,
     }
 
 

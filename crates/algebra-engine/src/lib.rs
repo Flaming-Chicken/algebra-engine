@@ -164,6 +164,7 @@ pub use poly::{
 };
 pub use qft::{DiracGamma, PassarinoVeltman, SpinorHelicity, WeylSpinor, WickContraction};
 pub use quantum_circuit::{Complex64, QuantumCircuit, QuantumGate};
+pub use query::{QueryEngine, QueryResponse, ResultPod};
 pub use risch::{DifferentialFieldTower, ExtensionKind, HermiteReductionResult, RischIntegrator};
 pub use series::SymbolicSeries;
 pub use session::{SymbolSessionMeta, UraeSession};
@@ -173,6 +174,10 @@ pub use smt::{ProofCertificate, SmtExpr, SmtLogic, SmtProblem, SmtSort};
 pub use solver::{SolveOutcome, SymbolicSolver};
 pub use sparse::CsrMatrix;
 pub use special::SpecialFunctions;
+pub use stream::{
+    BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
+    execute_async, execute_batch_async, query_async,
+};
 pub use symplectic::{
     HamiltonianSystemND, HarmonicOscillator, KeplerOrbit2D, PhaseState, SymplecticIntegrator,
     SymplecticOrder, SymplecticTrajectory,
@@ -194,11 +199,6 @@ pub use visualizer::{ColorRgba, DomainColoring, RiemannSurface, VectorFieldVisua
 pub use weyl_dmodules::{
     AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
     ZeilbergerAlgorithm, ZeilbergerResult,
-};
-pub use query::{QueryEngine, QueryResponse, ResultPod};
-pub use stream::{
-    BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
-    execute_async, execute_batch_async, query_async,
 };
 pub use workbench::{
     ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,

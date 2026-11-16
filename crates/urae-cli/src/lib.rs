@@ -302,10 +302,7 @@ pub fn execute_input_with_full_context(
         }
         if prompt.eq_ignore_ascii_case("enable") {
             ai_config.enabled = true;
-            let s = format!(
-                "AI Copilot Enabled. Status: {}",
-                ai_config.status_summary()
-            );
+            let s = format!("AI Copilot Enabled. Status: {}", ai_config.status_summary());
             return OperationResult::success(s.clone(), s.clone(), s);
         }
         if prompt.eq_ignore_ascii_case("disable") {
@@ -320,12 +317,18 @@ pub fn execute_input_with_full_context(
                 match parts[0].to_lowercase().as_str() {
                     "provider" => {
                         match parts[1].to_lowercase().as_str() {
-                            "googleai" | "google" | "gemini" => ai_config.provider = AiProvider::GoogleAi,
+                            "googleai" | "google" | "gemini" => {
+                                ai_config.provider = AiProvider::GoogleAi
+                            }
                             "anthropic" | "claude" => ai_config.provider = AiProvider::Anthropic,
                             "lmstudio" | "lm-studio" => ai_config.provider = AiProvider::LmStudio,
                             "opencode" => ai_config.provider = AiProvider::OpenCode,
                             "openrouter" => ai_config.provider = AiProvider::OpenRouter,
-                            _ => return OperationResult::error("Supported providers: googleai, anthropic, lmstudio, opencode, openrouter"),
+                            _ => {
+                                return OperationResult::error(
+                                    "Supported providers: googleai, anthropic, lmstudio, opencode, openrouter",
+                                );
+                            }
                         }
                         let s = format!(
                             "Provider set to {}. Status: {}",
@@ -336,10 +339,7 @@ pub fn execute_input_with_full_context(
                     }
                     "key" => {
                         ai_config.api_key = Some(parts[1].to_string());
-                        let s = format!(
-                            "API key updated. Status: {}",
-                            ai_config.status_summary()
-                        );
+                        let s = format!("API key updated. Status: {}", ai_config.status_summary());
                         return OperationResult::success(s.clone(), s.clone(), s);
                     }
                     "url" => {
@@ -564,15 +564,15 @@ pub fn get_help_text() -> String {
     help.push_str("  set <algebra|calculus|logic> <val>  Configure ambient mathematical system\n");
     help.push_str("  vars / params              List active notebook variables, parameters, and uncertainties\n");
     help.push_str("  a = 5.0 +/- 0.1 [m]        Define parameter with 1-sigma GUM uncertainty (also ± or +-)\n");
-    help.push_str("  branch_cut / branches      Inspect Riemann sheets and multivalued function branches\n");
+    help.push_str(
+        "  branch_cut / branches      Inspect Riemann sheets and multivalued function branches\n",
+    );
     help.push_str(
         "  agent <prompt> / ask        Ask AI Agent Copilot (Requires setup, off by default)\n",
     );
     help.push_str("  agent status / config      Configure AI copilot provider, key, and model\n");
     help.push_str("  preset <name>              Load preset math templates (quadratic, oscillator, calculus)\n");
-    help.push_str(
-        "  export <tex|py|lean>       Export session to LaTeX, Python, or Lean 4\n",
-    );
+    help.push_str("  export <tex|py|lean>       Export session to LaTeX, Python, or Lean 4\n");
     help.push_str("  log <off|error|warn|info|debug|trace>  Adjust live logging verbosity level\n");
     help.push_str("  proof <expr>               Export formal Lean 4 and Coq proof trace\n");
     help.push_str("  help                       Display this command guide\n");

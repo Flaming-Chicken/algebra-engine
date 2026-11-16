@@ -2961,9 +2961,9 @@ impl NotebookState {
                             expanded = Self::expand_user_function_call(&expanded, fn_name, fn_rhs);
                         }
                         if let Ok(expr_id) = parser.parse(&expanded) {
-                            let pt_id = parser
-                                .parse(&point)
-                                .unwrap_or_else(|_| self.graph.float(point.parse::<f64>().unwrap_or(0.0)));
+                            let pt_id = parser.parse(&point).unwrap_or_else(|_| {
+                                self.graph.float(point.parse::<f64>().unwrap_or(0.0))
+                            });
                             use urae::calculus::SymbolicCalculus;
                             use urae::engine::limits::{LimitDirection, LimitEngine};
                             let lim_res = match direction.as_deref() {
@@ -3324,7 +3324,8 @@ impl NotebookState {
                     {
                         active_branch_sheet = Some(*sheet);
                     }
-                    let res = urae::executor::OperationExecutor::execute(&self.graph, &op, &exec_ctx);
+                    let res =
+                        urae::executor::OperationExecutor::execute(&self.graph, &op, &exec_ctx);
                     let out_latex = if res.output_latex.is_empty() {
                         format!("\\text{{{}}}", res.output_text)
                     } else {
@@ -3457,11 +3458,9 @@ impl NotebookState {
                             }
                         }
 
-                        let mut ctx = EvalContext::with_bindings(
-                            53,
-                            self.session.slider_values.clone(),
-                        )
-                        .with_branch_sheet(active_branch_sheet);
+                        let mut ctx =
+                            EvalContext::with_bindings(53, self.session.slider_values.clone())
+                                .with_branch_sheet(active_branch_sheet);
                         for (p, meta) in &self.session.symbol_metadata {
                             if let Some(sigma) = meta.uncertainty {
                                 ctx.uncertainties.insert(p.clone(), sigma);

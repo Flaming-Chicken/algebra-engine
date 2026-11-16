@@ -291,12 +291,10 @@ impl Simplifier {
     ) -> SimplifyResult<ExprId> {
         let node = graph.get(root);
         if let ExprKind::Relational { op, lhs, rhs } = &node.kind {
-            let simp_lhs =
-                Self::simplify_with_goal_and_assumptions(graph, *lhs, goal, assumptions)
-                    .unwrap_or(*lhs);
-            let simp_rhs =
-                Self::simplify_with_goal_and_assumptions(graph, *rhs, goal, assumptions)
-                    .unwrap_or(*rhs);
+            let simp_lhs = Self::simplify_with_goal_and_assumptions(graph, *lhs, goal, assumptions)
+                .unwrap_or(*lhs);
+            let simp_rhs = Self::simplify_with_goal_and_assumptions(graph, *rhs, goal, assumptions)
+                .unwrap_or(*rhs);
             return Ok(graph.relational(*op, simp_lhs, simp_rhs));
         }
 
@@ -473,7 +471,9 @@ impl Simplifier {
             }
             ExprKind::Number(Number::Constant(c)) => match c {
                 algebra_core::Constant::I => Ok(rec.add(SymbolicLang::QuaternionI)),
-                algebra_core::Constant::Pi => Ok(rec.add(SymbolicLang::Symbol("__const_pi".into()))),
+                algebra_core::Constant::Pi => {
+                    Ok(rec.add(SymbolicLang::Symbol("__const_pi".into())))
+                }
                 algebra_core::Constant::E => Ok(rec.add(SymbolicLang::Symbol("__const_e".into()))),
                 algebra_core::Constant::EulerGamma => {
                     Ok(rec.add(SymbolicLang::Symbol("__const_gamma".into())))
@@ -684,24 +684,22 @@ fn pre_simplify_algebraic_with_assumptions(
     }
 
     fn contains_imaginary_unit(g: &ExprGraph, id: ExprId) -> bool {
-    match &g.get(id).kind {
-        ExprKind::Number(Number::Constant(algebra_core::Constant::I)) => true,
-        ExprKind::Symbol(s) => matches!(g.symbols.resolve(*s).as_deref(), Some("i" | "I")),
-        ExprKind::Neg(a) => contains_imaginary_unit(g, *a),
-        ExprKind::Add(xs) | ExprKind::Mul(xs) => {
-            xs.iter().any(|&x| contains_imaginary_unit(g, x))
+        match &g.get(id).kind {
+            ExprKind::Number(Number::Constant(algebra_core::Constant::I)) => true,
+            ExprKind::Symbol(s) => matches!(g.symbols.resolve(*s).as_deref(), Some("i" | "I")),
+            ExprKind::Neg(a) => contains_imaginary_unit(g, *a),
+            ExprKind::Add(xs) | ExprKind::Mul(xs) => {
+                xs.iter().any(|&x| contains_imaginary_unit(g, x))
+            }
+            ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
+                contains_imaginary_unit(g, *a) || contains_imaginary_unit(g, *b)
+            }
+            ExprKind::Function { args, .. } => args.iter().any(|&a| contains_imaginary_unit(g, a)),
+            _ => false,
         }
-        ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
-            contains_imaginary_unit(g, *a) || contains_imaginary_unit(g, *b)
-        }
-        ExprKind::Function { args, .. } => {
-            args.iter().any(|&a| contains_imaginary_unit(g, a))
-        }
-        _ => false,
     }
-}
 
-fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
+    fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
         match &g.get(e).kind {
             ExprKind::Number(n) => crate::poly::rational_from_number(n).ok(),
             ExprKind::Neg(inner) => Some(-as_rat(g, *inner)?),
@@ -761,9 +759,7 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
             ExprKind::Number(Number::Constant(algebra_core::Constant::Pi)) => {
                 Some(BigRational::one())
             }
-            ExprKind::Symbol(s)
-                if matches!(g.symbols.resolve(*s).as_deref(), Some("pi" | "π")) =>
-            {
+            ExprKind::Symbol(s) if matches!(g.symbols.resolve(*s).as_deref(), Some("pi" | "π")) => {
                 Some(BigRational::one())
             }
             ExprKind::Neg(a) => Some(-extract_pi_rational(g, *a)?),
@@ -953,7 +949,9 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
             let keys: Vec<Vec<ExprId>> = map.keys().cloned().collect();
             let mut merged = false;
             'outer: for key in keys {
-                let Some(c1) = map.get(&key).cloned() else { continue };
+                let Some(c1) = map.get(&key).cloned() else {
+                    continue;
+                };
                 for (pos, &elem) in key.iter().enumerate() {
                     if let Some(u) = fn_sq_arg(g, elem, "sin") {
                         let cos_u_sq = g.pow(g.function("cos", [u]), g.integer(2));
@@ -1043,7 +1041,11 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
             if c.is_zero() {
                 continue;
             }
-            let core_expr = if core.len() == 1 { core[0] } else { g.mul(core) };
+            let core_expr = if core.len() == 1 {
+                core[0]
+            } else {
+                g.mul(core)
+            };
             let term = if c.is_one() {
                 core_expr
             } else if c == -BigRational::one() {
@@ -1187,10 +1189,12 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                                     ("cot", "sin") => Some(Some(g.function("cos", [a1[0]]))),
                                     ("tanh", "cosh") => Some(Some(g.function("sinh", [a1[0]]))),
                                     ("coth", "sinh") => Some(Some(g.function("cosh", [a1[0]]))),
-                                    ("sec", "cos") | ("csc", "sin") | ("tan", "cot")
-                                    | ("sech", "cosh") | ("csch", "sinh") | ("tanh", "coth") => {
-                                        Some(None)
-                                    }
+                                    ("sec", "cos")
+                                    | ("csc", "sin")
+                                    | ("tan", "cot")
+                                    | ("sech", "cosh")
+                                    | ("csch", "sinh")
+                                    | ("tanh", "coth") => Some(None),
                                     _ => None,
                                 };
                                 if let Some(opt_e) = rep {
@@ -1374,7 +1378,10 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                 }
                 // i^2 -> -1 for both Symbol("i") and Constant::I
                 let is_i = is_imag_unit(g, sb);
-                if is_i && let Some(qe) = as_rat(g, se) && qe.is_integer() {
+                if is_i
+                    && let Some(qe) = as_rat(g, se)
+                    && qe.is_integer()
+                {
                     let four = num_bigint::BigInt::from(4);
                     let rem4 = (qe.numer() % &four + &four) % &four;
                     if let Some(r) = rem4.to_i64() {
@@ -1387,8 +1394,10 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                     }
                 }
                 // Euler's identity: e^(i * q * pi)
-                if matches!(g.get(sb).kind, ExprKind::Number(Number::Constant(algebra_core::Constant::E)))
-                    && let Some(kq) = extract_i_pi_rational(g, se)
+                if matches!(
+                    g.get(sb).kind,
+                    ExprKind::Number(Number::Constant(algebra_core::Constant::E))
+                ) && let Some(kq) = extract_i_pi_rational(g, se)
                 {
                     let two = BigRational::from_integer(2.into());
                     let mut r = kq;
@@ -1422,7 +1431,11 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                         && e_i32.abs() <= 64
                         && !(qb.is_zero() && e_i32 < 0)
                     {
-                        let p = if e_i32 >= 0 { qb.pow(e_i32) } else { qb.recip().pow(-e_i32) };
+                        let p = if e_i32 >= 0 {
+                            qb.pow(e_i32)
+                        } else {
+                            qb.recip().pow(-e_i32)
+                        };
                         return crate::poly::expr_from_rational(g, &p);
                     }
                 }
@@ -1490,7 +1503,9 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                             let pi = g.constant(algebra_core::Constant::Pi);
                             return g.div(pi, g.integer(4));
                         }
-                        "atan" | "arctan" if as_rat(g, a) == Some(BigRational::from_integer((-1).into())) => {
+                        "atan" | "arctan"
+                            if as_rat(g, a) == Some(BigRational::from_integer((-1).into())) =>
+                        {
                             let pi = g.constant(algebra_core::Constant::Pi);
                             return g.neg(g.div(pi, g.integer(4)));
                         }
@@ -1517,7 +1532,10 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                             {
                                 return ee;
                             }
-                            if let ExprKind::Function { name: inner_n, args: inner_a } = g.get(a).kind
+                            if let ExprKind::Function {
+                                name: inner_n,
+                                args: inner_a,
+                            } = g.get(a).kind
                                 && g.symbols.resolve(inner_n).as_deref() == Some("exp")
                                 && inner_a.len() == 1
                                 && (!contains_imaginary_unit(g, inner_a[0])
@@ -1547,8 +1565,14 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                                     return g.neg(g.constant(algebra_core::Constant::I));
                                 }
                             }
-                            if let ExprKind::Function { name: inner_n, args: inner_a } = g.get(a).kind
-                                && matches!(g.symbols.resolve(inner_n).as_deref(), Some("ln" | "log"))
+                            if let ExprKind::Function {
+                                name: inner_n,
+                                args: inner_a,
+                            } = g.get(a).kind
+                                && matches!(
+                                    g.symbols.resolve(inner_n).as_deref(),
+                                    Some("ln" | "log")
+                                )
                                 && inner_a.len() == 1
                             {
                                 return inner_a[0];
@@ -1601,7 +1625,12 @@ fn as_rat(g: &ExprGraph, e: ExprId) -> Option<BigRational> {
                         }
                         _ => {}
                     }
-                } else if sargs.len() == 2 && matches!(fn_name.as_str(), "log" | "mod" | "Mod" | "gcd" | "lcm" | "binomial") {
+                } else if sargs.len() == 2
+                    && matches!(
+                        fn_name.as_str(),
+                        "log" | "mod" | "Mod" | "gcd" | "lcm" | "binomial"
+                    )
+                {
                     if fn_name == "log" && is_one_id(g, sargs[0]) {
                         return g.integer(0);
                     }
@@ -1633,12 +1662,16 @@ fn post_simplify_algebraic_with_assumptions(
 ) -> ExprId {
     fn ast_size(g: &ExprGraph, e: ExprId) -> usize {
         match &g.get(e).kind {
-            ExprKind::Add(xs) | ExprKind::Mul(xs) => 1 + xs.iter().map(|&x| ast_size(g, x)).sum::<usize>(),
+            ExprKind::Add(xs) | ExprKind::Mul(xs) => {
+                1 + xs.iter().map(|&x| ast_size(g, x)).sum::<usize>()
+            }
             ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
                 1 + ast_size(g, *a) + ast_size(g, *b)
             }
             ExprKind::Neg(a) => 1 + ast_size(g, *a),
-            ExprKind::Function { args, .. } => 1 + args.iter().map(|&x| ast_size(g, x)).sum::<usize>(),
+            ExprKind::Function { args, .. } => {
+                1 + args.iter().map(|&x| ast_size(g, x)).sum::<usize>()
+            }
             _ => 1,
         }
     }

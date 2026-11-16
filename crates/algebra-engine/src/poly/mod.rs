@@ -220,7 +220,10 @@ impl UniPoly {
     }
 
     pub fn leading_coeff(&self) -> BigRational {
-        self.coeffs.last().cloned().unwrap_or_else(BigRational::zero)
+        self.coeffs
+            .last()
+            .cloned()
+            .unwrap_or_else(BigRational::zero)
     }
 
     pub fn add(&self, other: &Self) -> Self {
@@ -429,7 +432,10 @@ impl UniPoly {
                     let name = graph.symbols.resolve(*s).unwrap_or_default();
                     Err(AlgebraError::DomainViolation {
                         domain: "UniPoly".into(),
-                        reason: format!("Unexpected parameter symbol '{}' in univariate polynomial", name),
+                        reason: format!(
+                            "Unexpected parameter symbol '{}' in univariate polynomial",
+                            name
+                        ),
                     })
                 }
             }
@@ -456,14 +462,12 @@ impl UniPoly {
                 let q = Self::from_expr(graph, *den, var)?;
                 if q.is_zero() {
                     return Err(AlgebraError::DivisionByZero {
-                domain: "Polynomial".into(),
-            });
+                        domain: "Polynomial".into(),
+                    });
                 }
                 if q.degree() == 0 {
                     let c = q.leading_coeff();
-                    return Ok(Self::from_coeffs(
-                        p.coeffs.iter().map(|x| x / &c).collect(),
-                    ));
+                    return Ok(Self::from_coeffs(p.coeffs.iter().map(|x| x / &c).collect()));
                 }
                 let (quot, rem) = p.div_rem(&q)?;
                 if rem.is_zero() {
@@ -482,21 +486,26 @@ impl UniPoly {
                         return Err(AlgebraError::DomainViolation {
                             domain: "UniPoly".into(),
                             reason: "Non-constant exponent in polynomial".into(),
-                        })
+                        });
                     }
                 };
                 if !e_rat.is_integer() || e_rat.is_negative() {
                     return Err(AlgebraError::DomainViolation {
                         domain: "UniPoly".into(),
-                        reason: format!("Polynomial exponent must be a non-negative integer, got {}", e_rat),
+                        reason: format!(
+                            "Polynomial exponent must be a non-negative integer, got {}",
+                            e_rat
+                        ),
                     });
                 }
-                let exp_u32 = e_rat.numer().to_u32().ok_or_else(|| {
-                    AlgebraError::DomainViolation {
-                        domain: "UniPoly".into(),
-                        reason: "Polynomial exponent exceeds u32".into(),
-                    }
-                })?;
+                let exp_u32 =
+                    e_rat
+                        .numer()
+                        .to_u32()
+                        .ok_or_else(|| AlgebraError::DomainViolation {
+                            domain: "UniPoly".into(),
+                            reason: "Polynomial exponent exceeds u32".into(),
+                        })?;
                 if exp_u32 > 1000 {
                     return Err(AlgebraError::DomainViolation {
                         domain: "UniPoly".into(),
@@ -517,7 +526,10 @@ impl UniPoly {
         if self.is_zero() {
             return graph.integer(0);
         }
-        let var_name = graph.symbols.resolve(var).unwrap_or_else(|| "x".to_string());
+        let var_name = graph
+            .symbols
+            .resolve(var)
+            .unwrap_or_else(|| "x".to_string());
         let x_sym = graph.symbol(&var_name);
         let mut terms = Vec::new();
         for (deg, c) in self.coeffs.iter().enumerate().rev() {
@@ -753,7 +765,18 @@ fn extract_symbolic_coeffs_desc(
         let zero = g.integer(0);
         a.resize(n, zero);
         b.resize(n, zero);
-        a.into_iter().zip(b).map(|(x, y)| if x == zero { y } else if y == zero { x } else { g.add([x, y]) }).collect()
+        a.into_iter()
+            .zip(b)
+            .map(|(x, y)| {
+                if x == zero {
+                    y
+                } else if y == zero {
+                    x
+                } else {
+                    g.add([x, y])
+                }
+            })
+            .collect()
     }
     fn poly_mul(g: &ExprGraph, a: &[ExprId], b: &[ExprId]) -> Vec<ExprId> {
         if a.is_empty() || b.is_empty() {
@@ -762,11 +785,19 @@ fn extract_symbolic_coeffs_desc(
         let zero = g.integer(0);
         let mut out = vec![zero; a.len() + b.len() - 1];
         for (i, &x) in a.iter().enumerate() {
-            if x == zero { continue; }
+            if x == zero {
+                continue;
+            }
             for (j, &y) in b.iter().enumerate() {
-                if y == zero { continue; }
+                if y == zero {
+                    continue;
+                }
                 let prod = g.mul([x, y]);
-                out[i + j] = if out[i + j] == zero { prod } else { g.add([out[i + j], prod]) };
+                out[i + j] = if out[i + j] == zero {
+                    prod
+                } else {
+                    g.add([out[i + j], prod])
+                };
             }
         }
         out

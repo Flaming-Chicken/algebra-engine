@@ -77,6 +77,22 @@ impl LimitEngine {
             }
         }
 
+        // 1b. A two-sided limit through abs / sign / floor exists only if
+        // both one-sided values agree (x / |x| at 0 does not).
+        if direction == LimitDirection::TwoSided
+            && !pos_inf
+            && !neg_inf
+            && Self::has_nonsmooth_function(graph, expr)
+            && let Ok(at) = graph.evalf(point, &crate::numeric::EvalContext::default())
+            && let (Some(left), Some(right)) = (
+                Self::one_sided_numeric(graph, expr, wrt, at.to_f64(), false),
+                Self::one_sided_numeric(graph, expr, wrt, at.to_f64(), true),
+            )
+            && (left - right).abs() > 1e-6 * left.abs().max(right.abs()).max(1.0)
+        {
+            return Ok(graph.constant(algebra_core::Constant::Undefined));
+        }
+
         // 2. Direct substitution with constant simplification
         let sub = graph.substitute(expr, wrt, point);
         let simplified_sub = Self::simplify_constants(graph, sub);
@@ -563,9 +579,272 @@ impl LimitEngine {
             }
         }
 
+        if let Some(res) = Self::algebraic_limit_at_infinity(graph, expr, wrt) {
+            return Ok(res);
+        }
+
         Err(AlgebraError::EvaluationError(
             "Gruntz MRV asymptotic limit heuristic fallback".into(),
         ))
+    }
+
+    /// Dominant term `c · x^p` of an algebraic expression as `x → +∞`.
+    ///
+    /// Handles constants, `x`, products, quotients, constant powers (so
+    /// `sqrt`) and sums. Returns `None` when the dominant terms of a sum
+    /// cancel and the remainder cannot be read off exactly, or when the
+    /// expression is not algebraic in `x`.
+    fn leading_term(graph: &ExprGraph, id: ExprId, wrt: SymbolId) -> Option<(f64, f64)> {
+        let ctx = crate::numeric::EvalContext::default();
+        if !graph.has_symbol(id, wrt) {
+            let v = graph.evalf(id, &ctx).ok()?.to_f64();
+            return v.is_finite().then_some((v, 0.0));
+        }
+        match &graph.get(id).kind {
+            ExprKind::Symbol(sym) if *sym == wrt => Some((1.0, 1.0)),
+            ExprKind::Neg(inner) => {
+                let (c, e) = Self::leading_term(graph, *inner, wrt)?;
+                Some((-c, e))
+            }
+            ExprKind::Mul(factors) => {
+                let mut acc = (1.0, 0.0);
+                for &f in factors.iter() {
+                    let (c, e) = Self::leading_term(graph, f, wrt)?;
+                    acc = (acc.0 * c, acc.1 + e);
+                }
+                Some(acc)
+            }
+            ExprKind::Div(num, den) => {
+                let (cn, en) = Self::leading_term(graph, *num, wrt)?;
+                let (cd, ed) = Self::leading_term(graph, *den, wrt)?;
+                (cd != 0.0).then_some((cn / cd, en - ed))
+            }
+            ExprKind::Pow(base, exp) if !graph.has_symbol(*exp, wrt) => {
+                let r = graph.evalf(*exp, &ctx).ok()?.to_f64();
+                Self::leading_power(Self::leading_term(graph, *base, wrt)?, r)
+            }
+            ExprKind::Function { name, args } if args.len() == 1 => {
+                let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+                if fn_name == "sqrt" {
+                    Self::leading_power(Self::leading_term(graph, args[0], wrt)?, 0.5)
+                } else {
+                    None
+                }
+            }
+            ExprKind::Add(_) | ExprKind::Sub(..) => {
+                let mut terms = Vec::new();
+                Self::flatten_sum(graph, id, false, &mut terms);
+                let mut leads = Vec::with_capacity(terms.len());
+                for &(t, negated) in &terms {
+                    let (c, e) = Self::leading_term(graph, t, wrt)?;
+                    leads.push((if negated { -c } else { c }, e, t));
+                }
+                let top = leads.iter().map(|l| l.1).fold(f64::NEG_INFINITY, f64::max);
+                let scale = leads.iter().map(|l| l.0.abs()).fold(0.0, f64::max).max(1.0);
+                let sum_at = |e: f64| -> f64 {
+                    leads.iter().filter(|l| (l.1 - e).abs() < 1e-9).map(|l| l.0).sum()
+                };
+                let top_sum = sum_at(top);
+                if top_sum.abs() > 1e-9 * scale {
+                    return Some((top_sum, top));
+                }
+                // The dominant terms cancel. The next order is only exact if
+                // every term is a single monomial with no hidden lower orders.
+                if !leads.iter().all(|l| Self::is_monomial(graph, l.2, wrt)) {
+                    return None;
+                }
+                let mut exps: Vec<f64> = leads.iter().map(|l| l.1).collect();
+                exps.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+                exps.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+                for e in exps {
+                    let c = sum_at(e);
+                    if c.abs() > 1e-9 * scale {
+                        return Some((c, e));
+                    }
+                }
+                Some((0.0, 0.0))
+            }
+            _ => None,
+        }
+    }
+
+    /// `(c · x^p)^r`, defined when the base's leading coefficient allows it.
+    fn leading_power((c, e): (f64, f64), r: f64) -> Option<(f64, f64)> {
+        if c < 0.0 && r.fract() != 0.0 {
+            return None;
+        }
+        let coeff = c.powf(r);
+        coeff.is_finite().then_some((coeff, e * r))
+    }
+
+    /// Flatten nested `Add` / `Sub` / `Neg` into signed terms.
+    fn flatten_sum(graph: &ExprGraph, id: ExprId, negated: bool, out: &mut Vec<(ExprId, bool)>) {
+        match &graph.get(id).kind {
+            ExprKind::Add(terms) => {
+                for &t in terms.iter() {
+                    Self::flatten_sum(graph, t, negated, out);
+                }
+            }
+            ExprKind::Sub(a, b) => {
+                Self::flatten_sum(graph, *a, negated, out);
+                Self::flatten_sum(graph, *b, !negated, out);
+            }
+            ExprKind::Neg(inner) => Self::flatten_sum(graph, *inner, !negated, out),
+            _ => out.push((id, negated)),
+        }
+    }
+
+    /// True for `c · x^k` built only from constants, `x`, products and constant powers.
+    fn is_monomial(graph: &ExprGraph, id: ExprId, wrt: SymbolId) -> bool {
+        if !graph.has_symbol(id, wrt) {
+            return true;
+        }
+        match &graph.get(id).kind {
+            ExprKind::Symbol(_) => true,
+            ExprKind::Neg(inner) => Self::is_monomial(graph, *inner, wrt),
+            ExprKind::Mul(factors) => factors.iter().all(|&f| Self::is_monomial(graph, f, wrt)),
+            ExprKind::Pow(base, exp) => {
+                !graph.has_symbol(*exp, wrt) && Self::is_monomial(graph, *base, wrt)
+            }
+            _ => false,
+        }
+    }
+
+    /// The limit value for a dominant term `c · x^p` as `x → +∞`.
+    fn limit_from_leading(graph: &ExprGraph, (c, e): (f64, f64)) -> ExprId {
+        if e > 1e-9 && c != 0.0 {
+            return graph.constant(if c < 0.0 {
+                algebra_core::Constant::NegInfinity
+            } else {
+                algebra_core::Constant::Infinity
+            });
+        }
+        if e < -1e-9 || c == 0.0 {
+            return graph.integer(0);
+        }
+        Self::exact_or_float(graph, c)
+    }
+
+    /// A small exact rational when `v` is one to within rounding, else a float.
+    fn exact_or_float(graph: &ExprGraph, v: f64) -> ExprId {
+        for den in 1..=1000i64 {
+            let num = (v * den as f64).round();
+            if (v - num / den as f64).abs() < 1e-12 * v.abs().max(1.0) && num.abs() < 1e15 {
+                return if den == 1 {
+                    graph.integer(num as i64)
+                } else {
+                    graph.rational(num as i64, den)
+                };
+            }
+        }
+        graph.float(v)
+    }
+
+    /// Limits at `+∞` of algebraic expressions, by dominant-term analysis.
+    ///
+    /// Covers what polynomial-ratio analysis cannot: radicals
+    /// (`sqrt(x^2 + x) - x`, via rationalisation when the dominant terms
+    /// cancel) and powers with a variable exponent (`x^(1/x)`).
+    fn algebraic_limit_at_infinity(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> Option<ExprId> {
+        // f^g with both depending on x: f^g = exp(g · ln f), and for
+        // f ~ c·x^p, g ~ d·x^q the exponent behaves like d·x^q·(p·ln x + ln c).
+        if let ExprKind::Pow(base, exp) = graph.get(expr).kind
+            && graph.has_symbol(exp, wrt)
+        {
+            let (c, p_exp) = Self::leading_term(graph, base, wrt)?;
+            let (d, q) = Self::leading_term(graph, exp, wrt)?;
+            if c <= 0.0 {
+                return None;
+            }
+            if q < -1e-9 || d == 0.0 {
+                return Some(graph.integer(1));
+            }
+            // Sign of d · ln(base) for large x: ln x dominates when p != 0.
+            let log_sign = if p_exp.abs() > 1e-9 { p_exp } else { c.ln() };
+            if q > 1e-9 {
+                if log_sign == 0.0 {
+                    return None; // 1^∞ is handled by the caller.
+                }
+                return Some(if d * log_sign > 0.0 {
+                    graph.constant(algebra_core::Constant::Infinity)
+                } else {
+                    graph.integer(0)
+                });
+            }
+            // q == 0: the exponent tends to the constant d.
+            let lead = Self::leading_power((c, p_exp), d)?;
+            return Some(Self::limit_from_leading(graph, lead));
+        }
+
+        if let Some(lead) = Self::leading_term(graph, expr, wrt) {
+            return Some(Self::limit_from_leading(graph, lead));
+        }
+
+        // ∞ - ∞ with a square root: A - B = (A² - B²) / (A + B).
+        let mut terms = Vec::new();
+        Self::flatten_sum(graph, expr, false, &mut terms);
+        if terms.len() != 2 {
+            return None;
+        }
+        let signed = |(t, negated): (ExprId, bool)| if negated { graph.neg(t) } else { t };
+        let (a, b) = (signed(terms[0]), signed(terms[1]));
+        let square = |t: ExprId| -> ExprId {
+            let inner = match &graph.get(t).kind {
+                ExprKind::Neg(u) => *u,
+                _ => t,
+            };
+            if let ExprKind::Function { name, args } = &graph.get(inner).kind
+                && args.len() == 1
+                && graph.symbols.resolve(*name).as_deref() == Some("sqrt")
+            {
+                return args[0];
+            }
+            graph.pow(inner, graph.integer(2))
+        };
+        // A + B here is the original expression, so A - B is its conjugate.
+        let conjugate = graph.sub(a, b);
+        let numerator = crate::simplify::transformations::AlgebraicTransformations::expand(
+            graph,
+            graph.sub(square(a), square(b)),
+        );
+        let (cn, en) = Self::leading_term(graph, numerator, wrt)?;
+        let (cd, ed) = Self::leading_term(graph, conjugate, wrt)?;
+        (cd != 0.0).then(|| Self::limit_from_leading(graph, (cn / cd, en - ed)))
+    }
+
+    /// Numeric value of `expr` as `x` approaches `at` from one side, if it settles.
+    fn one_sided_numeric(
+        graph: &ExprGraph,
+        expr: ExprId,
+        wrt: SymbolId,
+        at: f64,
+        from_right: bool,
+    ) -> Option<f64> {
+        let name = graph.symbols.resolve(wrt)?;
+        let eval_at = |h: f64| -> Option<f64> {
+            let x = if from_right { at + h } else { at - h };
+            let mut bindings = std::collections::HashMap::new();
+            bindings.insert(name.clone(), x);
+            let ctx = crate::numeric::EvalContext::with_bindings(15, bindings);
+            let v = graph.evalf(expr, &ctx).ok()?.to_f64();
+            v.is_finite().then_some(v)
+        };
+        let (coarse, fine) = (eval_at(1e-5)?, eval_at(1e-7)?);
+        ((coarse - fine).abs() <= 1e-3 * fine.abs().max(1.0)).then_some(fine)
+    }
+
+    /// True if `expr` contains a function that can jump (`abs`, `sign`, `floor`, `ceil`).
+    fn has_nonsmooth_function(graph: &ExprGraph, id: ExprId) -> bool {
+        let node = graph.get(id);
+        if let ExprKind::Function { name, .. } = &node.kind
+            && matches!(
+                graph.symbols.resolve(*name).as_deref(),
+                Some("abs" | "sign" | "sgn" | "floor" | "ceil")
+            )
+        {
+            return true;
+        }
+        node.children().iter().any(|&c| Self::has_nonsmooth_function(graph, c))
     }
 
     fn eval_pole_limit(

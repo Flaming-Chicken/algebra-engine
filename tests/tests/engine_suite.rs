@@ -189,6 +189,9 @@ mod reference_oracle_tests;
 #[path = "engine/audit_regression_tests.rs"]
 mod audit_regression_tests;
 
+#[path = "engine/audit_followup_tests.rs"]
+mod audit_followup_tests;
+
 #[path = "engine/uncertainty_multivalued_tests.rs"]
 mod uncertainty_multivalued_tests;
 

@@ -621,7 +621,10 @@ fn factor_big_recursive(n: BigUint, counts: &mut BTreeMap<BigUint, u32>) {
     }
 }
 
-/// Factor an arbitrary-precision positive integer into sorted `(prime, exponent)` pairs.
+/// Factor an arbitrary-precision positive integer into sorted `(factor, exponent)` pairs.
+///
+/// Every factor is prime unless Pollard rho ran out of budget on it, in which
+/// case the unfactored composite is returned as-is; check with [`is_prime_big`].
 pub fn big_prime_factors(n: &BigUint) -> Vec<(BigUint, u32)> {
     use num_traits::Zero as _;
     let two = BigUint::from(2u8);
@@ -676,7 +679,12 @@ pub fn decompose_bigint(n: &num_bigint::BigInt) -> PrimeDecompositionResult {
         } else {
             Vec::new()
         };
-        let desc = if classes.is_empty() {
+        // Pollard rho can run out of budget on a number Miller-Rabin has
+        // already shown composite. Say so rather than list it as a prime.
+        let unfactored = p.to_u64().is_none() && !is_prime_big(&p);
+        let desc = if unfactored {
+            "Composite: no factor found within the Pollard rho budget".to_string()
+        } else if classes.is_empty() {
             "Arbitrary-precision probable prime (Miller-Rabin)".to_string()
         } else {
             classes
@@ -686,12 +694,20 @@ pub fn decompose_bigint(n: &num_bigint::BigInt) -> PrimeDecompositionResult {
                 .join("; ")
         };
         summary.push(format!("{}^{}: {}", p, exp, desc));
-        if exp == 1 {
-            eq_parts.push(p.to_string());
-            latex_parts.push(p.to_string());
+        let (text_note, latex_note) = if unfactored {
+            (
+                " [composite, not factored]",
+                "\\,\\text{[composite, not factored]}",
+            )
         } else {
-            eq_parts.push(format!("{}^{}", p, exp));
-            latex_parts.push(format!("{}^{{{}}}", p, exp));
+            ("", "")
+        };
+        if exp == 1 {
+            eq_parts.push(format!("{p}{text_note}"));
+            latex_parts.push(format!("{p}{latex_note}"));
+        } else {
+            eq_parts.push(format!("{p}^{exp}{text_note}"));
+            latex_parts.push(format!("{p}^{{{exp}}}{latex_note}"));
         }
         factors.push(PrimeFactor {
             factor_repr: p.to_string(),

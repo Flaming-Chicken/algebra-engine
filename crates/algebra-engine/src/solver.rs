@@ -535,7 +535,9 @@ impl SymbolicSolver for ExprGraph {
                 .resolve(target)
                 .unwrap_or_else(|| "x".to_string());
             let target_node = self.symbol(&target_name);
-            return Ok(vec![self.function("RootOf", [eq, target_node, self.integer(1)])]);
+            return Ok(vec![
+                self.function("RootOf", [eq, target_node, self.integer(1)]),
+            ]);
         };
 
         // Simplify coefficients and trim trailing symbolic zeros
@@ -618,7 +620,8 @@ impl SymbolicSolver for ExprGraph {
                 let target_node = self.symbol(&target_name);
                 let mut root_of_nodes = Vec::with_capacity(deg);
                 for k in 1..=deg {
-                    root_of_nodes.push(self.function("RootOf", [eq, target_node, self.integer(k as i64)]));
+                    root_of_nodes
+                        .push(self.function("RootOf", [eq, target_node, self.integer(k as i64)]));
                 }
                 return Ok(root_of_nodes);
             }
@@ -683,7 +686,11 @@ impl SymbolicSolver for ExprGraph {
             let root_of = self.function("RootOf", [eq, target_node, k_node]);
             root_of_nodes.push(root_of);
         }
-        let _ = (zero, BigRational::zero().to_i64(), coeffs[deg].is_sign_positive());
+        let _ = (
+            zero,
+            BigRational::zero().to_i64(),
+            coeffs[deg].is_sign_positive(),
+        );
         Ok(root_of_nodes)
     }
 }
@@ -906,9 +913,14 @@ fn solve_transcendental(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Opti
                             vec![asin_c]
                         });
                     }
-                    let mut all = graph.solveset(graph.sub(arg, asin_c), target).unwrap_or_default();
+                    let mut all = graph
+                        .solveset(graph.sub(arg, asin_c), target)
+                        .unwrap_or_default();
                     if distinct_second {
-                        for r in graph.solveset(graph.sub(arg, sup_c), target).unwrap_or_default() {
+                        for r in graph
+                            .solveset(graph.sub(arg, sup_c), target)
+                            .unwrap_or_default()
+                        {
                             if !all.contains(&r) {
                                 all.push(r);
                             }
@@ -929,9 +941,14 @@ fn solve_transcendental(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Opti
                             vec![acos_c]
                         });
                     }
-                    let mut all = graph.solveset(graph.sub(arg, acos_c), target).unwrap_or_default();
+                    let mut all = graph
+                        .solveset(graph.sub(arg, acos_c), target)
+                        .unwrap_or_default();
                     if distinct_second {
-                        for r in graph.solveset(graph.sub(arg, neg_acos_c), target).unwrap_or_default() {
+                        for r in graph
+                            .solveset(graph.sub(arg, neg_acos_c), target)
+                            .unwrap_or_default()
+                        {
                             if !all.contains(&r) {
                                 all.push(r);
                             }
@@ -972,7 +989,8 @@ fn solve_transcendental(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Opti
                             .filter(|&r| {
                                 let sub_arg = graph.substitute(arg, target, r);
                                 if let Some(a_val) = eval_constant_real(graph, sub_arg) {
-                                    a_val >= -1e-12 && (a_val.max(0.0).sqrt() - target_c).abs() < 1e-8
+                                    a_val >= -1e-12
+                                        && (a_val.max(0.0).sqrt() - target_c).abs() < 1e-8
                                 } else {
                                     true
                                 }
@@ -1435,7 +1453,9 @@ fn extract_poly_coeffs(graph: &ExprGraph, expr: ExprId, target: SymbolId) -> Opt
     }
 }
 
-fn extract_square_factor_bigint(n: &num_bigint::BigInt) -> (num_bigint::BigInt, num_bigint::BigInt) {
+fn extract_square_factor_bigint(
+    n: &num_bigint::BigInt,
+) -> (num_bigint::BigInt, num_bigint::BigInt) {
     use num_bigint::BigInt;
     use num_traits::{One as _, Zero as _};
     let mut k = BigInt::one();
@@ -1582,7 +1602,8 @@ fn solve_symbolic_quadratic(graph: &ExprGraph, a: ExprId, b: ExprId, c: ExprId) 
     let radical_part = if let Some(d_val) = eval_constant_real(graph, disc)
         && d_val < -1e-12
     {
-        let pos_disc = Simplifier::simplify(graph, graph.neg(disc)).unwrap_or_else(|_| graph.neg(disc));
+        let pos_disc =
+            Simplifier::simplify(graph, graph.neg(disc)).unwrap_or_else(|_| graph.neg(disc));
         let sqrt_pos = graph.pow(pos_disc, half);
         let i_sym = graph.constant(algebra_core::Constant::I);
         graph.mul([sqrt_pos, i_sym])
@@ -1631,7 +1652,10 @@ fn bigint_divisors(n: &num_bigint::BigInt, cap: usize) -> Vec<num_bigint::BigInt
     small
 }
 
-fn eval_rational_poly(coeffs: &[num_rational::BigRational], x: &num_rational::BigRational) -> num_rational::BigRational {
+fn eval_rational_poly(
+    coeffs: &[num_rational::BigRational],
+    x: &num_rational::BigRational,
+) -> num_rational::BigRational {
     use num_traits::Zero as _;
     let mut acc = num_rational::BigRational::zero();
     for c in coeffs.iter().rev() {
@@ -1658,7 +1682,10 @@ fn deflate_rational_poly(
 
 fn rational_roots_deflated(
     coeffs: &[num_rational::BigRational],
-) -> (Vec<num_rational::BigRational>, Vec<num_rational::BigRational>) {
+) -> (
+    Vec<num_rational::BigRational>,
+    Vec<num_rational::BigRational>,
+) {
     use num::Integer as _;
     use num_bigint::BigInt;
     use num_rational::BigRational;
@@ -1794,7 +1821,9 @@ fn solve_rational_polynomial(
     if deg == 4 && rem[3].is_zero() && rem[1].is_zero() {
         let u_roots = exact_quadratic_roots(graph, &rem[4], &rem[2], &rem[0]);
         for u in u_roots {
-            for r in solve_symbolic_quadratic(graph, graph.integer(1), graph.integer(0), graph.neg(u)) {
+            for r in
+                solve_symbolic_quadratic(graph, graph.integer(1), graph.integer(0), graph.neg(u))
+            {
                 if !results.contains(&r) {
                     results.push(r);
                 }
@@ -1853,7 +1882,8 @@ fn solve_rational_polynomial(
             let theta = (-q / (2.0 * r)).clamp(-1.0, 1.0).acos();
             let mult = 2.0 * (-p / 3.0).sqrt();
             for m in 0..3 {
-                let val = mult * ((theta + 2.0 * (m as f64) * std::f64::consts::PI) / 3.0).cos() + shift;
+                let val =
+                    mult * ((theta + 2.0 * (m as f64) * std::f64::consts::PI) / 3.0).cos() + shift;
                 results.push(graph.float(val));
             }
             return Ok(results);
@@ -1951,16 +1981,52 @@ fn solve_transcendental_quadratic(
 
     let mut x_roots = Vec::new();
     for u_r in u_roots {
+        // ln of a positive constant, e.g. ln(sqrt(7)) as ln(7)/2.
+        let ln_positive = |u: ExprId| -> ExprId {
+            ln_of_positive_power(graph, u).unwrap_or_else(|| {
+                let ln_u = graph.function("ln", [u]);
+                Simplifier::simplify(graph, ln_u).unwrap_or(ln_u)
+            })
+        };
         let simp = if u_r == graph.integer(1) {
             graph.integer(0)
+        } else if eval_constant_real(graph, u_r).is_some_and(|v| v < 0.0) {
+            // Principal complex branch, as for exp(x) = -1: ln(u) = ln(-u) + i*pi.
+            let i_pi = graph.mul([
+                graph.constant(algebra_core::Constant::I),
+                graph.constant(algebra_core::Constant::Pi),
+            ]);
+            let magnitude = Simplifier::simplify(graph, graph.neg(u_r)).unwrap_or(u_r);
+            if magnitude == graph.integer(1) {
+                i_pi
+            } else {
+                let sum = graph.add([ln_positive(magnitude), i_pi]);
+                Simplifier::simplify(graph, sum).unwrap_or(sum)
+            }
         } else {
-            let ln_u = graph.function("ln", [u_r]);
-            Simplifier::simplify(graph, ln_u).unwrap_or(ln_u)
+            ln_positive(u_r)
         };
-        x_roots.push(simp);
+        if !x_roots.contains(&simp) {
+            x_roots.push(simp);
+        }
     }
 
     Some(x_roots)
+}
+
+/// `ln(b^p)` as `p * ln(b)` for a positive constant base `b`, e.g. `ln(sqrt(7))` as `ln(7)/2`.
+fn ln_of_positive_power(graph: &ExprGraph, u: ExprId) -> Option<ExprId> {
+    let ExprKind::Pow(base, exp) = graph.get(u).kind else {
+        return None;
+    };
+    if eval_constant_real(graph, base).is_none_or(|b| b <= 0.0)
+        || eval_constant_real(graph, exp).is_none()
+    {
+        return None;
+    }
+    let ln_b = graph.function("ln", [base]);
+    let scaled = graph.mul([exp, ln_b]);
+    Some(Simplifier::simplify(graph, scaled).unwrap_or(scaled))
 }
 
 fn replace_exact(graph: &ExprGraph, expr: ExprId, pattern: ExprId, replacement: ExprId) -> ExprId {
@@ -2057,7 +2123,12 @@ fn find_non_polynomial_subexpr(
     }
 }
 
-fn flatten_signed_add_terms(graph: &ExprGraph, id: ExprId, sign: i64, out: &mut Vec<(i64, ExprId)>) {
+fn flatten_signed_add_terms(
+    graph: &ExprGraph,
+    id: ExprId,
+    sign: i64,
+    out: &mut Vec<(i64, ExprId)>,
+) {
     match &graph.get(id).kind {
         ExprKind::Add(ts) => {
             for &t in ts {
@@ -2144,7 +2215,12 @@ fn collect_log_args(graph: &ExprGraph, id: ExprId, target: SymbolId, out: &mut V
     }
 }
 
-fn verify_candidate_root_numeric(graph: &ExprGraph, eq: ExprId, target: SymbolId, root: ExprId) -> bool {
+fn verify_candidate_root_numeric(
+    graph: &ExprGraph,
+    eq: ExprId,
+    target: SymbolId,
+    root: ExprId,
+) -> bool {
     use crate::numeric::NumericalEval as _;
     let ctx = crate::numeric::EvalContext::default();
     let mut log_args = Vec::new();
@@ -2348,7 +2424,9 @@ fn extract_exact_symbolic_sqrt(graph: &ExprGraph, id: ExprId) -> Option<ExprId> 
                     None
                 }
             }
-            ExprKind::Div(a, b) => Some(graph.div(sqrt_monomial(graph, *a)?, sqrt_monomial(graph, *b)?)),
+            ExprKind::Div(a, b) => {
+                Some(graph.div(sqrt_monomial(graph, *a)?, sqrt_monomial(graph, *b)?))
+            }
             ExprKind::Pow(base, exp) => {
                 if let ExprKind::Number(Number::Integer(k)) = graph.get(*exp).kind
                     && k > 0

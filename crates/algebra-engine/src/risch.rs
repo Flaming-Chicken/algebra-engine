@@ -320,11 +320,9 @@ impl RischIntegrator {
                             };
                         }
                         let one = graph.integer(1);
-                        let n_plus_1 = crate::simplify::Simplifier::simplify(
-                            graph,
-                            graph.add([*exp, one]),
-                        )
-                        .unwrap_or_else(|_| graph.add([*exp, one]));
+                        let n_plus_1 =
+                            crate::simplify::Simplifier::simplify(graph, graph.add([*exp, one]))
+                                .unwrap_or_else(|_| graph.add([*exp, one]));
                         let u_pow = graph.pow(*base, n_plus_1);
                         let denom = if d_base == graph.integer(1) {
                             n_plus_1
@@ -336,9 +334,13 @@ impl RischIntegrator {
 
                     // Integrate powers of ln(a*x + b)^n for positive integer n >= 2
                     if let ExprKind::Function { name, args } = graph.get(*base).kind
-                        && matches!(graph.symbols.resolve(name).as_deref(), Some("ln") | Some("log"))
+                        && matches!(
+                            graph.symbols.resolve(name).as_deref(),
+                            Some("ln") | Some("log")
+                        )
                         && args.len() == 1
-                        && let ExprKind::Number(algebra_core::Number::Integer(n)) = graph.get(*exp).kind
+                        && let ExprKind::Number(algebra_core::Number::Integer(n)) =
+                            graph.get(*exp).kind
                         && (2..=8).contains(&n)
                     {
                         let inner = args[0];
@@ -370,7 +372,9 @@ impl RischIntegrator {
                         } else {
                             graph.pow(*base, graph.integer(-k))
                         };
-                        if let Ok(res) = Self::integrate_rational(graph, graph.integer(1), positive_den, wrt) {
+                        if let Ok(res) =
+                            Self::integrate_rational(graph, graph.integer(1), positive_den, wrt)
+                        {
                             return Ok(res);
                         }
                     }
@@ -430,8 +434,8 @@ impl RischIntegrator {
         if d_den != graph.integer(0) {
             let ratio_raw = graph.div(num, d_den);
             let ratio_cancel = crate::simplify::AlgebraicTransformations::cancel(graph, ratio_raw);
-            let ratio = crate::simplify::Simplifier::simplify(graph, ratio_cancel)
-                .unwrap_or(ratio_cancel);
+            let ratio =
+                crate::simplify::Simplifier::simplify(graph, ratio_cancel).unwrap_or(ratio_cancel);
             if !graph.has_symbol(ratio, wrt) {
                 let log_den = graph.function("ln", [den]);
                 return Ok(if ratio == graph.integer(1) {
@@ -710,6 +714,12 @@ impl RischIntegrator {
             }
         }
 
+        if factors.len() == 2
+            && let Some(result) = Self::integrate_power_times_elementary(graph, factors, x)
+        {
+            return Ok(result);
+        }
+
         if factors.len() == 2 {
             let (u, v) = (factors[0], factors[1]);
 
@@ -851,6 +861,101 @@ impl RischIntegrator {
 }
 
 impl RischIntegrator {
+    /// `∫ x^n · f(x) dx` for `f` in `exp`, `sin`, `cos` (any `n` from 3 to 20) and
+    /// `ln` (any `n` from 2 to 20), by repeated integration by parts (tabular method).
+    ///
+    /// Degrees 1 and 2 are handled by the fixed formulas in `integrate_products`.
+    fn integrate_power_times_elementary(
+        graph: &ExprGraph,
+        factors: &[ExprId],
+        x: ExprId,
+    ) -> Option<ExprId> {
+        let power_of_x = |id: ExprId| -> Option<u32> {
+            if let ExprKind::Pow(base, exp) = graph.get(id).kind
+                && base == x
+                && let ExprKind::Number(algebra_core::Number::Integer(n)) = graph.get(exp).kind
+                && (2..=20).contains(&n)
+            {
+                return Some(n as u32);
+            }
+            None
+        };
+        let (n, func) = match (power_of_x(factors[0]), power_of_x(factors[1])) {
+            (Some(n), _) => (n, factors[1]),
+            (None, Some(n)) => (n, factors[0]),
+            _ => return None,
+        };
+        let ExprKind::Function { name, args } = graph.get(func).kind else {
+            return None;
+        };
+        if args.len() != 1 || args[0] != x {
+            return None;
+        }
+        let fn_name = graph.symbols.resolve(name).unwrap_or_default();
+
+        // x^(n - k), omitted when the exponent is zero.
+        let x_pow = |p: u32| -> Option<ExprId> {
+            match p {
+                0 => None,
+                1 => Some(x),
+                _ => Some(graph.pow(x, graph.integer(i64::from(p)))),
+            }
+        };
+        // n! / (n - k)!: the k-th derivative coefficient of x^n.
+        let falling = |k: u32| -> i64 { ((n - k + 1)..=n).map(i64::from).product() };
+        let signed_term = |coeff: i64, power: u32, factor: Option<ExprId>| -> ExprId {
+            let mut parts = vec![graph.integer(coeff)];
+            parts.extend(x_pow(power));
+            parts.extend(factor);
+            if parts.len() == 1 {
+                parts[0]
+            } else {
+                graph.mul(parts)
+            }
+        };
+
+        match fn_name.as_str() {
+            "ln" | "log" if n >= 2 => {
+                // ∫ x^n ln x = x^(n+1) ln x / (n+1) - x^(n+1) / (n+1)^2
+                let m = i64::from(n) + 1;
+                let x_m = graph.pow(x, graph.integer(m));
+                let ln_x = graph.function("ln", [x]);
+                let first = graph.mul([graph.rational(1, m), x_m, ln_x]);
+                let second = graph.mul([graph.rational(1, m * m), x_m]);
+                Some(graph.sub(first, second))
+            }
+            "exp" if n >= 3 => {
+                // e^x · Σ (-1)^k n!/(n-k)! x^(n-k)
+                let terms: Vec<ExprId> = (0..=n)
+                    .map(|k| {
+                        let sign = if k % 2 == 0 { 1 } else { -1 };
+                        signed_term(sign * falling(k), n - k, None)
+                    })
+                    .collect();
+                Some(graph.mul([graph.function("exp", [x]), graph.add(terms)]))
+            }
+            "sin" | "cos" if n >= 3 => {
+                let sin_x = graph.function("sin", [x]);
+                let cos_x = graph.function("cos", [x]);
+                // Antiderivative cycle A_1, A_2, ... of the trig factor.
+                let cycle: [(i64, ExprId); 4] = if fn_name == "sin" {
+                    [(-1, cos_x), (-1, sin_x), (1, cos_x), (1, sin_x)]
+                } else {
+                    [(1, sin_x), (-1, cos_x), (-1, sin_x), (1, cos_x)]
+                };
+                let terms: Vec<ExprId> = (0..=n)
+                    .map(|k| {
+                        let (cycle_sign, trig) = cycle[(k % 4) as usize];
+                        let sign = if k % 2 == 0 { 1 } else { -1 };
+                        signed_term(sign * cycle_sign * falling(k), n - k, Some(trig))
+                    })
+                    .collect();
+                Some(graph.add(terms))
+            }
+            _ => None,
+        }
+    }
+
     fn try_u_substitution(
         graph: &ExprGraph,
         factors: &[ExprId],
@@ -893,7 +998,8 @@ impl RischIntegrator {
             let ratio_raw = graph.div(expr, du);
             let togethered = crate::simplify::AlgebraicTransformations::together(graph, ratio_raw);
             let canceled = crate::simplify::AlgebraicTransformations::cancel(graph, togethered);
-            let reduced = crate::simplify::Simplifier::simplify(graph, canceled).unwrap_or(canceled);
+            let reduced =
+                crate::simplify::Simplifier::simplify(graph, canceled).unwrap_or(canceled);
 
             let in_u = replace_subexpr(graph, reduced, cand, u_var);
             if !graph.has_symbol(in_u, wrt)
@@ -1109,7 +1215,11 @@ fn integrate_univariate_rational(
         let a = &q.coeffs[2];
         let b = &q.coeffs[1];
         let c = &q.coeffs[0];
-        let r0 = rem.coeffs.first().cloned().unwrap_or_else(BigRational::zero);
+        let r0 = rem
+            .coeffs
+            .first()
+            .cloned()
+            .unwrap_or_else(BigRational::zero);
         let r1 = rem.coeffs.get(1).cloned().unwrap_or_else(BigRational::zero);
 
         let two = BigRational::from_integer(BigInt::from(2));
@@ -1218,14 +1328,16 @@ fn integrate_univariate_rational(
                             graph.mul([crate::poly::expr_from_rational(graph, &outer_c), atan_t])
                         }
                     } else {
-                        let k_sym = graph.function("sqrt", [crate::poly::expr_from_rational(graph, &k_sq)]);
+                        let k_sym =
+                            graph.function("sqrt", [crate::poly::expr_from_rational(graph, &k_sq)]);
                         let shifted = if h.is_zero() {
                             x_sym
                         } else {
                             graph.add([x_sym, crate::poly::expr_from_rational(graph, &h)])
                         };
                         let atan_t = graph.function("atan", [graph.div(shifted, k_sym)]);
-                        let outer = graph.div(crate::poly::expr_from_rational(graph, &(&cap_k / a)), k_sym);
+                        let outer =
+                            graph.div(crate::poly::expr_from_rational(graph, &(&cap_k / a)), k_sym);
                         graph.mul([outer, atan_t])
                     };
                     parts.push(k_expr);
@@ -1236,7 +1348,10 @@ fn integrate_univariate_rational(
                 ));
             }
         }
-    } else if rem.coeffs[0..rem.coeffs.len() - 1].iter().all(|c| c.is_zero()) {
+    } else if rem.coeffs[0..rem.coeffs.len() - 1]
+        .iter()
+        .all(|c| c.is_zero())
+    {
         // Pure monomial denominator c0 * x^d -> check if q is monomial a*x^n
         if q.coeffs[0..deg_q].iter().all(|c| c.is_zero()) {
             let qd = &q.coeffs[deg_q];
@@ -1262,9 +1377,8 @@ fn integrate_univariate_rational(
             }
         } else {
             let rat_expr = graph.div(num, den);
-            let pfd = crate::simplify::AlgebraicTransformations::partial_fractions(
-                graph, rat_expr, wrt,
-            );
+            let pfd =
+                crate::simplify::AlgebraicTransformations::partial_fractions(graph, rat_expr, wrt);
             if pfd != rat_expr && matches!(graph.get(pfd).kind, ExprKind::Add(_)) {
                 return RischIntegrator::integrate(graph, pfd, wrt);
             }
@@ -1298,9 +1412,8 @@ fn integrate_univariate_rational(
             }
         } else {
             let rat_expr = graph.div(num, den);
-            let pfd = crate::simplify::AlgebraicTransformations::partial_fractions(
-                graph, rat_expr, wrt,
-            );
+            let pfd =
+                crate::simplify::AlgebraicTransformations::partial_fractions(graph, rat_expr, wrt);
             if pfd != rat_expr && matches!(graph.get(pfd).kind, ExprKind::Add(_)) {
                 return RischIntegrator::integrate(graph, pfd, wrt);
             }

@@ -106,3 +106,104 @@ fn unfactored_composite_is_not_reported_as_prime() {
         res.output_text
     );
 }
+
+// --- Integration by parts for higher-degree polynomial factors ---------------
+
+use algebra_core::parser::ExprParser;
+use algebra_engine::calculus::SymbolicCalculus;
+use algebra_engine::numeric::{EvalContext, NumericalEval};
+use algebra_engine::solver::SymbolicSolver;
+use std::collections::HashMap;
+
+fn eval_at(graph: &ExprGraph, expr: algebra_core::ExprId, x: f64) -> f64 {
+    let mut bindings = HashMap::new();
+    bindings.insert("x".to_string(), x);
+    graph
+        .evalf(expr, &EvalContext::with_bindings(15, bindings))
+        .unwrap()
+        .to_f64()
+}
+
+/// The derivative of the antiderivative must equal the integrand.
+#[test]
+fn power_times_elementary_integrals_differentiate_back() {
+    let integrands = [
+        "x^3 * exp(x)",
+        "x^4 * exp(x)",
+        "x^6 * exp(x)",
+        "x^3 * sin(x)",
+        "x^4 * sin(x)",
+        "x^5 * sin(x)",
+        "x^3 * cos(x)",
+        "x^4 * cos(x)",
+        "x^2 * ln(x)",
+        "x^3 * ln(x)",
+        "x^7 * ln(x)",
+    ];
+    for src in integrands {
+        let graph = ExprGraph::new();
+        let x_sym = graph.symbols.get_or_intern("x");
+        let integrand = ExprParser::new(&graph).parse(src).unwrap();
+        let antiderivative = graph
+            .integrate(integrand, x_sym)
+            .unwrap_or_else(|e| panic!("`{src}` did not integrate: {e}"));
+        let back = graph.diff(antiderivative, x_sym);
+        for point in [0.7, 1.3, 2.1] {
+            let want = eval_at(&graph, integrand, point);
+            let got = eval_at(&graph, back, point);
+            assert!(
+                (want - got).abs() <= 1e-8 * want.abs().max(1.0),
+                "d/dx of the antiderivative of `{src}` at {point}: {got}, expected {want}"
+            );
+        }
+    }
+}
+
+// --- Equations in e^x ---------------------------------------------------------
+
+fn complex_roots(src: &str) -> Vec<(f64, f64)> {
+    let graph = ExprGraph::new();
+    let x_sym = graph.symbols.get_or_intern("x");
+    let eq = ExprParser::new(&graph).parse(src).unwrap();
+    let mut roots: Vec<(f64, f64)> = graph
+        .solveset(eq, x_sym)
+        .unwrap()
+        .iter()
+        .map(|&r| {
+            graph
+                .evalf(r, &EvalContext::default())
+                .unwrap()
+                .as_complex()
+        })
+        .collect();
+    roots.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    roots
+}
+
+#[test]
+fn exp_quadratic_gives_clean_principal_roots() {
+    // u = e^x and u^2 = 7: u = ±sqrt(7), so x = ln(7)/2 and ln(7)/2 + i*pi.
+    // The second used to print as the unevaluated ln(-sqrt(7)).
+    assert_eq!(
+        run("solve exp(2*x) = 7, x")
+            .output_text
+            .trim()
+            .chars()
+            .take(31)
+            .collect::<String>(),
+        "Solutions for x: [1/2 · ln(7), "
+    );
+    let half_ln7 = 7f64.ln() / 2.0;
+    let roots = complex_roots("exp(2*x) - 7");
+    assert_eq!(roots.len(), 2);
+    assert!((roots[0].0 - half_ln7).abs() < 1e-12 && roots[0].1.abs() < 1e-12);
+    assert!(
+        (roots[1].0 - half_ln7).abs() < 1e-12 && (roots[1].1 - std::f64::consts::PI).abs() < 1e-12
+    );
+
+    // Both roots positive: (u - 1)(u - 2) = 0 gives 0 and ln 2, both real.
+    let roots = complex_roots("exp(2*x) - 3*exp(x) + 2");
+    assert_eq!(roots.len(), 2);
+    assert!(roots[0].0.abs() < 1e-12 && (roots[1].0 - 2f64.ln()).abs() < 1e-12);
+    assert!(roots.iter().all(|r| r.1.abs() < 1e-12));
+}

@@ -210,8 +210,14 @@ pub enum NumberTheoryOpKind {
     ContinuedFraction { val_str: String, max_terms: usize },
     /// Primality check (Miller-Rabin)
     IsPrime { n: u64 },
+    /// Arbitrary-precision / expression primality check
+    IsPrimeExpr { expr_str: String },
     /// Extended Euclidean Algorithm $\gcd(a, b) = a x + b y$
     ExtendedGcd { a: i64, b: i64 },
+    /// Arbitrary-precision / expression Extended GCD
+    ExtendedGcdExpr { a_str: String, b_str: String },
+    /// Arbitrary-precision / expression LCM
+    LcmExpr { a_str: String, b_str: String },
     /// Legendre symbol $(a/p)$
     Legendre { a: i64, p: u64 },
     /// Prime decomposition with algebraic prime classification across number systems
@@ -471,6 +477,25 @@ pub enum SymbolRoleKind {
     Constant,
 }
 
+/// Multi-valued Riemann surface and branch-cut operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BranchOpKind {
+    /// Evaluate a multi-valued function on a specified Riemann sheet or custom branch cut.
+    /// E.g., `branch_cut("sqrt", sheet = 1, cut = "(-infinity, 0]")` or `branch ln(-1), sheet = 1`.
+    EvaluateSheet {
+        function: String,
+        expression: Option<String>,
+        sheet: i64,
+        cut: Option<String>,
+    },
+    /// Enumerate all algebraic branches or a finite sheet fiber of an expression.
+    /// E.g., `branches (-1)^(1/3)` or `branches lambert_w(-0.2)`.
+    AllBranches {
+        expression: String,
+        max_branches: usize,
+    },
+}
+
 /// System / interactive REPL commands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SystemCommandKind {
@@ -643,6 +668,18 @@ pub enum MathOperation {
         value: Option<f64>,
         unit: Option<String>,
     },
+
+    /// Symbol declaration with explicit uncertainty (`a: Parameter = 5.0 +/- 0.1 [m]` or `a = 5.0 ± 0.1 [m]`).
+    UncertainDeclaration {
+        name: String,
+        role: SymbolRoleKind,
+        value: f64,
+        uncertainty: f64,
+        unit: Option<String>,
+    },
+
+    /// Multi-valued complex branch evaluation & Riemann sheet selection.
+    Branch(BranchOpKind),
 
     /// Set-builder domain restriction: e.g. `{ x in Reals | -5 <= x <= 5 }`
     SetBuilder {

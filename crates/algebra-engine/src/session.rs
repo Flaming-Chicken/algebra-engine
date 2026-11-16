@@ -12,7 +12,9 @@ use crate::numeric::{EvalContext, NumericalEval};
 use algebra_core::domain::{DomainBound, MathContext};
 use algebra_core::operation::{MathOperation, SymbolRoleKind};
 use algebra_core::parser::{parse_domain_declaration, parse_operation};
-use algebra_core::{ExprGraph, ExprId, ExprKind};
+use algebra_core::{
+    ExprGraph, ExprId, ExprKind, RealInterval, parse_value_uncertainty_and_unit,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -26,6 +28,8 @@ pub struct SymbolSessionMeta {
     pub max_val: f64,
     pub domain_type: String,
     pub unit_str: Option<String>,
+    #[serde(default)]
+    pub uncertainty: Option<f64>,
 }
 
 impl SymbolSessionMeta {
@@ -39,6 +43,7 @@ impl SymbolSessionMeta {
             max_val: val + 10.0,
             domain_type: "Reals".to_string(),
             unit_str: None,
+            uncertainty: None,
         }
     }
 
@@ -57,6 +62,12 @@ pub struct UraeSession {
     pub graph: ExprGraph,
     /// Numerical symbol bindings (for evaluation & slider scrubbing).
     pub bindings: HashMap<String, f64>,
+    /// 1-sigma parameter uncertainties (from `a = 5.0 +/- 0.1` etc.).
+    pub uncertainties: HashMap<String, f64>,
+    /// Certified parameter interval bounds.
+    pub intervals: HashMap<String, RealInterval>,
+    /// Optional active Riemann sheet index `k`.
+    pub branch_sheet: Option<i64>,
     /// Declared domain bounds per symbol.
     pub symbol_domains: HashMap<String, DomainBound>,
     /// Rich metadata for symbols (role, value, unit, domain).
@@ -81,6 +92,9 @@ impl UraeSession {
         Self {
             graph: ExprGraph::new(),
             bindings: HashMap::new(),
+            uncertainties: HashMap::new(),
+            intervals: HashMap::new(),
+            branch_sheet: None,
             symbol_domains: HashMap::new(),
             symbol_metadata: HashMap::new(),
             user_functions: HashMap::new(),
@@ -93,6 +107,9 @@ impl UraeSession {
     pub fn reset(&mut self) {
         self.graph = ExprGraph::new();
         self.bindings.clear();
+        self.uncertainties.clear();
+        self.intervals.clear();
+        self.branch_sheet = None;
         self.symbol_domains.clear();
         self.symbol_metadata.clear();
         self.user_functions.clear();
@@ -141,9 +158,71 @@ impl UraeSession {
         self.symbol_domains.get(name)
     }
 
-    /// Build an `ExecutionContext` populated with current bindings and symbol summary.
+    /// Set or update a symbol's numerical binding along with optional 1-sigma uncertainty.
+    pub fn set_uncertain_binding(
+        &mut self,
+        name: impl Into<String>,
+        val: f64,
+        uncertainty: f64,
+        unit: Option<String>,
+    ) {
+        let name_str = name.into();
+        let sigma = uncertainty.abs();
+        self.bindings.insert(name_str.clone(), val);
+        self.uncertainties.insert(name_str.clone(), sigma);
+        self.intervals.insert(
+            name_str.clone(),
+            RealInterval::from_center_uncertainty(val, sigma),
+        );
+        let entry = self
+            .symbol_metadata
+            .entry(name_str.clone())
+            .or_insert_with(|| SymbolSessionMeta::new(&name_str, val, SymbolRoleKind::Parameter));
+        entry.cur_val = entry.clamp(val);
+        entry.uncertainty = Some(sigma);
+        if let Some(u) = unit {
+            entry.unit_str = Some(u);
+        }
+    }
+
+    /// Build an `ExecutionContext` populated with current bindings, uncertainties, assumptions, and symbol summary.
     pub fn execution_context(&self) -> ExecutionContext {
         let mut ctx = ExecutionContext::with_bindings(self.bindings.clone());
+        ctx.uncertainties = self.uncertainties.clone();
+        ctx.intervals = self.intervals.clone();
+        ctx.branch_sheet = self.branch_sheet;
+        for (name, bound) in &self.symbol_domains {
+            let sym = self.graph.symbols.get_or_intern(name);
+            match bound.domain_type.as_str() {
+                "Positive" => ctx.assumptions.assume(sym, crate::logic::Predicate::Positive),
+                "NonNegative" | "Naturals" => {
+                    ctx.assumptions.assume(sym, crate::logic::Predicate::NonNegative);
+                    if bound.domain_type == "Naturals" {
+                        ctx.assumptions.assume(sym, crate::logic::Predicate::Integer);
+                    }
+                }
+                "Negative" => ctx.assumptions.assume(sym, crate::logic::Predicate::Negative),
+                "NonZero" => ctx.assumptions.assume(sym, crate::logic::Predicate::NonZero),
+                "Integers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Integer),
+                "EvenIntegers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Even),
+                "OddIntegers" => ctx.assumptions.assume(sym, crate::logic::Predicate::Odd),
+                "Prime" => ctx.assumptions.assume(sym, crate::logic::Predicate::Prime),
+                "Reals" => {
+                    ctx.assumptions.assume(sym, crate::logic::Predicate::Real);
+                    if let Some(min) = bound.min_val {
+                        if min > 0.0 {
+                            ctx.assumptions.assume(sym, crate::logic::Predicate::Positive);
+                        } else if min >= 0.0 {
+                            ctx.assumptions.assume(sym, crate::logic::Predicate::NonNegative);
+                        }
+                    }
+                    if let Some(max) = bound.max_val && max < 0.0 {
+                        ctx.assumptions.assume(sym, crate::logic::Predicate::Negative);
+                    }
+                }
+                _ => {}
+            }
+        }
         let mut summary = Vec::new();
         for (name, meta) in &self.symbol_metadata {
             summary.push((
@@ -175,39 +254,40 @@ impl UraeSession {
             return OperationExecutor::execute(&self.graph, &op, &ctx);
         }
 
-        // Check for explicit parameter assignment `param = val`
+        // Check for explicit parameter assignment `param = val [+/- err] [unit]`
         if let Some((name, val_str)) = trimmed.split_once('=') {
             let name = name.trim();
-            let val_str = val_str.trim();
+            let val_norm = val_str.trim().replace("\\pm", "±");
             if !name.contains(':')
                 && !name.contains('(')
                 && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && let Some((f, err_opt, unit_opt)) = parse_value_uncertainty_and_unit(&val_norm)
             {
-                let (num_str, unit_opt) = if let Some(bracket_idx) = val_str.find('[') {
-                    let u = val_str[bracket_idx..]
-                        .trim_matches(|c| c == '[' || c == ']')
-                        .trim();
-                    (&val_str[..bracket_idx], Some(u.to_string()))
-                } else {
-                    (val_str, None)
-                };
-
-                if let Ok(f) = num_str.trim().parse::<f64>() {
-                    self.set_binding(name, f);
-                    if let Some(u) = unit_opt
-                        && let Some(meta) = self.symbol_metadata.get_mut(name)
-                    {
-                        meta.unit_str = Some(u);
-                    }
+                if let Some(sigma) = err_opt {
+                    self.set_uncertain_binding(name, f, sigma, unit_opt);
                     let meta = self.symbol_metadata.get(name).unwrap();
                     let unit_suffix = meta
                         .unit_str
                         .as_ref()
                         .map(|u| format!(" [{}]", u))
                         .unwrap_or_default();
-                    let out = format!("{} = {:.4}{}", name, meta.cur_val, unit_suffix);
+                    let out = format!("{} = {} ± {}{}", name, f, sigma, unit_suffix);
                     return OperationResult::success(out.clone(), out.clone(), out);
                 }
+                self.set_binding(name, f);
+                if let Some(u) = unit_opt
+                    && let Some(meta) = self.symbol_metadata.get_mut(name)
+                {
+                    meta.unit_str = Some(u);
+                }
+                let meta = self.symbol_metadata.get(name).unwrap();
+                let unit_suffix = meta
+                    .unit_str
+                    .as_ref()
+                    .map(|u| format!(" [{}]", u))
+                    .unwrap_or_default();
+                let out = format!("{} = {:.4}{}", name, meta.cur_val, unit_suffix);
+                return OperationResult::success(out.clone(), out.clone(), out);
             }
         }
 
@@ -266,16 +346,33 @@ impl UraeSession {
         }
 
         // Substitute numerical bindings for constant parameters in calculus or general expressions
-        if !self.bindings.is_empty() {
+        if !self.bindings.is_empty()
+            || trimmed.contains("±")
+            || trimmed.contains("+/-")
+            || trimmed.contains("uncertain(")
+            || trimmed.contains("interval(")
+        {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
                 let syms = self.extract_symbols(expr_id);
-                // If all symbols are bound, evaluate directly
-                if !syms.is_empty() && syms.iter().all(|s| self.bindings.contains_key(s)) {
-                    let mut eval_ctx = EvalContext::default();
-                    for (k, v) in &self.bindings {
-                        eval_ctx.bindings.insert(k.clone(), *v);
+                let all_bound = !syms.is_empty() && syms.iter().all(|s| self.bindings.contains_key(s));
+                let has_unc_syms = syms
+                    .iter()
+                    .any(|s| self.uncertainties.get(s).copied().unwrap_or(0.0) > 0.0 || self.intervals.contains_key(s));
+                let has_unc_nodes = crate::numeric::expr_has_uncertainty_nodes(&self.graph, expr_id);
+                if all_bound && (has_unc_syms || has_unc_nodes) || (syms.is_empty() && has_unc_nodes) {
+                    let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
+                        .with_uncertainties(self.uncertainties.clone())
+                        .with_intervals(self.intervals.clone())
+                        .with_branch_sheet(self.branch_sheet);
+                    if let Ok(u) = crate::numeric::eval_uncertain(&self.graph, expr_id, &eval_ctx) {
+                        let out = u.format_unicode();
+                        let latex = u.format_latex();
+                        return OperationResult::success(out.clone(), latex, out);
                     }
+                } else if all_bound {
+                    let eval_ctx = EvalContext::with_bindings(50, self.bindings.clone())
+                        .with_branch_sheet(self.branch_sheet);
                     if let Ok(num) = self.graph.evalf(expr_id, &eval_ctx) {
                         let val_f64 = num.to_f64();
                         let val_str = if val_f64.fract() == 0.0 && val_f64.abs() < 1e12 {
@@ -310,6 +407,18 @@ impl UraeSession {
                     self.bindings.insert(name.clone(), val);
                 }
                 self.symbol_metadata.insert(name.clone(), meta);
+            }
+            MathOperation::UncertainDeclaration {
+                name,
+                role,
+                value,
+                uncertainty,
+                unit,
+            } => {
+                self.set_uncertain_binding(name, *value, *uncertainty, unit.clone());
+                if let Some(meta) = self.symbol_metadata.get_mut(name) {
+                    meta.role = *role;
+                }
             }
             MathOperation::DomainRestriction(bound) => {
                 self.set_domain(bound.clone());

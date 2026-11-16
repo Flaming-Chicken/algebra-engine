@@ -125,15 +125,34 @@ impl SymbolicOdeSolver {
             graph.symbol("x")
         };
 
+        let num_node = |v: f64| -> ExprId {
+            if (v - v.round()).abs() < 1e-12 && v.abs() < 1e15 {
+                graph.integer(v.round() as i64)
+            } else {
+                graph.float(v)
+            }
+        };
+        let scale_var = |c: f64| -> ExprId {
+            if (c - 1.0).abs() < 1e-12 {
+                var_x
+            } else if (c + 1.0).abs() < 1e-12 {
+                graph.neg(var_x)
+            } else {
+                graph.mul([num_node(c), var_x])
+            }
+        };
+
         if disc.abs() < 1e-12 {
             // Repeated root r = -b / (2a)
             let r = -b / (2.0 * a);
-            let r_node = graph.float(r);
-            let rx = graph.mul([r_node, var_x]);
-            let exp_rx = graph.function("exp", [rx]);
+            let exp_rx = if r.abs() < 1e-12 {
+                graph.integer(1)
+            } else {
+                graph.function("exp", [scale_var(r)])
+            };
             let c2_x = graph.mul([c2, var_x]);
             let inner = graph.add([c1, c2_x]);
-            let sol = graph.mul([inner, exp_rx]);
+            let sol = if r.abs() < 1e-12 { inner } else { graph.mul([inner, exp_rx]) };
             Ok(Simplifier::simplify(graph, sol).unwrap_or(sol))
         } else if disc > 0.0 {
             // Distinct real roots
@@ -141,17 +160,19 @@ impl SymbolicOdeSolver {
             let r1 = (-b + sqrt_d) / (2.0 * a);
             let r2 = (-b - sqrt_d) / (2.0 * a);
 
-            let r1_node = graph.float(r1);
-            let r2_node = graph.float(r2);
+            let exp_r1 = if r1.abs() < 1e-12 {
+                graph.integer(1)
+            } else {
+                graph.function("exp", [scale_var(r1)])
+            };
+            let exp_r2 = if r2.abs() < 1e-12 {
+                graph.integer(1)
+            } else {
+                graph.function("exp", [scale_var(r2)])
+            };
 
-            let r1_x = graph.mul([r1_node, var_x]);
-            let r2_x = graph.mul([r2_node, var_x]);
-
-            let exp_r1 = graph.function("exp", [r1_x]);
-            let exp_r2 = graph.function("exp", [r2_x]);
-
-            let term1 = graph.mul([c1, exp_r1]);
-            let term2 = graph.mul([c2, exp_r2]);
+            let term1 = if r1.abs() < 1e-12 { c1 } else { graph.mul([c1, exp_r1]) };
+            let term2 = if r2.abs() < 1e-12 { c2 } else { graph.mul([c2, exp_r2]) };
             let sol = graph.add([term1, term2]);
             Ok(Simplifier::simplify(graph, sol).unwrap_or(sol))
         } else {
@@ -159,20 +180,19 @@ impl SymbolicOdeSolver {
             let alpha = -b / (2.0 * a);
             let beta = (-disc).sqrt() / (2.0 * a);
 
-            let alpha_node = graph.float(alpha);
-            let beta_node = graph.float(beta);
-
-            let alpha_x = graph.mul([alpha_node, var_x]);
-            let beta_x = graph.mul([beta_node, var_x]);
-
-            let exp_alpha = graph.function("exp", [alpha_x]);
+            let beta_x = scale_var(beta);
             let cos_beta = graph.function("cos", [beta_x]);
             let sin_beta = graph.function("sin", [beta_x]);
 
             let c1_cos = graph.mul([c1, cos_beta]);
             let c2_sin = graph.mul([c2, sin_beta]);
             let inner = graph.add([c1_cos, c2_sin]);
-            let sol = graph.mul([exp_alpha, inner]);
+            let sol = if alpha.abs() < 1e-12 {
+                inner
+            } else {
+                let exp_alpha = graph.function("exp", [scale_var(alpha)]);
+                graph.mul([exp_alpha, inner])
+            };
             Ok(Simplifier::simplify(graph, sol).unwrap_or(sol))
         }
     }

@@ -536,10 +536,13 @@ impl MctsSearchEngine {
             }
 
             // Pick highest prior probability action
-            let (best_action, _) = policy
+            let (best_action, _) = match policy
                 .iter()
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap();
+            {
+                Some(p) => p,
+                None => break,
+            };
 
             if let Some(next_expr) = self.apply_action(graph, curr, best_action) {
                 if next_expr == curr {
@@ -592,45 +595,46 @@ impl MctsSearchEngine {
             if !nodes[curr_idx].untried_actions.is_empty()
                 && nodes[curr_idx].depth < self.config.max_depth
             {
-                let action = nodes[curr_idx].untried_actions.pop().unwrap();
-                let parent_expr = nodes[curr_idx].expr_id;
+                if let Some(action) = nodes[curr_idx].untried_actions.pop() {
+                    let parent_expr = nodes[curr_idx].expr_id;
 
-                if let Some(next_expr) = self.apply_action(graph, parent_expr, &action) {
-                    let child_policy = MctsPolicyHead::compute_policy(
-                        graph,
-                        next_expr,
-                        self.lemma_registry.as_ref(),
-                    );
-                    let mut child_actions = Vec::new();
-                    let mut prior_prob = 0.5;
+                    if let Some(next_expr) = self.apply_action(graph, parent_expr, &action) {
+                        let child_policy = MctsPolicyHead::compute_policy(
+                            graph,
+                            next_expr,
+                            self.lemma_registry.as_ref(),
+                        );
+                        let mut child_actions = Vec::new();
+                        let mut prior_prob = 0.5;
 
-                    for (a, p) in child_policy {
-                        if a == action {
-                            prior_prob = p;
+                        for (a, p) in child_policy {
+                            if a == action {
+                                prior_prob = p;
+                            }
+                            child_actions.push(a);
                         }
-                        child_actions.push(a);
-                    }
 
-                    let child_node = MctsNode::new(
-                        next_expr,
-                        Some(curr_idx),
-                        prior_prob,
-                        nodes[curr_idx].depth + 1,
-                        child_actions,
-                    );
-                    let new_idx = nodes.len();
-                    nodes.push(child_node);
-                    nodes[curr_idx].children.push((action, new_idx));
-                    expanded_idx = new_idx;
+                        let child_node = MctsNode::new(
+                            next_expr,
+                            Some(curr_idx),
+                            prior_prob,
+                            nodes[curr_idx].depth + 1,
+                            child_actions,
+                        );
+                        let new_idx = nodes.len();
+                        nodes.push(child_node);
+                        nodes[curr_idx].children.push((action, new_idx));
+                        expanded_idx = new_idx;
 
-                    // Update global best tracking
-                    let val = self.value_head.evaluate(graph, next_expr, target);
-                    if val > best_value {
-                        best_value = val;
-                        best_expr = next_expr;
-                    }
-                    if target == Some(next_expr) {
-                        target_reached = true;
+                        // Update global best tracking
+                        let val = self.value_head.evaluate(graph, next_expr, target);
+                        if val > best_value {
+                            best_value = val;
+                            best_expr = next_expr;
+                        }
+                        if target == Some(next_expr) {
+                            target_reached = true;
+                        }
                     }
                 }
             }

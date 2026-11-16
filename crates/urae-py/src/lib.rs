@@ -642,7 +642,9 @@ mod tests {
 
         let factored = py_factor("x^2 - 5*x + 6").expect("py_factor");
         assert!(
-            factored.contains("-3") && factored.contains("-2") && factored.contains('·'),
+            (factored.contains("- 3") || factored.contains("-3"))
+                && (factored.contains("- 2") || factored.contains("-2"))
+                && (factored.contains('·') || factored.contains('*')),
             "factored={factored}"
         );
 

@@ -114,14 +114,51 @@ impl SymbolicCalculus for ExprGraph {
             ExprKind::Pow(base, exp) => {
                 let b = *base;
                 let e = *exp;
-                let db = self.diff(b, wrt);
+                if !self.has_symbol(e, wrt) {
+                    let db = self.diff(b, wrt);
+                    if db == self.integer(0) {
+                        return self.integer(0);
+                    }
+                    let one = self.integer(1);
+                    let e_minus_1 = self.sub(e, one);
+                    let b_pow = self.pow(b, e_minus_1);
+                    let term = self.mul([e, b_pow]);
+                    self.mul([term, db])
+                } else {
+                    let db = self.diff(b, wrt);
+                    let de = self.diff(e, wrt);
+                    let zero = self.integer(0);
+                    let one = self.integer(1);
 
-                let one = self.integer(1);
-                let e_minus_1 = self.sub(e, one);
-                let b_pow = self.pow(b, e_minus_1);
+                    let mut inner_terms = Vec::new();
+                    if de != zero {
+                        let ln_b = self.function("ln", [b]);
+                        if de == one {
+                            inner_terms.push(ln_b);
+                        } else {
+                            inner_terms.push(self.mul([de, ln_b]));
+                        }
+                    }
+                    if db != zero {
+                        let b_term = if e == b && db == one {
+                            one
+                        } else if db == one {
+                            self.div(e, b)
+                        } else {
+                            self.div(self.mul([e, db]), b)
+                        };
+                        inner_terms.push(b_term);
+                    }
 
-                let term = self.mul([e, b_pow]);
-                self.mul([term, db])
+                    if inner_terms.is_empty() {
+                        zero
+                    } else if inner_terms.len() == 1 {
+                        self.mul([expr, inner_terms[0]])
+                    } else {
+                        let sum_inner = self.add(inner_terms);
+                        self.mul([expr, sum_inner])
+                    }
+                }
             }
             ExprKind::Neg(inner) => {
                 let d_inner = self.diff(*inner, wrt);
@@ -157,6 +194,68 @@ impl SymbolicCalculus for ExprGraph {
                         "tanh" => {
                             let cosh_sq = self.pow(self.function("cosh", [arg]), self.integer(-2));
                             self.mul([cosh_sq, darg])
+                        }
+                        "sec" => {
+                            let sec_arg = self.function("sec", [arg]);
+                            let tan_arg = self.function("tan", [arg]);
+                            self.mul([sec_arg, tan_arg, darg])
+                        }
+                        "csc" => {
+                            let csc_arg = self.function("csc", [arg]);
+                            let cot_arg = self.function("cot", [arg]);
+                            let neg_csc_cot = self.neg(self.mul([csc_arg, cot_arg]));
+                            self.mul([neg_csc_cot, darg])
+                        }
+                        "cot" => {
+                            let csc_sq = self.pow(self.function("csc", [arg]), self.integer(2));
+                            let neg_csc_sq = self.neg(csc_sq);
+                            self.mul([neg_csc_sq, darg])
+                        }
+                        "sech" => {
+                            let sech_arg = self.function("sech", [arg]);
+                            let tanh_arg = self.function("tanh", [arg]);
+                            let neg_sech_tanh = self.neg(self.mul([sech_arg, tanh_arg]));
+                            self.mul([neg_sech_tanh, darg])
+                        }
+                        "csch" => {
+                            let csch_arg = self.function("csch", [arg]);
+                            let coth_arg = self.function("coth", [arg]);
+                            let neg_csch_coth = self.neg(self.mul([csch_arg, coth_arg]));
+                            self.mul([neg_csch_coth, darg])
+                        }
+                        "coth" => {
+                            let csch_sq = self.pow(self.function("csch", [arg]), self.integer(2));
+                            let neg_csch_sq = self.neg(csch_sq);
+                            self.mul([neg_csch_sq, darg])
+                        }
+                        "asinh" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let one_plus_sq = self.add([arg_sq, one]);
+                            let half = self.rational(1, 2);
+                            let denom = self.pow(one_plus_sq, half);
+                            let deriv = self.div(self.integer(1), denom);
+                            self.mul([deriv, darg])
+                        }
+                        "acosh" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let sq_minus_one = self.sub(arg_sq, one);
+                            let half = self.rational(1, 2);
+                            let denom = self.pow(sq_minus_one, half);
+                            let deriv = self.div(self.integer(1), denom);
+                            self.mul([deriv, darg])
+                        }
+                        "atanh" => {
+                            let one = self.integer(1);
+                            let arg_sq = self.pow(arg, self.integer(2));
+                            let one_minus_sq = self.sub(one, arg_sq);
+                            let deriv = self.div(self.integer(1), one_minus_sq);
+                            self.mul([deriv, darg])
+                        }
+                        "abs" | "Abs" => {
+                            let sign_arg = self.function("sign", [arg]);
+                            self.mul([sign_arg, darg])
                         }
                         "asin" => {
                             let one = self.integer(1);
@@ -255,6 +354,11 @@ impl SymbolicCalculus for ExprGraph {
                             1,
                         ),
                     }
+                } else if args.len() == 2 && fn_name == "log" {
+                    let ln_u = self.function("ln", [args[0]]);
+                    let ln_b = self.function("ln", [args[1]]);
+                    let ratio = self.div(ln_u, ln_b);
+                    self.diff(ratio, wrt)
                 } else {
                     self.derivative(
                         expr,
@@ -371,30 +475,32 @@ impl SymbolicCalculus for ExprGraph {
     }
 
     fn taylor_series(&self, expr: ExprId, wrt: SymbolId, point: ExprId, order: u32) -> ExprId {
-        let mut terms = Vec::new();
         let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
         let x_sym = self.symbol(&wrt_name);
-        let x_minus_a = self.sub(x_sym, point);
+        let zero = self.integer(0);
+        let x_minus_a = if point == zero {
+            x_sym
+        } else {
+            self.sub(x_sym, point)
+        };
 
-        let mut current_deriv = expr;
-        let mut factorial = 1i64;
-
-        for n in 0..=order {
-            let eval_deriv = self.substitute(current_deriv, wrt, point);
-            if n == 0 {
-                terms.push(eval_deriv);
-            } else {
-                factorial *= n as i64;
-                let n_expr = self.integer(n as i64);
-                let pow_term = self.pow(x_minus_a, n_expr);
-                let coeff = self.div(eval_deriv, self.integer(factorial));
-                let term = self.mul([coeff, pow_term]);
-                terms.push(term);
+        // Removable singularity quotient f(x)/g(x) where g(point) == 0:
+        // Expand numerator and denominator via Taylor coefficients and divide power series directly.
+        if let ExprKind::Div(num, den) = self.get(expr).kind {
+            let sub_den = self.substitute(den, wrt, point);
+            let den_at_pt = crate::limits::LimitEngine::simplify_constants(self, sub_den);
+            let den_at_pt =
+                crate::simplify::Simplifier::simplify(self, den_at_pt).unwrap_or(den_at_pt);
+            if den_at_pt == zero
+                && let Some(q_coeffs) =
+                    taylor_div_coeffs(self, num, den, wrt, point, order as usize)
+            {
+                return build_taylor_poly(self, &q_coeffs, x_minus_a);
             }
-            current_deriv = self.diff(current_deriv, wrt);
         }
 
-        self.add(terms)
+        let coeffs = taylor_coeffs_vec(self, expr, wrt, point, order as usize);
+        build_taylor_poly(self, &coeffs, x_minus_a)
     }
 
     fn limit(&self, expr: ExprId, wrt: SymbolId, point: ExprId) -> AlgebraResult<ExprId> {
@@ -582,11 +688,142 @@ impl SymbolicCalculus for ExprGraph {
         lower: ExprId,
         upper: ExprId,
     ) -> AlgebraResult<ExprId> {
+        use crate::limits::{LimitDirection, LimitEngine};
+        use crate::numeric::NumericalEval as _;
+        use crate::solver::SymbolicSolver as _;
+        use algebra_core::{Constant, Number};
+
+        let ctx = crate::numeric::EvalContext::default();
+        let wrt_name = self.symbols.resolve(wrt).unwrap_or_else(|| "x".to_string());
+
+        let is_sym_inf = |id: ExprId| -> bool {
+            matches!(
+                &self.get(id).kind,
+                ExprKind::Symbol(s)
+                    if matches!(
+                        self.symbols.resolve(*s).as_deref(),
+                        Some("oo" | "inf" | "infinity" | "∞")
+                    )
+            )
+        };
+        let is_pos_inf_bound = |id: ExprId| -> bool {
+            matches!(
+                self.get(id).kind,
+                ExprKind::Number(Number::Constant(Constant::Infinity))
+            ) || is_sym_inf(id)
+        };
+        let is_neg_inf_bound = |id: ExprId| -> bool {
+            matches!(
+                self.get(id).kind,
+                ExprKind::Number(Number::Constant(Constant::NegInfinity))
+            ) || matches!(self.get(id).kind, ExprKind::Neg(inner) if is_pos_inf_bound(inner))
+        };
+        let is_inf_bound = |id: ExprId| -> bool { is_pos_inf_bound(id) || is_neg_inf_bound(id) };
+
+        let mut singular_lower = false;
+        let mut singular_upper = false;
+
+        // Check for interior denominator poles and flag boundary singularities for limit evaluation
+        if let (Ok(low_v), Ok(up_v)) = (
+            self.evalf(lower, &ctx).map(|v| v.to_f64()),
+            self.evalf(upper, &ctx).map(|v| v.to_f64()),
+        ) && low_v.is_finite()
+            && up_v.is_finite()
+        {
+            let lo = low_v.min(up_v);
+            let hi = low_v.max(up_v);
+            let mut dens = Vec::new();
+            collect_denominators(self, expr, wrt, &mut dens);
+            for den in dens {
+                if let Ok(roots) = self.solveset(den, wrt) {
+                    for r in roots {
+                        let real_part = match self.evalf(r, &ctx) {
+                            Ok(crate::numeric::BigValue::Real(rv)) => Some(rv),
+                            Ok(crate::numeric::BigValue::Complex(rv, iv)) if iv.abs() < 1e-9 => {
+                                Some(rv)
+                            }
+                            _ => None,
+                        };
+                        if let Some(rv) = real_part && rv.is_finite() {
+                            if (rv - low_v).abs() < 1e-9 {
+                                singular_lower = true;
+                            } else if (rv - up_v).abs() < 1e-9 {
+                                singular_upper = true;
+                            } else if rv > lo + 1e-9 && rv < hi - 1e-9 {
+                                return Err(AlgebraError::EvaluationError(format!(
+                                    "Definite integral diverges: singularity at {} = {}",
+                                    wrt_name, rv
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let f_antideriv = self.integrate(expr, wrt)?;
-        let f_b = self.substitute(f_antideriv, wrt, upper);
-        let f_a = self.substitute(f_antideriv, wrt, lower);
+
+        let eval_bound = |bound: ExprId, dir: LimitDirection, force_limit: bool| -> AlgebraResult<ExprId> {
+            let need_limit = force_limit || is_inf_bound(bound);
+            let raw = if need_limit {
+                LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
+            } else {
+                let sub = self.substitute(f_antideriv, wrt, bound);
+                let simp = crate::simplify::Simplifier::simplify(self, sub).unwrap_or(sub);
+                if matches!(
+                    self.get(simp).kind,
+                    ExprKind::Number(Number::Constant(
+                        Constant::Infinity | Constant::NegInfinity | Constant::Undefined
+                    ))
+                ) {
+                    LimitEngine::limit_directed(self, f_antideriv, wrt, bound, dir)?
+                } else {
+                    simp
+                }
+            };
+            if matches!(
+                self.get(raw).kind,
+                ExprKind::Number(Number::Constant(
+                    Constant::Infinity | Constant::NegInfinity | Constant::Undefined
+                ))
+            ) {
+                return Err(AlgebraError::EvaluationError(
+                    "Definite integral diverges at integration boundary".into(),
+                ));
+            }
+            Ok(raw)
+        };
+
+        let lower_dir = if is_pos_inf_bound(lower) {
+            LimitDirection::PositiveInfinity
+        } else if is_neg_inf_bound(lower) {
+            LimitDirection::NegativeInfinity
+        } else {
+            LimitDirection::FromRight
+        };
+        let upper_dir = if is_pos_inf_bound(upper) {
+            LimitDirection::PositiveInfinity
+        } else if is_neg_inf_bound(upper) {
+            LimitDirection::NegativeInfinity
+        } else {
+            LimitDirection::FromLeft
+        };
+
+        let f_b = eval_bound(upper, upper_dir, singular_upper)?;
+        let f_a = eval_bound(lower, lower_dir, singular_lower)?;
         let diff = self.sub(f_b, f_a);
-        Ok(crate::simplify::Simplifier::simplify(self, diff).unwrap_or(diff))
+        let res = crate::simplify::Simplifier::simplify(self, diff).unwrap_or(diff);
+
+        // Guard against finite non-convergent values (e.g. NaN / inf after subtraction)
+        if let Ok(val) = self.evalf(res, &ctx)
+            && !val.to_f64().is_finite()
+        {
+            return Err(AlgebraError::EvaluationError(
+                "Definite integral diverges at integration boundary".into(),
+            ));
+        }
+
+        Ok(res)
     }
 
     fn summation(
@@ -688,6 +925,176 @@ impl VariationalCalculus {
         let d_dt_dl_dqdot = graph.diff(dl_dqdot, t);
 
         graph.sub(d_dt_dl_dqdot, dl_dq)
+    }
+}
+
+fn collect_denominators(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    out: &mut Vec<ExprId>,
+) {
+    match &graph.get(expr).kind {
+        ExprKind::Div(n, d) => {
+            if graph.has_symbol(*d, wrt) {
+                out.push(*d);
+            }
+            collect_denominators(graph, *n, wrt, out);
+            collect_denominators(graph, *d, wrt, out);
+        }
+        ExprKind::Pow(b, e) => {
+            if graph.has_symbol(*b, wrt)
+                && matches!(
+                    graph.get(*e).kind,
+                    ExprKind::Number(algebra_core::Number::Integer(k)) if k < 0
+                )
+            {
+                out.push(*b);
+            } else if graph.has_symbol(*b, wrt) && matches!(graph.get(*e).kind, ExprKind::Neg(_)) {
+                out.push(*b);
+            }
+            collect_denominators(graph, *b, wrt, out);
+        }
+        ExprKind::Add(xs) | ExprKind::Mul(xs) => {
+            for &x in xs {
+                collect_denominators(graph, x, wrt, out);
+            }
+        }
+        ExprKind::Sub(a, b) => {
+            collect_denominators(graph, *a, wrt, out);
+            collect_denominators(graph, *b, wrt, out);
+        }
+        ExprKind::Neg(a) => collect_denominators(graph, *a, wrt, out),
+        ExprKind::Function { args, .. } => {
+            for &a in args {
+                collect_denominators(graph, a, wrt, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn taylor_coeffs_vec(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    point: ExprId,
+    order: usize,
+) -> Vec<ExprId> {
+    let mut coeffs = Vec::with_capacity(order + 1);
+    let mut current_deriv = expr;
+    let mut factorial = num_bigint::BigInt::from(1u8);
+    let zero = graph.integer(0);
+
+    for n in 0..=order {
+        if n > 0 {
+            factorial *= n;
+        }
+        let sub = graph.substitute(current_deriv, wrt, point);
+        let c_sub = crate::limits::LimitEngine::simplify_constants(graph, sub);
+        let mut eval_deriv =
+            crate::simplify::Simplifier::simplify(graph, c_sub).unwrap_or(c_sub);
+        if crate::limits::LimitEngine::is_indeterminate(graph, eval_deriv)
+            && let ExprKind::Div(num, den) = graph.get(current_deriv).kind
+            && let Ok(Some(lim)) =
+                crate::limits::LimitEngine::eval_lhopital(graph, num, den, wrt, point, 6)
+        {
+            eval_deriv = crate::simplify::Simplifier::simplify(graph, lim).unwrap_or(lim);
+        }
+        if eval_deriv == zero {
+            coeffs.push(zero);
+        } else if n <= 1 {
+            coeffs.push(eval_deriv);
+        } else {
+            let fact_expr = if let Ok(v) = i64::try_from(&factorial) {
+                graph.integer(v)
+            } else {
+                graph.intern(algebra_core::ExprNode::new(
+                    algebra_core::Domain::Integers,
+                    ExprKind::Number(algebra_core::Number::BigInteger(factorial.clone())),
+                ))
+            };
+            let raw = graph.div(eval_deriv, fact_expr);
+            coeffs.push(crate::simplify::Simplifier::simplify(graph, raw).unwrap_or(raw));
+        }
+        if n < order {
+            current_deriv = graph.diff(current_deriv, wrt);
+        }
+    }
+    coeffs
+}
+
+fn taylor_div_coeffs(
+    graph: &ExprGraph,
+    num: ExprId,
+    den: ExprId,
+    wrt: SymbolId,
+    point: ExprId,
+    order: usize,
+) -> Option<Vec<ExprId>> {
+    let zero = graph.integer(0);
+    let max_probe = order + 6;
+    let den_c = taylor_coeffs_vec(graph, den, wrt, point, max_probe);
+    let shift = den_c.iter().position(|&c| c != zero)?;
+    if shift == 0 || shift > 6 {
+        return None;
+    }
+    let num_c = taylor_coeffs_vec(graph, num, wrt, point, order + shift);
+    if num_c.iter().take(shift).any(|&c| c != zero) {
+        return None;
+    }
+
+    let n_slice = &num_c[shift..];
+    let d_slice = &den_c[shift..];
+    let d0 = *d_slice.first()?;
+    if d0 == zero {
+        return None;
+    }
+
+    let mut q = Vec::with_capacity(order + 1);
+    for m in 0..=order {
+        let mut rhs = *n_slice.get(m).unwrap_or(&zero);
+        for j in 1..=m.min(d_slice.len().saturating_sub(1)) {
+            if d_slice[j] != zero && q[m - j] != zero {
+                let prod = graph.mul([d_slice[j], q[m - j]]);
+                rhs = graph.sub(rhs, prod);
+            }
+        }
+        let qm_raw = if d0 == graph.integer(1) {
+            rhs
+        } else {
+            graph.div(rhs, d0)
+        };
+        let qm = crate::simplify::Simplifier::simplify(graph, qm_raw).unwrap_or(qm_raw);
+        q.push(qm);
+    }
+    Some(q)
+}
+
+fn build_taylor_poly(graph: &ExprGraph, coeffs: &[ExprId], x_minus_a: ExprId) -> ExprId {
+    let zero = graph.integer(0);
+    let mut terms = Vec::new();
+    for (n, &c) in coeffs.iter().enumerate() {
+        if c == zero {
+            continue;
+        }
+        let term = if n == 0 {
+            c
+        } else if n == 1 {
+            graph.mul([c, x_minus_a])
+        } else {
+            let pow_term = graph.pow(x_minus_a, graph.integer(n as i64));
+            graph.mul([c, pow_term])
+        };
+        let simp = crate::simplify::Simplifier::simplify(graph, term).unwrap_or(term);
+        if simp != zero {
+            terms.push(simp);
+        }
+    }
+    if terms.is_empty() {
+        zero
+    } else {
+        graph.add(terms)
     }
 }
 

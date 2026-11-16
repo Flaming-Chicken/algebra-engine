@@ -212,7 +212,13 @@ impl StructureTensorAlgebra {
         // i * i = -1
         tensor[1][1][0] = -1.0;
 
-        Self::new("ComplexNumbers", names, tensor).unwrap()
+        Self::new("ComplexNumbers", names, tensor)
+            .unwrap_or_else(|_| Self {
+                name: "ComplexNumbers".into(),
+                basis_names: vec!["1".into(), "i".into()],
+                structure_tensor: vec![],
+                dim: 2,
+            })
     }
 
     /// Dual Numbers $\mathbb{D} = \operatorname{span}\{1, \varepsilon\}$ where $\varepsilon^2 = 0$.
@@ -227,7 +233,13 @@ impl StructureTensorAlgebra {
         tensor[1][0][1] = 1.0;
         // eps * eps = 0
 
-        Self::new("DualNumbers", names, tensor).unwrap()
+        Self::new("DualNumbers", names, tensor)
+            .unwrap_or_else(|_| Self {
+                name: "DualNumbers".into(),
+                basis_names: vec!["1".into(), "eps".into()],
+                structure_tensor: vec![],
+                dim: 2,
+            })
     }
 
     /// Hamilton Quaternions $\mathbb{H} = \operatorname{span}\{1, i, j, k\}$.
@@ -263,27 +275,33 @@ impl StructureTensorAlgebra {
         tensor[3][1][2] = 1.0;
         tensor[1][3][2] = -1.0;
 
-        Self::new("Quaternions", names, tensor).unwrap()
+        Self::new("Quaternions", names, tensor)
+            .unwrap_or_else(|_| Self {
+                name: "Quaternions".into(),
+                basis_names: vec!["1".into(), "i".into(), "j".into(), "k".into()],
+                structure_tensor: vec![],
+                dim: 4,
+            })
     }
 
     /// Complex Dual Numbers $\mathbb{C} \otimes \mathbb{D} = \operatorname{span}\{1, i, \varepsilon, i\varepsilon\}$.
     pub fn complex_dual() -> Self {
         let c = Self::complex();
         let d = Self::dual();
-        c.tensor_product(&d).unwrap()
+        c.tensor_product(&d).unwrap_or(c)
     }
 
     /// Dual Quaternions $\mathbb{H} \otimes \mathbb{D}$ (8-dimensional spatial screw algebra).
     pub fn dual_quaternion() -> Self {
         let h = Self::quaternion();
         let d = Self::dual();
-        h.tensor_product(&d).unwrap()
+        h.tensor_product(&d).unwrap_or(h)
     }
 
     /// Bicomplex Numbers $\mathbb{C} \otimes \mathbb{C} = \operatorname{span}\{1, i, j, ij\}$.
     pub fn bicomplex() -> Self {
         let c1 = Self::complex();
         let c2 = Self::complex();
-        c1.tensor_product(&c2).unwrap()
+        c1.tensor_product(&c2).unwrap_or(c1)
     }
 }

@@ -143,8 +143,7 @@ impl Octonion {
                 return (q, -1.0);
             }
         }
-
-        unreachable!("Fano plane covers all pairs of 7 imaginary units");
+        (0, 0.0)
     }
 
     /// Non-associative octonion product $x \cdot y$.

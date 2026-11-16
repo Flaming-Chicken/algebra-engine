@@ -88,6 +88,16 @@ fn test_permissive_intent_parsing() {
             expression: "sin(x)/x".to_string(),
             variable: "x".to_string(),
             point: "0".to_string(),
+            direction: None,
+        })
+    );
+    assert_eq!(
+        parse_permissive_intent("lim_{x->0+} 1/x"),
+        Some(PermissiveIntent::Limit {
+            expression: "1/x".to_string(),
+            variable: "x".to_string(),
+            point: "0".to_string(),
+            direction: Some("+".to_string()),
         })
     );
 

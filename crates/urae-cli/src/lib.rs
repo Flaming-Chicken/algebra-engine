@@ -67,7 +67,7 @@ pub fn run_repl() {
     );
     println!("Type 'exit' or 'quit' to exit. Enter expressions to parse and evaluate.\n");
 
-    let graph = ExprGraph::new();
+    let mut session = algebra_engine::UraeSession::new();
     let formatter = LatexFormatter;
     let mut ai_config = load_ai_config_from_env();
 
@@ -93,7 +93,7 @@ pub fn run_repl() {
         }
 
         if input.starts_with('{') || input.starts_with('[') {
-            let resp_json = process_json_request(&graph, input);
+            let resp_json = process_json_request(&session.graph, input);
             println!("= {}\n", resp_json);
             continue;
         }
@@ -109,9 +109,46 @@ pub fn run_repl() {
             continue;
         }
 
-        match process_input_with_ai_config(&graph, &formatter, input, &mut ai_config) {
-            Ok(result) => println!("= {}\n", result),
-            Err(err) => eprintln!("Error: {}\n", err),
+        let lower = input.to_ascii_lowercase();
+        if lower.starts_with("agent ")
+            || lower.starts_with("ask ")
+            || lower.starts_with("preset ")
+            || lower.starts_with("embed ")
+        {
+            let summary: Vec<(String, String, f64, String)> = session
+                .symbol_metadata
+                .values()
+                .map(|m| {
+                    let extra = match (m.uncertainty, &m.unit_str) {
+                        (Some(u), Some(unit)) => format!("± {:.6} [{}]", u, unit),
+                        (Some(u), None) => format!("± {:.6}", u),
+                        (None, Some(unit)) => format!("[{}]", unit),
+                        (None, None) => String::new(),
+                    };
+                    (m.name.clone(), format!("{:?}", m.role), m.cur_val, extra)
+                })
+                .collect();
+            match process_input_with_full_context(
+                &session.graph,
+                &formatter,
+                input,
+                &mut ai_config,
+                Some(&session.bindings),
+                Some(&session.uncertainties),
+                Some(&session.intervals),
+                session.branch_sheet,
+                Some(&summary),
+            ) {
+                Ok(result) => println!("= {}\n", result),
+                Err(err) => eprintln!("Error: {}\n", err),
+            }
+        } else {
+            let res = session.execute_line(input);
+            if res.is_error {
+                eprintln!("Error: {}\n", res.error_msg.unwrap_or(res.output_text));
+            } else {
+                println!("= {}\n", res.output_text);
+            }
         }
     }
 }
@@ -191,6 +228,31 @@ pub fn process_input_with_context(
     input: &str,
     ai_config: &mut AiConfig,
     bindings: Option<&HashMap<String, f64>>,
+    symbol_summary: Option<&[(String, String, f64, String)]>,
+) -> Result<String, String> {
+    process_input_with_full_context(
+        graph,
+        formatter,
+        input,
+        ai_config,
+        bindings,
+        None,
+        None,
+        None,
+        symbol_summary,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn process_input_with_full_context(
+    graph: &ExprGraph,
+    formatter: &LatexFormatter,
+    input: &str,
+    ai_config: &mut AiConfig,
+    bindings: Option<&HashMap<String, f64>>,
+    uncertainties: Option<&HashMap<String, f64>>,
+    intervals: Option<&HashMap<String, algebra_core::RealInterval>>,
+    branch_sheet: Option<i64>,
     symbol_summary: Option<&[(String, String, f64, String)]>,
 ) -> Result<String, String> {
     let input = input.trim();
@@ -413,6 +475,13 @@ pub fn process_input_with_context(
     if let Some(b) = bindings {
         exec_ctx.bindings = b.clone();
     }
+    if let Some(u) = uncertainties {
+        exec_ctx.uncertainties = u.clone();
+    }
+    if let Some(ivs) = intervals {
+        exec_ctx.intervals = ivs.clone();
+    }
+    exec_ctx.branch_sheet = branch_sheet;
     if let Some(s) = symbol_summary {
         exec_ctx.symbol_summary = s.to_vec();
     }
@@ -453,7 +522,9 @@ pub fn get_help_text() -> String {
     help.push_str("  stability 2x2              Control system stability\n");
     help.push_str("  context / mathcontext       Inspect ambient mathematical context\n");
     help.push_str("  set <algebra|calculus|logic> <val>  Configure ambient mathematical system\n");
-    help.push_str("  vars / params              List active notebook variables and parameters\n");
+    help.push_str("  vars / params              List active notebook variables, parameters, and uncertainties\n");
+    help.push_str("  a = 5.0 +/- 0.1 [m]        Define parameter with 1-sigma GUM uncertainty (also ± or +-)\n");
+    help.push_str("  branch_cut / branches      Inspect Riemann sheets and multivalued function branches\n");
     help.push_str(
         "  agent <prompt> / ask        Ask AI Agent Copilot (Requires setup, off by default)\n",
     );

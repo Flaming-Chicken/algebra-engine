@@ -567,7 +567,7 @@ impl GeometricConstraintSolver {
                     solved_coords.insert(name.clone(), vec![*px, *py]);
                 }
                 GeometricEntity::Point3D { coords, .. } if coords.iter().all(|c| c.is_some()) => {
-                    solved_coords.insert(name.clone(), coords.iter().map(|c| c.unwrap()).collect());
+                    solved_coords.insert(name.clone(), coords.iter().flatten().copied().collect());
                 }
                 _ => {}
             }

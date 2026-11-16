@@ -34,7 +34,7 @@ pub use expr::{ExprKind, ExprNode, RelOp, SetOp};
 pub use format::{FormatError, FormatResult, Formatter, LatexFormatter, UnicodeFormatter};
 pub use graph::ExprGraph;
 pub use id::{DomainId, ExprId, SymbolId};
-pub use interval::RealInterval;
+pub use interval::{RealInterval, UncertainValue, parse_value_uncertainty_and_unit};
 pub use lemma_miner::{
     DomainKind, EquivalenceHypothesis, ExpressionGenerator, ExpressionGeneratorConfig,
     FingerprintTriple, FormalEquivalenceProver, LearnedLemma, LemmaMiner, LemmaRegistry,
@@ -42,10 +42,10 @@ pub use lemma_miner::{
 pub use number::{Constant, Number};
 pub use numbers::{DualNumber, HyperrealNumber, Octonion, PAdicNumber, Quaternion, SurrealNumber};
 pub use operation::{
-    CombinatoricsOpKind, ComparisonKind, ControlOpKind, GaloisOpKind, HyperOpKind, IntervalOpKind,
-    LogicOpKind, MathOperation, MatrixOpKind, NumberTheoryOpKind, PhysicsOpKind, PolynomialOpKind,
-    ProofTarget, SimplifyStrategy, StatMechOpKind, SymbolRoleKind, SystemCommandKind,
-    TopologyOpKind, TransformOpKind, TropicalOpKind,
+    BranchOpKind, CombinatoricsOpKind, ComparisonKind, ControlOpKind, GaloisOpKind, HyperOpKind,
+    IntervalOpKind, LogicOpKind, MathOperation, MatrixOpKind, NumberTheoryOpKind, PhysicsOpKind,
+    PolynomialOpKind, ProofTarget, SimplifyStrategy, StatMechOpKind, SymbolRoleKind,
+    SystemCommandKind, TopologyOpKind, TransformOpKind, TropicalOpKind,
 };
 pub use parser::{ExprParser, parse_domain_declaration, parse_operation};
 pub use probabilistic::{ProbabilisticVerifier, Solution};

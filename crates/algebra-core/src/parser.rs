@@ -1,6 +1,6 @@
 //! Mathematical expression parser using `nom` with support for standard math expressions and raw LaTeX syntax.
 
-use crate::{ExprGraph, ExprId, RelOp};
+use crate::{BranchOpKind, ExprGraph, ExprId, RelOp, parse_value_uncertainty_and_unit};
 use nom::{
     IResult,
     branch::alt,
@@ -68,6 +68,7 @@ pub fn normalize_latex_input(input: &str) -> String {
         .replace('≠', "!=")
         .replace('≤', "<=")
         .replace('≥', ">=")
+        .replace("\\pm", "±")
         .replace('∈', " in ")
         .replace('∪', " union ")
         .replace('∩', " intersect ")
@@ -244,29 +245,61 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_term<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
-        let (input, lhs) = self.parse_factor(input)?;
-        let (input, ops) = nom::multi::many0(tuple((
-            delimited(
-                multispace0,
-                alt((tag(".*"), tag("./"), tag("*"), tag("/"), tag("\\"))),
-                multispace0,
-            ),
-            |i| self.parse_factor(i),
-        )))(input)?;
+        let (mut rem, mut current) = self.parse_uncertainty(input)?;
+        loop {
+            let (next_rem, op_opt) = opt(tuple((
+                delimited(
+                    multispace0,
+                    alt((tag(".*"), tag("./"), tag("*"), tag("/"), tag("%"), tag("\\"))),
+                    multispace0,
+                ),
+                |i| self.parse_uncertainty(i),
+            )))(rem)?;
 
-        let mut current = lhs;
-        for (op, rhs) in ops {
-            match op {
-                "*" => current = self.graph.mul([current, rhs]),
-                "/" => current = self.graph.div(current, rhs),
-                ".*" => current = self.graph.function("elem_mul", [current, rhs]),
-                "./" => current = self.graph.function("elem_div", [current, rhs]),
-                "\\" => current = self.graph.function("mldivide", [current, rhs]),
-                _ => {}
+            if let Some((op, rhs)) = op_opt {
+                current = match op {
+                    "*" => self.graph.mul([current, rhs]),
+                    "/" => self.graph.div(current, rhs),
+                    "%" => self.graph.function("mod", [current, rhs]),
+                    ".*" => self.graph.function("elem_mul", [current, rhs]),
+                    "./" => self.graph.function("elem_div", [current, rhs]),
+                    "\\" => self.graph.function("mldivide", [current, rhs]),
+                    _ => current,
+                };
+                rem = next_rem;
+                continue;
             }
+
+            // Contiguous implicit multiplication (no whitespace so `[1 2; 3 4]` keeps space-separated columns):
+            // handles `2x`, `2(x+1)`, `(x+1)(x-1)`, `(x+1)2`, `2sin(x)`, `sin(x)cos(x)`.
+            if let Some(next_ch) = rem.chars().next()
+                && (next_ch == '(' || next_ch.is_alphabetic() || next_ch == '_' || next_ch.is_ascii_digit())
+                && let Ok((after_rhs, rhs)) = self.parse_uncertainty(rem)
+            {
+                current = self.graph.mul([current, rhs]);
+                rem = after_rhs;
+                continue;
+            }
+
+            break;
         }
 
-        Ok((input, current))
+        Ok((rem, current))
+    }
+
+    /// Parses uncertainty expressions `val ± err`, `val +/- err`, or `val +- err`
+    /// tighter than `*`, `/`, `+`, `-` so `-5 ± 0.1` and `10 ± 0.2 + 5 ± 0.1` work naturally.
+    fn parse_uncertainty<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
+        let (input, lhs) = self.parse_factor(input)?;
+        let (input, err_opt) = opt(tuple((
+            delimited(multispace0, alt((tag("±"), tag("+/-"), tag("+-"))), multispace0),
+            |i| self.parse_factor(i),
+        )))(input)?;
+        if let Some((_, err)) = err_opt {
+            Ok((input, self.graph.function("uncertain", [lhs, err])))
+        } else {
+            Ok((input, lhs))
+        }
     }
 
     fn parse_factor<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
@@ -278,7 +311,16 @@ impl<'a> ExprParser<'a> {
         if let Some(rest) = input.strip_prefix('+') {
             return self.parse_factor(rest);
         }
-        let (input, base) = self.parse_primary(input)?;
+        let (mut input, mut base) = self.parse_primary(input)?;
+        loop {
+            let after_ws = input.trim_start();
+            if after_ws.starts_with('!') && !after_ws.starts_with("!=") {
+                base = self.graph.function("factorial", [base]);
+                input = &after_ws[1..];
+            } else {
+                break;
+            }
+        }
         let (input, exp_opt) = opt(tuple((
             delimited(multispace0, alt((tag(".^"), tag("^"))), multispace0),
             |i| self.parse_factor(i),
@@ -296,16 +338,17 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_primary<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
-        delimited(
-            multispace0,
-            alt((
-                |i| self.parse_matlab_matrix(i),
-                |i| self.parse_number(i),
-                |i| self.parse_symbol_or_fn(i),
-                delimited(char('('), |i| self.parse_expr(i), char(')')),
-            )),
-            multispace0,
-        )(input)
+        let (input, _) = multispace0(input)?;
+        alt((
+            |i| self.parse_matlab_matrix(i),
+            |i| self.parse_number(i),
+            |i| self.parse_symbol_or_fn(i),
+            delimited(
+                tuple((char('('), multispace0)),
+                |i| self.parse_expr(i),
+                tuple((multispace0, char(')'))),
+            ),
+        ))(input)
     }
 
     fn parse_matlab_matrix<'i>(&self, input: &'i str) -> IResult<&'i str, ExprId> {
@@ -372,14 +415,27 @@ impl<'a> ExprParser<'a> {
                 end_idx = i + c.len_utf8();
                 chars.next();
             } else if (c == 'e' || c == 'E') && has_digit && !has_exp {
-                has_exp = true;
-                end_idx = i + c.len_utf8();
-                chars.next();
-                if let Some(&(si, sc)) = chars.peek()
+                let mut look = chars.clone();
+                look.next();
+                if let Some(&(_, sc)) = look.peek()
                     && (sc == '+' || sc == '-')
                 {
-                    end_idx = si + sc.len_utf8();
+                    look.next();
+                }
+                if let Some(&(_, dc)) = look.peek()
+                    && dc.is_ascii_digit()
+                {
+                    has_exp = true;
+                    end_idx = i + c.len_utf8();
                     chars.next();
+                    if let Some(&(si, sc)) = chars.peek()
+                        && (sc == '+' || sc == '-')
+                    {
+                        end_idx = si + sc.len_utf8();
+                        chars.next();
+                    }
+                } else {
+                    break;
                 }
             } else {
                 break;
@@ -576,6 +632,7 @@ pub enum PermissiveIntent {
         expression: String,
         variable: String,
         point: String,
+        direction: Option<String>,
     },
     /// Symbolic summation: `sum of 1/n^2 from n=1 to infinity`, `sum_{n=1}^{10} n`
     Sum {
@@ -589,6 +646,25 @@ pub enum PermissiveIntent {
         expression: String,
         domain: Option<String>,
     },
+}
+
+fn split_top_level_commas(input: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, c) in input.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(input[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(input[start..].trim());
+    parts
 }
 
 fn split_expr_and_var(input: &str) -> (String, Option<String>) {
@@ -630,6 +706,18 @@ fn split_expr_and_var(input: &str) -> (String, Option<String>) {
     }
 
     (trimmed.to_string(), None)
+}
+
+fn split_limit_point_direction(raw_pt: &str) -> (String, Option<String>) {
+    let p = raw_pt.trim();
+    if p.len() >= 2 && (p.ends_with('+') || p.ends_with('-')) {
+        let dir = p[p.len() - 1..].to_string();
+        let base = p[..p.len() - 1].trim().to_string();
+        if !base.is_empty() && base != "from_above" && base != "from_below" {
+            return (base, Some(dir));
+        }
+    }
+    (p.to_string(), None)
 }
 
 /// Parse permissive natural language mathematical phrasing into structured intent.
@@ -737,7 +825,7 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
         }
     }
 
-    // 10. Limits e.g. `limit of sin(x)/x as x -> 0`, `lim sin(x)/x as x -> 0`, `lim_(x->0) (sin(x)/x)`
+    // 10. Limits e.g. `limit of sin(x)/x as x -> 0`, `limit of sin(x)/x as x approaches 0`, `lim_{x->0+} expr`, `lim_(x->0) (expr)`
     if trimmed.starts_with("limit ")
         || trimmed.starts_with("lim ")
         || trimmed.contains("limit of ")
@@ -754,38 +842,115 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
             clean = r.trim();
         }
 
-        if let Some((expr_part, bound_part)) = clean.split_once(" as ") {
+        if let Some(after_lim) = clean.strip_prefix("lim_{")
+            && let Some(close_brace) = after_lim.find('}')
+        {
+            let bound_part = &after_lim[..close_brace];
+            let expr_part = after_lim[close_brace + 1..].trim();
+            if let Some((var_part, val_part)) = bound_part
+                .split_once("->")
+                .or_else(|| bound_part.split_once("\\to"))
+                .or_else(|| bound_part.split_once('='))
+            {
+                let (pt, dir) = split_limit_point_direction(val_part);
+                return Some(PermissiveIntent::Limit {
+                    expression: expr_part.to_string(),
+                    variable: var_part.trim().to_string(),
+                    point: pt,
+                    direction: dir,
+                });
+            }
+        } else if let Some((expr_part, bound_part)) = clean.split_once(" as ") {
             let expr = expr_part.trim().to_string();
             let bound = bound_part.trim();
-            if let Some((var_part, val_part)) =
-                bound.split_once("->").or_else(|| bound.split_once(" to "))
+            if let Some((var_part, val_part)) = bound
+                .split_once("->")
+                .or_else(|| bound.split_once(" approaches "))
+                .or_else(|| bound.split_once(" to "))
             {
+                let (pt, dir) = split_limit_point_direction(val_part);
                 return Some(PermissiveIntent::Limit {
                     expression: expr,
                     variable: var_part.trim().to_string(),
-                    point: val_part.trim().to_string(),
+                    point: pt,
+                    direction: dir,
                 });
             }
-        } else if clean.starts_with("_(")
-            && let Some(close_idx) = clean.find(')')
-        {
-            let bound_part = &clean[3..close_idx];
-            let expr_part = &clean[close_idx + 1..];
-            if let Some((var_part, val_part)) = bound_part
-                .split_once("->")
-                .or_else(|| bound_part.split_once('='))
-            {
+        } else if clean.starts_with("lim_(") || clean.starts_with("_(") {
+            let inner_start = clean.find('(').unwrap() + 1;
+            if let Some(close_rel) = clean[inner_start..].find(')') {
+                let bound_part = &clean[inner_start..inner_start + close_rel];
+                let expr_part = &clean[inner_start + close_rel + 1..];
+                if let Some((var_part, val_part)) = bound_part
+                    .split_once("->")
+                    .or_else(|| bound_part.split_once('='))
+                {
+                    let (pt, dir) = split_limit_point_direction(val_part);
+                    return Some(PermissiveIntent::Limit {
+                        expression: expr_part.trim().to_string(),
+                        variable: var_part.trim().to_string(),
+                        point: pt,
+                        direction: dir,
+                    });
+                }
+            }
+        } else {
+            let parts = split_top_level_commas(clean);
+            if parts.len() >= 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty() {
+                let (mut pt, mut dir) = split_limit_point_direction(parts[2]);
+                if parts.len() >= 4 && !parts[3].is_empty() {
+                    let explicit_dir = match parts[3].trim() {
+                        "+" | "right" | "from_above" => Some("+".to_string()),
+                        "-" | "left" | "from_below" => Some("-".to_string()),
+                        _ => None,
+                    };
+                    if explicit_dir.is_some() {
+                        dir = explicit_dir;
+                        pt = parts[2].trim().to_string();
+                    }
+                }
                 return Some(PermissiveIntent::Limit {
-                    expression: expr_part.trim().to_string(),
-                    variable: var_part.trim().to_string(),
-                    point: val_part.trim().to_string(),
+                    expression: parts[0].to_string(),
+                    variable: parts[1].to_string(),
+                    point: pt,
+                    direction: dir,
                 });
             }
         }
     }
 
-    // 11. Summations e.g. `sum of 1/n^2 from n=1 to infinity`, `sum_{n=1}^{10} n`
-    if trimmed.starts_with("sum ") || trimmed.contains("sum of ") || trimmed.starts_with("sum_") {
+    // 11. Summations e.g. `sum of 1/n^2 from n=1 to infinity`, `sum_{n=1}^{10} n`, `sum k^2, k, 1, 10`, `sum(k, (k, 1, 10))`
+    if trimmed.starts_with("sum ")
+        || trimmed.starts_with("sum(")
+        || trimmed.contains("sum of ")
+        || trimmed.starts_with("sum_")
+    {
+        if trimmed.starts_with("sum(") && trimmed.ends_with(')') {
+            let inner = &trimmed[4..trimmed.len() - 1];
+            let parts = split_top_level_commas(inner);
+            if parts.len() == 2
+                && parts[1].starts_with('(')
+                && parts[1].ends_with(')')
+            {
+                let range_parts = split_top_level_commas(&parts[1][1..parts[1].len() - 1]);
+                if range_parts.len() == 3 {
+                    return Some(PermissiveIntent::Sum {
+                        expression: parts[0].to_string(),
+                        variable: range_parts[0].to_string(),
+                        lower: range_parts[1].to_string(),
+                        upper: range_parts[2].to_string(),
+                    });
+                }
+            } else if parts.len() >= 4 {
+                return Some(PermissiveIntent::Sum {
+                    expression: parts[0].to_string(),
+                    variable: parts[1].to_string(),
+                    lower: parts[2].to_string(),
+                    upper: parts[3].to_string(),
+                });
+            }
+        }
+
         let mut clean = trimmed;
         if let Some(r) = clean.strip_prefix("sum of ") {
             clean = r.trim();
@@ -826,6 +991,26 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
                         upper: u_str.trim().to_string(),
                     });
                 }
+            }
+        } else {
+            let parts = split_top_level_commas(clean);
+            if parts.len() >= 4 {
+                return Some(PermissiveIntent::Sum {
+                    expression: parts[0].to_string(),
+                    variable: parts[1].to_string(),
+                    lower: parts[2].to_string(),
+                    upper: parts[3].to_string(),
+                });
+            } else if parts.len() == 2
+                && let Some((var_part, bounds)) = parts[1].split_once('=')
+                && let Some((l_str, u_str)) = bounds.split_once("..")
+            {
+                return Some(PermissiveIntent::Sum {
+                    expression: parts[0].to_string(),
+                    variable: var_part.trim().to_string(),
+                    lower: l_str.trim().to_string(),
+                    upper: u_str.trim().to_string(),
+                });
             }
         }
     }
@@ -1300,6 +1485,68 @@ pub fn parse_operation(input: &str) -> MathOperation {
     }
 
     // 1. System Commands
+    // 1a. Assumptions: `assume x > 0`, `assume x >= 0`, `assume x < 0`, `assume x: positive|real|integer|negative|nonzero|even|odd|prime`
+    if let Some(rest) = input
+        .strip_prefix("assume ")
+        .or_else(|| input.strip_prefix("Assume "))
+    {
+        let body = rest.trim();
+        if let Some(bound) = parse_domain_declaration(body) {
+            return MathOperation::DomainRestriction(bound);
+        }
+        let make_bound = |name: &str, domain_type: &str, min_val: Option<f64>, max_val: Option<f64>, inc_min: bool, inc_max: bool| {
+            MathOperation::DomainRestriction(DomainBound {
+                name: name.to_string(),
+                domain_type: domain_type.to_string(),
+                min_val,
+                max_val,
+                inclusive_min: inc_min,
+                inclusive_max: inc_max,
+            })
+        };
+        if let Some((v, rhs)) = body.split_once(">=")
+            && rhs.trim() == "0"
+        {
+            return make_bound(v.trim(), "NonNegative", Some(0.0), None, true, false);
+        }
+        if let Some((v, rhs)) = body.split_once('>')
+            && rhs.trim() == "0"
+        {
+            return make_bound(v.trim(), "Positive", Some(0.0), None, false, false);
+        }
+        if let Some((v, rhs)) = body.split_once("<=")
+            && rhs.trim() == "0"
+        {
+            return make_bound(v.trim(), "NonPositive", None, Some(0.0), false, true);
+        }
+        if let Some((v, rhs)) = body.split_once('<')
+            && rhs.trim() == "0"
+        {
+            return make_bound(v.trim(), "Negative", None, Some(0.0), false, false);
+        }
+        if let Some((v, rhs)) = body.split_once("!=")
+            && rhs.trim() == "0"
+        {
+            return make_bound(v.trim(), "NonZero", None, None, false, false);
+        }
+        if let Some((v, prop)) = body.split_once(':').or_else(|| body.split_once(" is ")) {
+            let p_low = prop.trim().to_ascii_lowercase();
+            let dt = match p_low.as_str() {
+                "positive" | "pos" | "r+" => "Positive",
+                "nonnegative" | "non_negative" | "non-negative" => "NonNegative",
+                "negative" | "neg" | "r-" => "Negative",
+                "nonzero" | "non_zero" | "non-zero" => "NonZero",
+                "real" | "reals" => "Reals",
+                "integer" | "integers" | "int" => "Integers",
+                "even" => "EvenIntegers",
+                "odd" => "OddIntegers",
+                "prime" => "Prime",
+                "complex" => "Complex",
+                _ => prop.trim(),
+            };
+            return make_bound(v.trim(), dt, None, None, false, false);
+        }
+    }
     if input.eq_ignore_ascii_case("help") || input.eq_ignore_ascii_case("?") {
         return MathOperation::System(SystemCommandKind::Help);
     }
@@ -1539,9 +1786,14 @@ pub fn parse_operation(input: &str) -> MathOperation {
     if let Some(body) = input
         .strip_prefix("is_prime ")
         .or_else(|| input.strip_prefix("prime "))
-        && let Ok(n) = body.trim().parse::<u64>()
     {
-        return MathOperation::NumberTheory(NumberTheoryOpKind::IsPrime { n });
+        let trimmed = body.trim();
+        if let Ok(n) = trimmed.parse::<u64>() {
+            return MathOperation::NumberTheory(NumberTheoryOpKind::IsPrime { n });
+        }
+        return MathOperation::NumberTheory(NumberTheoryOpKind::IsPrimeExpr {
+            expr_str: trimmed.to_string(),
+        });
     }
     if let Some(body) = input
         .strip_prefix("gcd ")
@@ -1549,14 +1801,59 @@ pub fn parse_operation(input: &str) -> MathOperation {
         .or_else(|| input.strip_prefix("extended_gcd "))
     {
         let parts: Vec<&str> = if body.contains(',') {
-            body.split(',').map(|s| s.trim()).collect()
+            split_top_level_commas(body)
         } else {
             body.split_whitespace().collect()
         };
-        if parts.len() >= 2
-            && let (Ok(a), Ok(b)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>())
-        {
-            return MathOperation::NumberTheory(NumberTheoryOpKind::ExtendedGcd { a, b });
+        if parts.len() >= 2 {
+            if let (Ok(a), Ok(b)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
+                return MathOperation::NumberTheory(NumberTheoryOpKind::ExtendedGcd { a, b });
+            }
+            return MathOperation::NumberTheory(NumberTheoryOpKind::ExtendedGcdExpr {
+                a_str: parts[0].to_string(),
+                b_str: parts[1].to_string(),
+            });
+        }
+    }
+    if let Some(body) = input.strip_prefix("lcm ") {
+        let parts: Vec<&str> = if body.contains(',') {
+            split_top_level_commas(body)
+        } else {
+            body.split_whitespace().collect()
+        };
+        if parts.len() >= 2 {
+            return MathOperation::NumberTheory(NumberTheoryOpKind::LcmExpr {
+                a_str: parts[0].to_string(),
+                b_str: parts[1].to_string(),
+            });
+        }
+    }
+    if let Some(body) = input.strip_prefix("compare ") {
+        let parts = split_top_level_commas(body);
+        if parts.len() == 2 {
+            return MathOperation::Compare {
+                left: parts[0].trim().to_string(),
+                right: parts[1].trim().to_string(),
+                kind: ComparisonKind::Equivalent,
+            };
+        }
+    }
+    if let Some(body) = input
+        .strip_prefix("solve_ode ")
+        .or_else(|| input.strip_prefix("dsolve "))
+        .or_else(|| input.strip_prefix("ode "))
+    {
+        let parts = split_top_level_commas(body);
+        if !parts.is_empty() && !parts[0].trim().is_empty() {
+            return MathOperation::DiffEq(DiffEqOpKind::ClassifyAndSolve {
+                equation: parts[0].trim().to_string(),
+                dependent_var: parts.get(1).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                independent_vars: parts
+                    .get(2)
+                    .map(|s| vec![s.trim().to_string()])
+                    .filter(|v| !v[0].is_empty()),
+                override_kind: Some("ode".to_string()),
+            });
         }
     }
     if let Some(body) = input.strip_prefix("legendre ") {
@@ -1613,10 +1910,19 @@ pub fn parse_operation(input: &str) -> MathOperation {
             });
         }
     }
-    if let Some(body) = input.strip_prefix("galois ")
-        && let Ok(d) = body.trim().parse::<i64>()
-    {
-        return MathOperation::Galois(GaloisOpKind::QuadraticExtension { d });
+    if let Some(body) = input.strip_prefix("galois ") {
+        let trimmed = body.trim();
+        if let Ok(d) = trimmed.parse::<i64>() {
+            return MathOperation::Galois(GaloisOpKind::QuadraticExtension { d });
+        }
+        return MathOperation::Galois(GaloisOpKind::CheckSolvability {
+            group_name: trimmed.to_string(),
+        });
+    }
+    if let Some(body) = input.strip_prefix("galois_solvable ") {
+        return MathOperation::Galois(GaloisOpKind::CheckSolvability {
+            group_name: body.trim().to_string(),
+        });
     }
 
     // 9. Algebraic Transformations
@@ -1801,16 +2107,23 @@ pub fn parse_operation(input: &str) -> MathOperation {
         }
     }
 
-    // 10. Numerical Evaluation (Explicit lossy floating-point evaluation)
+    // 10. Evaluation: `eval` defaults to exact rational/big-integer first;
+    // `evalf`, `N(...)`, `approx` request floating-point approximation.
+    if let Some(body) = input.strip_prefix("eval ") {
+        return MathOperation::Evaluate {
+            expression: body.trim().to_string(),
+            precision_digits: None,
+            bindings: HashMap::new(),
+        };
+    }
     if let Some(body) = input
-        .strip_prefix("eval ")
-        .or_else(|| input.strip_prefix("evalf "))
+        .strip_prefix("evalf ")
         .or_else(|| input.strip_prefix("N "))
         .or_else(|| input.strip_prefix("approx "))
     {
         return MathOperation::Evaluate {
             expression: body.trim().to_string(),
-            precision_digits: None,
+            precision_digits: Some(15),
             bindings: HashMap::new(),
         };
     }
@@ -1821,7 +2134,7 @@ pub fn parse_operation(input: &str) -> MathOperation {
         let inner = &input[open + 1..input.len() - 1];
         return MathOperation::Evaluate {
             expression: inner.trim().to_string(),
-            precision_digits: None,
+            precision_digits: Some(15),
             bindings: HashMap::new(),
         };
     }
@@ -1841,19 +2154,35 @@ pub fn parse_operation(input: &str) -> MathOperation {
         };
 
         let mut value = None;
+        let mut uncertainty = None;
         let mut unit = None;
         if let Some((_, val_part)) = rest.split_once('=') {
-            let val_str = val_part.trim();
-            let (num_str, unit_str) = if let Some(bracket_idx) = val_str.find('[') {
-                let u = val_str[bracket_idx..]
-                    .trim_matches(|c| c == '[' || c == ']')
-                    .trim();
-                (&val_str[..bracket_idx], Some(u.to_string()))
+            if let Some((v, err_opt, u_opt)) = parse_value_uncertainty_and_unit(val_part) {
+                value = Some(v);
+                uncertainty = err_opt;
+                unit = u_opt;
             } else {
-                (val_str, None)
+                let val_str = val_part.trim();
+                let (num_str, unit_str) = if let Some(bracket_idx) = val_str.find('[') {
+                    let u = val_str[bracket_idx..]
+                        .trim_matches(|c| c == '[' || c == ']')
+                        .trim();
+                    (&val_str[..bracket_idx], Some(u.to_string()))
+                } else {
+                    (val_str, None)
+                };
+                value = num_str.trim().parse::<f64>().ok();
+                unit = unit_str;
+            }
+        }
+        if let (Some(v), Some(u)) = (value, uncertainty) {
+            return MathOperation::UncertainDeclaration {
+                name,
+                role,
+                value: v,
+                uncertainty: u,
+                unit,
             };
-            value = num_str.trim().parse::<f64>().ok();
-            unit = unit_str;
         }
         return MathOperation::Declaration {
             name,
@@ -1861,6 +2190,114 @@ pub fn parse_operation(input: &str) -> MathOperation {
             value,
             unit,
         };
+    }
+
+    // 11b. Bare uncertain parameter assignment: e.g. `a = 5.0 +/- 0.1 [m]`, `m = 2.5 ± 0.05`
+    if !input.starts_with("solve ")
+        && !input.starts_with("eval ")
+        && (input.contains("+/-") || input.contains('±') || input.contains("+-") || input.contains("\\pm"))
+        && let Some((lhs, rhs)) = input.split_once('=')
+    {
+        let sym_name = lhs.trim();
+        let rhs_norm = rhs.replace("\\pm", "±");
+        if !sym_name.is_empty()
+            && !sym_name.contains(':')
+            && sym_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && sym_name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+            && let Some((v, Some(u), unit)) = parse_value_uncertainty_and_unit(&rhs_norm)
+        {
+            return MathOperation::UncertainDeclaration {
+                name: sym_name.to_string(),
+                role: SymbolRoleKind::Parameter,
+                value: v,
+                uncertainty: u,
+                unit,
+            };
+        }
+    }
+
+    // 11c. Multi-valued Branch Cut & Riemann Sheet Commands
+    // Supports: `branch_cut("sqrt", sheet = 1, cut = "(-infinity, 0]")`,
+    // `branches <expr>`, `branch <expr> [, sheet=<k>] [, cut=<...>]`
+    if let Some(inner) = input
+        .strip_prefix("branch_cut(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let parts = split_top_level_commas(inner);
+        let function = parts
+            .first()
+            .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+            .unwrap_or_else(|| "sqrt".to_string());
+        let mut sheet: i64 = 0;
+        let mut cut: Option<String> = None;
+        let mut expr: Option<String> = None;
+        for part in parts.iter().skip(1) {
+            if let Some((k, v)) = part.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                match key.as_str() {
+                    "sheet" | "k" => {
+                        if let Ok(parsed_k) = val.parse::<i64>() {
+                            sheet = parsed_k;
+                        }
+                    }
+                    "cut" => cut = Some(val.to_string()),
+                    "expr" | "z" | "at" => expr = Some(val.to_string()),
+                    _ => {}
+                }
+            } else if expr.is_none() {
+                expr = Some(part.trim().to_string());
+            }
+        }
+        return MathOperation::Branch(BranchOpKind::EvaluateSheet {
+            function,
+            expression: expr,
+            sheet,
+            cut,
+        });
+    }
+    if let Some(body) = input.strip_prefix("branches ") {
+        let trimmed = body.trim();
+        let (expression, max_branches) = if let Some((e, n_str)) = trimmed.rsplit_once(',') {
+            if let Ok(n) = n_str.trim().parse::<usize>() {
+                (e.trim().to_string(), n.clamp(1, 32))
+            } else {
+                (trimmed.to_string(), 6)
+            }
+        } else {
+            (trimmed.to_string(), 6)
+        };
+        return MathOperation::Branch(BranchOpKind::AllBranches {
+            expression,
+            max_branches,
+        });
+    }
+    if let Some(body) = input.strip_prefix("branch ") {
+        let parts = split_top_level_commas(body);
+        let expr_str = parts.first().copied().unwrap_or("").trim().to_string();
+        let mut sheet: i64 = 0;
+        let mut cut: Option<String> = None;
+        for part in parts.iter().skip(1) {
+            if let Some((k, v)) = part.split_once('=') {
+                let key = k.trim().to_ascii_lowercase();
+                let val = v.trim().trim_matches('"').trim_matches('\'');
+                if (key == "sheet" || key == "k")
+                    && let Ok(parsed_k) = val.parse::<i64>()
+                {
+                    sheet = parsed_k;
+                } else if key == "cut" {
+                    cut = Some(val.to_string());
+                }
+            } else if let Ok(parsed_k) = part.trim().parse::<i64>() {
+                sheet = parsed_k;
+            }
+        }
+        return MathOperation::Branch(BranchOpKind::EvaluateSheet {
+            function: "auto".to_string(),
+            expression: Some(expr_str),
+            sheet,
+            cut,
+        });
     }
 
     // 12. Set-Builder Domain Declarations e.g. `{ x in Reals | -5 <= x <= 5 }` or `x in Reals | x >= 0`
@@ -1916,14 +2353,29 @@ pub fn parse_operation(input: &str) -> MathOperation {
         });
     }
     if let Some(body) = input.strip_prefix("charpoly ") {
-        let (m_str, var) = body
-            .split_once(',')
-            .map(|(m, v)| (m.trim().to_string(), v.trim().to_string()))
-            .unwrap_or((body.trim().to_string(), "lambda".to_string()));
+        let parts = split_top_level_commas(body);
+        let (m_str, var) = if parts.len() >= 2 && !parts[1].is_empty() {
+            (parts[0].to_string(), parts[1].to_string())
+        } else {
+            (body.trim().to_string(), "lambda".to_string())
+        };
         return MathOperation::Matrix(MatrixOpKind::CharPoly {
             matrix_str: m_str,
             var,
         });
+    }
+    if let Some(body) = input
+        .strip_prefix("matmul ")
+        .or_else(|| input.strip_prefix("matrix_mul "))
+        .or_else(|| input.strip_prefix("mat_mul "))
+    {
+        let parts = split_top_level_commas(body);
+        if parts.len() >= 2 {
+            return MathOperation::Matrix(MatrixOpKind::Multiply {
+                a_str: parts[0].to_string(),
+                b_str: parts[1].to_string(),
+            });
+        }
     }
 
     // 15. Discrete Combinatorics Commands
@@ -2152,7 +2604,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
             None
         }
     }) {
-        let parts: Vec<&str> = diff_body.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = split_top_level_commas(diff_body)
+            .into_iter()
+            .map(|s| s.trim())
+            .collect();
         let expr = parts[0].to_string();
         let var = if parts.len() >= 2 && !parts[1].is_empty() {
             Some(parts[1].to_string())
@@ -2181,18 +2636,33 @@ pub fn parse_operation(input: &str) -> MathOperation {
         if let Some((expr_part, bounds_part)) = int_body.split_once(" from ")
             && let Some((lower_p, upper_p)) = bounds_part.split_once(" to ")
         {
-            let (expr, var) = expr_part
-                .split_once(',')
-                .map(|(e, v)| (e.trim().to_string(), Some(v.trim().to_string())))
-                .unwrap_or((expr_part.trim().to_string(), None));
+            let expr_parts = split_top_level_commas(expr_part);
+            let (expr, mut var) = if expr_parts.len() >= 2 {
+                (expr_parts[0].trim().to_string(), Some(expr_parts[1].trim().to_string()))
+            } else {
+                (expr_part.trim().to_string(), None)
+            };
+            let upper_parts = split_top_level_commas(upper_p);
+            let upper = if var.is_none() && upper_parts.len() >= 2 {
+                let v_tr = upper_parts[1].trim();
+                if !v_tr.is_empty() {
+                    var = Some(v_tr.to_string());
+                }
+                upper_parts[0].trim().to_string()
+            } else {
+                upper_p.trim().to_string()
+            };
             return MathOperation::Integrate {
                 expression: expr,
                 variable: var,
                 lower: Some(lower_p.trim().to_string()),
-                upper: Some(upper_p.trim().to_string()),
+                upper: Some(upper),
             };
         }
-        let parts: Vec<&str> = int_body.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = split_top_level_commas(int_body)
+            .into_iter()
+            .map(|s| s.trim())
+            .collect();
         let expr = parts[0].to_string();
         let var = if parts.len() >= 2 && !parts[1].is_empty() {
             Some(parts[1].to_string())
@@ -2223,10 +2693,15 @@ pub fn parse_operation(input: &str) -> MathOperation {
             None
         }
     }) {
-        let (eq, var) = solve_body
-            .split_once(',')
-            .map(|(e, v)| (e.trim(), Some(v.trim().to_string())))
-            .unwrap_or((solve_body.trim(), None));
+        let parts: Vec<&str> = split_top_level_commas(solve_body)
+            .into_iter()
+            .map(|s| s.trim())
+            .collect();
+        let (eq, var) = if parts.len() >= 2 && !parts[1].is_empty() {
+            (parts[0], Some(parts[1].to_string()))
+        } else {
+            (solve_body.trim(), None)
+        };
         return MathOperation::Solve {
             equation: eq.to_string(),
             variable: var,
@@ -2250,7 +2725,10 @@ pub fn parse_operation(input: &str) -> MathOperation {
         .strip_prefix("series ")
         .or_else(|| input.strip_prefix("taylor "))
     {
-        let parts: Vec<&str> = body.split(',').map(|s| s.trim()).collect();
+        let parts: Vec<&str> = split_top_level_commas(body)
+            .into_iter()
+            .map(|s| s.trim())
+            .collect();
         let expr = parts[0].to_string();
         let var = if parts.len() >= 2 && !parts[1].is_empty() {
             parts[1].to_string()
@@ -2330,12 +2808,13 @@ pub fn parse_operation(input: &str) -> MathOperation {
                 expression,
                 variable,
                 point,
+                direction,
             } => {
                 return MathOperation::Limit {
                     expression,
                     variable,
                     point,
-                    direction: None,
+                    direction,
                 };
             }
             PermissiveIntent::Sum {

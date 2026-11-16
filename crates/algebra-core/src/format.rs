@@ -16,6 +16,13 @@ pub trait Formatter {
     fn format(&self, graph: &ExprGraph, root: ExprId) -> FormatResult<String>;
 }
 
+fn resolve_symbol(graph: &ExprGraph, sym: crate::SymbolId) -> FormatResult<String> {
+    graph
+        .symbols
+        .resolve(sym)
+        .ok_or_else(|| FormatError::Custom(format!("Unresolved symbol id {:?}", sym)))
+}
+
 /// How tightly an expression's outermost operator binds, lowest first.
 ///
 /// A child is parenthesised when its precedence is lower than its position
@@ -212,13 +219,7 @@ impl Formatter for LatexFormatter {
                     Constant::Undefined => "\\text{Undefined}".to_string(),
                 },
             }),
-            ExprKind::Symbol(sym) => {
-                let name = graph
-                    .symbols
-                    .resolve(*sym)
-                    .unwrap_or_else(|| "x".to_string());
-                Ok(name)
-            }
+            ExprKind::Symbol(sym) => resolve_symbol(graph, *sym),
             ExprKind::Add(terms) => format_sum(self, &LATEX, graph, terms),
             ExprKind::Mul(factors) => format_product(self, &LATEX, graph, factors),
             ExprKind::Pow(base, exp) => {
@@ -238,7 +239,7 @@ impl Formatter for LatexFormatter {
                 Ok(format!("-{}", i_str))
             }
             ExprKind::Function { name, args } => {
-                let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+                let fn_name = resolve_symbol(graph, *name)?;
                 let arg_strs: Result<Vec<_>, _> =
                     args.iter().map(|&a| self.format(graph, a)).collect();
                 let args_vec = arg_strs?;
@@ -252,6 +253,17 @@ impl Formatter for LatexFormatter {
                         "J_{{{}}}\\left({}\\right)",
                         args_vec[0], args_vec[1]
                     ))
+                } else if fn_name == "uncertain" && args_vec.len() == 2 {
+                    Ok(format!("{} \\pm {}", args_vec[0], args_vec[1]))
+                } else if fn_name == "interval" && args_vec.len() == 2 {
+                    Ok(format!("\\left[{}, {}\\right]", args_vec[0], args_vec[1]))
+                } else if (fn_name == "lambert_w" || fn_name == "LambertW" || fn_name == "W")
+                    && args_vec.len() == 2
+                {
+                    Ok(format!(
+                        "W_{{{}}}\\left({}\\right)",
+                        args_vec[0], args_vec[1]
+                    ))
                 } else {
                     Ok(format!(
                         "\\operatorname{{{}}}\\left({}\\right)",
@@ -262,7 +274,7 @@ impl Formatter for LatexFormatter {
             }
             ExprKind::Derivative { expr, wrt, order } => {
                 let e_str = self.format(graph, *expr)?;
-                let wrt_str = graph.symbols.resolve(*wrt).unwrap_or_default();
+                let wrt_str = resolve_symbol(graph, *wrt)?;
                 if *order == 1 {
                     Ok(format!(
                         "\\frac{{\\mathrm{{d}}}}{{\\mathrm{{d}}{}}} \\left({}\\right)",
@@ -282,7 +294,7 @@ impl Formatter for LatexFormatter {
                 upper,
             } => {
                 let e_str = self.format(graph, *expr)?;
-                let wrt_str = graph.symbols.resolve(*wrt).unwrap_or_default();
+                let wrt_str = resolve_symbol(graph, *wrt)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -348,10 +360,7 @@ impl Formatter for LatexFormatter {
                 upper,
             } => {
                 let body_str = self.format(graph, *body)?;
-                let var_str = graph
-                    .symbols
-                    .resolve(*var)
-                    .unwrap_or_else(|| "i".to_string());
+                let var_str = resolve_symbol(graph, *var)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -371,10 +380,7 @@ impl Formatter for LatexFormatter {
                 upper,
             } => {
                 let body_str = self.format(graph, *body)?;
-                let var_str = graph
-                    .symbols
-                    .resolve(*var)
-                    .unwrap_or_else(|| "i".to_string());
+                let var_str = resolve_symbol(graph, *var)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -461,13 +467,7 @@ impl Formatter for UnicodeFormatter {
                     Constant::Undefined => "Undefined".to_string(),
                 },
             }),
-            ExprKind::Symbol(sym) => {
-                let name = graph
-                    .symbols
-                    .resolve(*sym)
-                    .unwrap_or_else(|| "x".to_string());
-                Ok(name)
-            }
+            ExprKind::Symbol(sym) => resolve_symbol(graph, *sym),
             ExprKind::Add(terms) => format_sum(self, &UNICODE, graph, terms),
             ExprKind::Mul(factors) => format_product(self, &UNICODE, graph, factors),
             ExprKind::Pow(base, exp) => {
@@ -489,7 +489,7 @@ impl Formatter for UnicodeFormatter {
                 Ok(format!("-{}", i_str))
             }
             ExprKind::Function { name, args } => {
-                let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+                let fn_name = resolve_symbol(graph, *name)?;
                 let arg_strs: Result<Vec<_>, _> =
                     args.iter().map(|&a| self.format(graph, a)).collect();
                 let args_vec = arg_strs?;
@@ -499,13 +499,21 @@ impl Formatter for UnicodeFormatter {
                     Ok(format!("BR({})", args_vec[0]))
                 } else if fn_name == "besselj" && args_vec.len() == 2 {
                     Ok(format!("J_{}({})", args_vec[0], args_vec[1]))
+                } else if fn_name == "uncertain" && args_vec.len() == 2 {
+                    Ok(format!("{} ± {}", args_vec[0], args_vec[1]))
+                } else if fn_name == "interval" && args_vec.len() == 2 {
+                    Ok(format!("[{}, {}]", args_vec[0], args_vec[1]))
+                } else if (fn_name == "lambert_w" || fn_name == "LambertW" || fn_name == "W")
+                    && args_vec.len() == 2
+                {
+                    Ok(format!("W_{}({})", args_vec[0], args_vec[1]))
                 } else {
                     Ok(format!("{}({})", fn_name, args_vec.join(", ")))
                 }
             }
             ExprKind::Derivative { expr, wrt, order } => {
                 let e_str = self.format(graph, *expr)?;
-                let wrt_str = graph.symbols.resolve(*wrt).unwrap_or_default();
+                let wrt_str = resolve_symbol(graph, *wrt)?;
                 if *order == 1 {
                     Ok(format!("d/d{} [{}]", wrt_str, e_str))
                 } else {
@@ -519,7 +527,7 @@ impl Formatter for UnicodeFormatter {
                 upper,
             } => {
                 let e_str = self.format(graph, *expr)?;
-                let wrt_str = graph.symbols.resolve(*wrt).unwrap_or_default();
+                let wrt_str = resolve_symbol(graph, *wrt)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -582,10 +590,7 @@ impl Formatter for UnicodeFormatter {
                 upper,
             } => {
                 let body_str = self.format(graph, *body)?;
-                let var_str = graph
-                    .symbols
-                    .resolve(*var)
-                    .unwrap_or_else(|| "i".to_string());
+                let var_str = resolve_symbol(graph, *var)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -605,10 +610,7 @@ impl Formatter for UnicodeFormatter {
                 upper,
             } => {
                 let body_str = self.format(graph, *body)?;
-                let var_str = graph
-                    .symbols
-                    .resolve(*var)
-                    .unwrap_or_else(|| "i".to_string());
+                let var_str = resolve_symbol(graph, *var)?;
                 match (lower, upper) {
                     (Some(l), Some(u)) => {
                         let l_str = self.format(graph, *l)?;
@@ -664,16 +666,16 @@ impl Formatter for MathMLFormatter {
                     Constant::Pi => "<mi>&pi;</mi>".to_string(),
                     Constant::E => "<mi>e</mi>".to_string(),
                     Constant::I => "<mi>i</mi>".to_string(),
-                    _ => "<mi>&infty;</mi>".to_string(),
+                    Constant::EulerGamma => "<mi>&gamma;</mi>".to_string(),
+                    Constant::GoldenRatio => "<mi>&phi;</mi>".to_string(),
+                    Constant::Apery => "<mi>&zeta;</mi><mo>(</mo><mn>3</mn><mo>)</mo>".to_string(),
+                    Constant::Catalan => "<mi>G</mi>".to_string(),
+                    Constant::Infinity => "<mi>&infin;</mi>".to_string(),
+                    Constant::NegInfinity => "<mo>-</mo><mi>&infin;</mi>".to_string(),
+                    Constant::Undefined => "<mtext>Undefined</mtext>".to_string(),
                 },
             }),
-            ExprKind::Symbol(sym) => {
-                let name = graph
-                    .symbols
-                    .resolve(*sym)
-                    .unwrap_or_else(|| "x".to_string());
-                Ok(format!("<mi>{}</mi>", name))
-            }
+            ExprKind::Symbol(sym) => Ok(format!("<mi>{}</mi>", resolve_symbol(graph, *sym)?)),
             ExprKind::Add(terms) => format_sum(self, &MATHML, graph, terms),
             ExprKind::Mul(factors) => format_product(self, &MATHML, graph, factors),
             ExprKind::Pow(base, exp) => {
@@ -685,7 +687,178 @@ impl Formatter for MathMLFormatter {
                     b_str, e_str
                 ))
             }
-            _ => Ok(format!("<mi>{:?}</mi>", node.kind)),
+            ExprKind::Div(num, den) => {
+                let n_str = self.format(graph, *num)?;
+                let d_str = self.format(graph, *den)?;
+                Ok(format!(
+                    "<mfrac><mrow>{}</mrow><mrow>{}</mrow></mfrac>",
+                    n_str, d_str
+                ))
+            }
+            ExprKind::Sub(lhs, rhs) => format_difference(self, &MATHML, graph, *lhs, *rhs),
+            ExprKind::Neg(inner) => {
+                let i_str = child(self, &MATHML, graph, *inner, Prec::Product)?;
+                Ok(format!("<mo>-</mo>{}", i_str))
+            }
+            ExprKind::Function { name, args } => {
+                let fn_name = resolve_symbol(graph, *name)?;
+                let arg_strs: Result<Vec<_>, _> =
+                    args.iter().map(|&a| self.format(graph, a)).collect();
+                let args_vec = arg_strs?;
+                if fn_name == "sqrt" && args_vec.len() == 1 {
+                    Ok(format!("<msqrt>{}</msqrt>", args_vec[0]))
+                } else {
+                    Ok(format!(
+                        "<mi>{}</mi><mo>(</mo>{}<mo>)</mo>",
+                        fn_name,
+                        args_vec.join("<mo>,</mo>")
+                    ))
+                }
+            }
+            ExprKind::Derivative { expr, wrt, order } => {
+                let e_str = self.format(graph, *expr)?;
+                let wrt_str = resolve_symbol(graph, *wrt)?;
+                if *order == 1 {
+                    Ok(format!(
+                        "<mfrac><mi>d</mi><mrow><mi>d</mi><mi>{}</mi></mrow></mfrac><mo>(</mo>{}<mo>)</mo>",
+                        wrt_str, e_str
+                    ))
+                } else {
+                    Ok(format!(
+                        "<mfrac><msup><mi>d</mi><mn>{}</mn></msup><mrow><mi>d</mi><msup><mi>{}</mi><mn>{}</mn></msup></mrow></mfrac><mo>(</mo>{}<mo>)</mo>",
+                        order, wrt_str, order, e_str
+                    ))
+                }
+            }
+            ExprKind::Integral {
+                expr,
+                wrt,
+                lower,
+                upper,
+            } => {
+                let e_str = self.format(graph, *expr)?;
+                let wrt_str = resolve_symbol(graph, *wrt)?;
+                match (lower, upper) {
+                    (Some(l), Some(u)) => {
+                        let l_str = self.format(graph, *l)?;
+                        let u_str = self.format(graph, *u)?;
+                        Ok(format!(
+                            "<msubsup><mo>&int;</mo><mrow>{}</mrow><mrow>{}</mrow></msubsup><mrow>{}</mrow><mi>d</mi><mi>{}</mi>",
+                            l_str, u_str, e_str, wrt_str
+                        ))
+                    }
+                    _ => Ok(format!(
+                        "<mo>&int;</mo><mrow>{}</mrow><mi>d</mi><mi>{}</mi>",
+                        e_str, wrt_str
+                    )),
+                }
+            }
+            ExprKind::Matrix {
+                rows,
+                cols,
+                elements,
+            } => {
+                let mut rows_xml = String::new();
+                for r in 0..*rows {
+                    rows_xml.push_str("<mtr>");
+                    for c in 0..*cols {
+                        let idx = r * cols + c;
+                        let cell = self.format(graph, elements[idx])?;
+                        rows_xml.push_str(&format!("<mtd>{}</mtd>", cell));
+                    }
+                    rows_xml.push_str("</mtr>");
+                }
+                Ok(format!(
+                    "<mo>(</mo><mtable>{}</mtable><mo>)</mo>",
+                    rows_xml
+                ))
+            }
+            ExprKind::Relational { op, lhs, rhs } => {
+                let l_str = self.format(graph, *lhs)?;
+                let r_str = self.format(graph, *rhs)?;
+                let op_str = match op {
+                    RelOp::Equal => "=",
+                    RelOp::NotEqual => "&ne;",
+                    RelOp::LessThan => "&lt;",
+                    RelOp::LessEqual => "&le;",
+                    RelOp::GreaterThan => "&gt;",
+                    RelOp::GreaterEqual => "&ge;",
+                };
+                Ok(format!(
+                    "<mrow>{}<mo>{}</mo>{}</mrow>",
+                    l_str, op_str, r_str
+                ))
+            }
+            ExprKind::SetOperation { op, args } => {
+                let arg_strs: Result<Vec<_>, _> =
+                    args.iter().map(|&a| self.format(graph, a)).collect();
+                let op_str = match op {
+                    SetOp::Union => "&cup;",
+                    SetOp::Intersection => "&cap;",
+                    SetOp::Difference => "\\",
+                    SetOp::SymmetricDifference => "&Delta;",
+                    SetOp::CartesianProduct => "&times;",
+                    SetOp::In => "&isin;",
+                    SetOp::Subset => "&sub;",
+                };
+                Ok(arg_strs?.join(&format!("<mo>{}</mo>", op_str)))
+            }
+            ExprKind::Sum {
+                body,
+                var,
+                lower,
+                upper,
+            } => {
+                let body_str = self.format(graph, *body)?;
+                let var_str = resolve_symbol(graph, *var)?;
+                match (lower, upper) {
+                    (Some(l), Some(u)) => {
+                        let l_str = self.format(graph, *l)?;
+                        let u_str = self.format(graph, *u)?;
+                        Ok(format!(
+                            "<munderover><mo>&sum;</mo><mrow><mi>{}</mi><mo>=</mo>{}</mrow><mrow>{}</mrow></munderover><mrow>{}</mrow>",
+                            var_str, l_str, u_str, body_str
+                        ))
+                    }
+                    _ => Ok(format!(
+                        "<msub><mo>&sum;</mo><mi>{}</mi></msub><mrow>{}</mrow>",
+                        var_str, body_str
+                    )),
+                }
+            }
+            ExprKind::Product {
+                body,
+                var,
+                lower,
+                upper,
+            } => {
+                let body_str = self.format(graph, *body)?;
+                let var_str = resolve_symbol(graph, *var)?;
+                match (lower, upper) {
+                    (Some(l), Some(u)) => {
+                        let l_str = self.format(graph, *l)?;
+                        let u_str = self.format(graph, *u)?;
+                        Ok(format!(
+                            "<munderover><mo>&prod;</mo><mrow><mi>{}</mi><mo>=</mo>{}</mrow><mrow>{}</mrow></munderover><mrow>{}</mrow>",
+                            var_str, l_str, u_str, body_str
+                        ))
+                    }
+                    _ => Ok(format!(
+                        "<msub><mo>&prod;</mo><mi>{}</mi></msub><mrow>{}</mrow>",
+                        var_str, body_str
+                    )),
+                }
+            }
+            ExprKind::TensorContraction {
+                tensor_a, tensor_b, ..
+            } => {
+                let a_str = self.format(graph, *tensor_a)?;
+                let b_str = self.format(graph, *tensor_b)?;
+                Ok(format!(
+                    "<mi>Contract</mi><mo>(</mo>{}<mo>,</mo>{}<mo>)</mo>",
+                    a_str, b_str
+                ))
+            }
         }
     }
 }

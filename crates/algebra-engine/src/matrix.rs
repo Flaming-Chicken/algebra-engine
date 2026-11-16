@@ -5,7 +5,7 @@
 
 use spodeian_parallel::prelude::*;
 
-use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId};
+use algebra_core::{AlgebraError, AlgebraResult, Domain, ExprGraph, ExprId, ExprKind, ExprNode};
 
 /// Mutable stateful matrix buffer for zero-allocation in-place modifications prior to lock-free DAG interning.
 #[derive(Debug, Clone)]
@@ -238,6 +238,161 @@ impl SymbolicMatrix {
             cols,
             elements,
         })
+    }
+
+    /// Parse a symbolic matrix from `[[a, b], [c, d]]`, `[a, b; c, d]`, `[a b; c d]`, or `Matrix([[a, b], [c, d]])` syntax.
+    pub fn from_expr_str(graph: &ExprGraph, raw: &str) -> AlgebraResult<Self> {
+        let mut s = raw.trim();
+        if let Some(inner) = s
+            .strip_prefix("Matrix(")
+            .or_else(|| s.strip_prefix("matrix("))
+            .and_then(|rest| rest.strip_suffix(')'))
+        {
+            s = inner.trim();
+        }
+        if !(s.starts_with('[') && s.ends_with(']')) {
+            return Err(AlgebraError::DomainViolation {
+                domain: "Matrix".into(),
+                reason: format!("Expected matrix brackets `[...]` in `{}`", raw),
+            });
+        }
+        let inner = s[1..s.len() - 1].trim();
+        if inner.is_empty() {
+            return Err(AlgebraError::DomainViolation {
+                domain: "Matrix".into(),
+                reason: "Empty matrix".into(),
+            });
+        }
+
+        let parser = algebra_core::parser::ExprParser::new(graph);
+        let row_strs: Vec<String> = if inner.starts_with('[') {
+            Self::split_top_level(inner, ',')
+        } else {
+            Self::split_top_level(inner, ';')
+        };
+
+        let mut rows: Vec<Vec<ExprId>> = Vec::with_capacity(row_strs.len());
+        let mut expected_cols: Option<usize> = None;
+        for row_raw in row_strs {
+            let row_trimmed = row_raw.trim();
+            let row_body = if row_trimmed.starts_with('[') && row_trimmed.ends_with(']') {
+                row_trimmed[1..row_trimmed.len() - 1].trim()
+            } else {
+                row_trimmed
+            };
+            if row_body.is_empty() {
+                return Err(AlgebraError::DomainViolation {
+                    domain: "Matrix".into(),
+                    reason: format!("Empty row in matrix `{}`", raw),
+                });
+            }
+            let comma_cells = Self::split_top_level(row_body, ',');
+            let cell_strs: Vec<String> = if comma_cells.len() > 1 || row_body.contains(',') {
+                comma_cells
+            } else {
+                Self::split_space_elements(row_body)
+            };
+            let mut row_ids = Vec::with_capacity(cell_strs.len());
+            for cell in cell_strs {
+                let id = parser
+                    .parse(cell.trim())
+                    .map_err(|e| AlgebraError::DomainViolation {
+                        domain: "Matrix".into(),
+                        reason: format!("Invalid matrix entry `{}`: {}", cell.trim(), e),
+                    })?;
+                row_ids.push(id);
+            }
+            if let Some(cols) = expected_cols {
+                if row_ids.len() != cols {
+                    return Err(AlgebraError::DimensionMismatch(format!(
+                        "Inconsistent matrix row lengths: expected {}, got {}",
+                        cols,
+                        row_ids.len()
+                    )));
+                }
+            } else {
+                expected_cols = Some(row_ids.len());
+            }
+            rows.push(row_ids);
+        }
+
+        let cols = expected_cols.unwrap_or(0);
+        let num_rows = rows.len();
+        let elements: Vec<ExprId> = rows.into_iter().flatten().collect();
+        Self::new(num_rows, cols, elements)
+    }
+
+    /// Intern this matrix as an `ExprKind::Matrix` node inside `graph`.
+    pub fn to_expr_id(&self, graph: &ExprGraph) -> ExprId {
+        graph.intern(ExprNode::new(
+            Domain::Matrix {
+                rows: self.rows,
+                cols: self.cols,
+                element_domain: Box::new(Domain::Generic),
+            },
+            ExprKind::Matrix {
+                rows: self.rows,
+                cols: self.cols,
+                elements: self.elements.clone(),
+            },
+        ))
+    }
+
+    fn split_top_level(input: &str, delim: char) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut depth_paren = 0usize;
+        let mut depth_brack = 0usize;
+        let mut depth_brace = 0usize;
+        let mut start = 0usize;
+        for (i, c) in input.char_indices() {
+            match c {
+                '(' => depth_paren += 1,
+                ')' => depth_paren = depth_paren.saturating_sub(1),
+                '[' => depth_brack += 1,
+                ']' => depth_brack = depth_brack.saturating_sub(1),
+                '{' => depth_brace += 1,
+                '}' => depth_brace = depth_brace.saturating_sub(1),
+                ch if ch == delim && depth_paren == 0 && depth_brack == 0 && depth_brace == 0 => {
+                    out.push(input[start..i].trim().to_string());
+                    start = i + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        let tail = input[start..].trim();
+        if !tail.is_empty() {
+            out.push(tail.to_string());
+        }
+        out
+    }
+
+    fn split_space_elements(row: &str) -> Vec<String> {
+        let raw_tokens: Vec<&str> = row.split_whitespace().collect();
+        if raw_tokens.len() <= 1 {
+            return raw_tokens.into_iter().map(String::from).collect();
+        }
+        let is_binop = |t: &str| matches!(t, "+" | "-" | "*" | "/" | "^");
+        let mut out: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut expect_rhs = false;
+        for tok in raw_tokens {
+            if cur.is_empty() {
+                cur.push_str(tok);
+                expect_rhs = is_binop(tok);
+            } else if expect_rhs || is_binop(tok) {
+                cur.push(' ');
+                cur.push_str(tok);
+                expect_rhs = is_binop(tok);
+            } else {
+                out.push(std::mem::take(&mut cur));
+                cur.push_str(tok);
+                expect_rhs = is_binop(tok);
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out
     }
 
     /// Get element at 0-indexed row and col.

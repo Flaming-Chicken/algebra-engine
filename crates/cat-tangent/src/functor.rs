@@ -71,19 +71,21 @@ impl TangentFunctor {
                 HyperOp::Mul => {
                     // d(u * v) = u dv + v du (Leibniz product rule)
                     if edge.inputs.len() == 2 && edge.outputs.len() == 1 {
-                        let &(u, du) = wire_map.get(&edge.inputs[0]).unwrap();
-                        let &(v, dv) = wire_map.get(&edge.inputs[1]).unwrap();
-                        let &(out_p, out_t) = wire_map.get(&edge.outputs[0]).unwrap();
+                        if let (Some(&(u, du)), Some(&(v, dv)), Some(&(out_p, out_t))) = (
+                            wire_map.get(&edge.inputs[0]),
+                            wire_map.get(&edge.inputs[1]),
+                            wire_map.get(&edge.outputs[0]),
+                        ) {
+                            // Primal: out_p = u * v
+                            t_diag.add_edge(HyperEdge::binary(u, v, out_p, HyperOp::Mul));
 
-                        // Primal: out_p = u * v
-                        t_diag.add_edge(HyperEdge::binary(u, v, out_p, HyperOp::Mul));
-
-                        // Tangent: out_t = (u * dv) + (v * du)
-                        let u_dv = t_diag.alloc_wire();
-                        let v_du = t_diag.alloc_wire();
-                        t_diag.add_edge(HyperEdge::binary(u, dv, u_dv, HyperOp::Mul));
-                        t_diag.add_edge(HyperEdge::binary(v, du, v_du, HyperOp::Mul));
-                        t_diag.add_edge(HyperEdge::binary(u_dv, v_du, out_t, HyperOp::Add));
+                            // Tangent: out_t = (u * dv) + (v * du)
+                            let u_dv = t_diag.alloc_wire();
+                            let v_du = t_diag.alloc_wire();
+                            t_diag.add_edge(HyperEdge::binary(u, dv, u_dv, HyperOp::Mul));
+                            t_diag.add_edge(HyperEdge::binary(v, du, v_du, HyperOp::Mul));
+                            t_diag.add_edge(HyperEdge::binary(u_dv, v_du, out_t, HyperOp::Add));
+                        }
                     }
                 }
                 _ => {

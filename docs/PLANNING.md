@@ -53,11 +53,11 @@ code. No item remains unchecked. Fixed defects have a regression test in
 | B4 | `solve_ode_linear` with `p = 0` | **Fixed** | `y' = 1` gives `x`; each stage is simplified before it is integrated again |
 | B5 | `laurent_series` / `lagrange_inversion` | **Partly fixed** | Laurent now handles pole order 0 and simplifies; Lagrange inversion unchanged |
 | B6 | `RecurrenceSolver::solve_linear_constant` order ≥ 2 | **Fixed** | orders 1 and 2 (distinct real roots, repeated root); complex roots and order ≥ 3 return an error |
-| B7 | `differential.rs` forcing term drops the Duhamel integral | **Open** | File unchanged |
+| B7 | `differential.rs` forcing term drops the Duhamel integral | **Fixed** | forced 2×2 systems add `∫₀ᵗ Φ(t−τ) g(τ) dτ` (an unevaluated integral when no antiderivative is found) instead of the diagonal-entry product; checked against `y1 = 1 − e^{-t}` |
 | B8 | `cat_eval.rs` stamps an order-3 enclosure on a linear tangent | **Fixed** | the tangent-line tier is labelled `taylor_order_1` with remainder order 2; with no expansion variable the result is exact |
 | B9 | `scheduler.rs` shrinks enclosures by a constant factor without re-evaluating | **Fixed** | `AnytimeHandle` no longer shrinks enclosures by a fixed factor. `refine_with` adopts only a re-evaluated ball that is contained in the current one and strictly tighter; `run_to_budget` takes the re-evaluator. API change: `refine_step`/`run_to_budget` now take a closure |
 | B10 | `weil_ideal.rs` Itô multiply arm returns no drift | **Fixed (misdiagnosed)** | the product rule was already right: `second_order` is the `dW²` coefficient, which equals `dt` in Itô calculus. The comment was misleading; `WeilJet::ito_drift` now reads it, with a test of `d(W²) = 2W dW + dt` and `d(W³)` |
-| B11 | `kauffman_bracket` hard-codes four knots | **Open** | File unchanged |
+| B11 | `kauffman_bracket` hard-codes four knots | **Fixed** | `kauffman_bracket` is a real state sum over all smoothings (up to 22 crossings) with loop counting on the closure; it returns `Result`, so malformed or oversized braids are errors. Verified by the textbook Jones polynomial `t + t³ − t⁴` of the right-handed trefoil, braid-relation and Markov invariance. Convention note: σ₁³ now gives `A⁻⁷ − A⁻³ − A⁵` (the old table held the mirror image) |
 | B12 | `quantum.rs` time-ordered evolution not integrated | **Fixed** | `DysonSeries::first_order_term` keeps an unevaluated integral instead of returning the integrand; `first_order_term_between` integrates from `t0` to `t`. Time ordering for higher orders is still not implemented |
 
 ### C. Oversimplifications
@@ -77,7 +77,7 @@ changed:
 
 ## 3. Fixed since the first audit
 
-17 Nov 2026, after the ledger was verified: B8–B10, B12, A1 (`pade!`), A2 (Clifford), A3 (Cartan input), A4 (`export`), A5, A6 (honest errors), A7, A9 (Lean/Coq export), A10,, B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
+17 Nov 2026, after the ledger was verified: B7–B12, A1 (`pade!`), A2 (Clifford), A3 (Cartan input), A4 (`export`), A5, A6 (honest errors), A7, A9 (Lean/Coq export), A10,, B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
 
 Released in 0.3.2 and 0.4.0 (see `CHANGELOG.md`): limits through radicals and variable exponents, two-sided limits
 through `abs`/`sign`, formatter precedence and exponent rendering, base and radical merging in the simplifier, Itô
@@ -89,7 +89,7 @@ number-theory output, the GUI plan status, and the documentation corrections to 
 1. **Make stubs honest before making them real.** A1–A7, A9 and A10 are done. For the rest of A1–A11, either implement the feature or return an explicit
    "not implemented" error and remove the claim from ROADMAP, README and the notebook help. A wrong answer
    presented as a result is worse than a refusal. A11 (GUI export formats) is the smallest; A8 needs a real algorithm.
-2. **Numerical and symbolic correctness (B1–B12).** B1–B4, B6, B8–B10 and B12 are fixed, with tests in
+2. **Numerical and symbolic correctness (B1–B12).** B1–B4 and B6–B12 are fixed, with tests in
    `tests/tests/engine/known_defect_tests.rs`. For each remaining item add a failing test, then fix. Each fix needs a test that fails on the old code.
 3. **Panic hygiene.** About 63 production `panic!`/`unwrap` sites per `AUDIT-PANICS-AND-UNWRAPS.md`; replace
    them with typed errors, then enable `clippy::unwrap_used` for non-test code.

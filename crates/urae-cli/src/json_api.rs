@@ -6,7 +6,7 @@
 
 use algebra_advanced::agent::{AiConfig, AlgebraAgentInterface};
 use algebra_advanced::codegen::{CodeGenerator, TargetLanguage};
-use algebra_advanced::proof::{ProofTrace, UnificationEngine};
+use algebra_advanced::proof::ProofTrace;
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::parser::ExprParser;
 use algebra_core::{ExprGraph, ExprId, ExprKind};
@@ -458,10 +458,13 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
     // Proof trace exports
     let (lean4_proof, coq_proof) = if req.export_proof {
         let mut trace = ProofTrace::new();
-        let engine = UnificationEngine::new();
+        // Record the simplification as a proof step only when the probabilistic equivalence check
+        // confirms that it preserved the value.
         if let Ok(simp_id) = Simplifier::simplify(graph, expr_id) {
-            if let Ok(_subst) = engine.unify(graph, expr_id, simp_id) {
-                trace.add_step("algebraic_simplification", expr_id, simp_id);
+            let mut candidate = ProofTrace::new();
+            candidate.add_step("algebraic_simplification", expr_id, simp_id);
+            if candidate.verify_steps(graph).is_ok() {
+                trace = candidate;
             }
         }
         (

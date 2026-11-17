@@ -22,6 +22,14 @@ impl SubstitutionMap {
     pub fn insert(&mut self, var: SymbolId, expr: ExprId) {
         self.mappings.insert(var, expr);
     }
+
+    /// Apply the substitution to `expr`. For a substitution produced by
+    /// [`UnificationEngine::unify`] this is idempotent.
+    pub fn apply(&self, graph: &ExprGraph, expr: ExprId) -> ExprId {
+        self.mappings.iter().fold(expr, |acc, (&var, &value)| {
+            graph.substitute(acc, var, value)
+        })
+    }
 }
 
 /// Martelli-Montanari unification algorithm engine.
@@ -33,46 +41,92 @@ impl UnificationEngine {
         Self
     }
 
-    /// Unify two AST nodes $E_1$ and $E_2$ in `ExprGraph`, returning a substitution map if unifiable.
+    /// Unify two expressions, treating every symbol as a variable (first-order, syntactic).
+    ///
+    /// This is the Martelli-Montanari algorithm: equations are decomposed structurally (same
+    /// head and arity, arguments in order), a variable is bound to the other side unless it
+    /// occurs there (occurs check), and each binding is propagated into the bindings already
+    /// made. The result is the most general unifier: applying it to both inputs gives the same
+    /// expression. Addition and multiplication are matched argument by argument, in order; no
+    /// commutativity or associativity is assumed.
     pub fn unify(
         &self,
         graph: &ExprGraph,
         expr1: ExprId,
         expr2: ExprId,
     ) -> AlgebraResult<SubstitutionMap> {
+        use algebra_core::ExprKind;
+        let failure = |reason: String| AlgebraError::DomainViolation {
+            domain: "Unification".to_string(),
+            reason,
+        };
         let mut subst = SubstitutionMap::new();
+        let mut pending = vec![(expr1, expr2)];
 
-        if expr1 == expr2 {
-            return Ok(subst);
-        }
-
-        let node1 = graph.get(expr1);
-        let node2 = graph.get(expr2);
-
-        match (&node1.kind, &node2.kind) {
-            (algebra_core::ExprKind::Symbol(s1), _) => {
-                subst.insert(*s1, expr2);
-                Ok(subst)
+        while let Some((left, right)) = pending.pop() {
+            // Work on the current instances of both sides.
+            let (left, right) = (subst.apply(graph, left), subst.apply(graph, right));
+            if left == right {
+                continue;
             }
-            (_, algebra_core::ExprKind::Symbol(s2)) => {
-                subst.insert(*s2, expr1);
-                Ok(subst)
-            }
-            (algebra_core::ExprKind::Number(n1), algebra_core::ExprKind::Number(n2)) => {
-                if n1 == n2 {
-                    Ok(subst)
-                } else {
-                    Err(AlgebraError::DomainViolation {
-                        domain: "Unification".to_string(),
-                        reason: format!("Numbers {:?} and {:?} do not match", n1, n2),
-                    })
+            let (kind_left, kind_right) =
+                (graph.get(left).kind.clone(), graph.get(right).kind.clone());
+            let bind = |var: SymbolId, value: ExprId, subst: &mut SubstitutionMap| {
+                if graph.has_symbol(value, var) {
+                    return Err(failure(format!(
+                        "occurs check: `{}` appears inside the term it would be bound to",
+                        graph.symbols.resolve(var).unwrap_or_default()
+                    )));
+                }
+                // Propagate the new binding into the existing ones, then record it.
+                for existing in subst.mappings.values_mut() {
+                    *existing = graph.substitute(*existing, var, value);
+                }
+                subst.insert(var, value);
+                Ok(())
+            };
+            match (&kind_left, &kind_right) {
+                (ExprKind::Symbol(v), _) => bind(*v, right, &mut subst)?,
+                (_, ExprKind::Symbol(v)) => bind(*v, left, &mut subst)?,
+                (ExprKind::Number(a), ExprKind::Number(b)) => {
+                    return Err(failure(format!("numbers {a:?} and {b:?} do not match")));
+                }
+                (ExprKind::Add(a), ExprKind::Add(b)) | (ExprKind::Mul(a), ExprKind::Mul(b)) => {
+                    if a.len() != b.len() {
+                        return Err(failure("operand counts differ".to_string()));
+                    }
+                    pending.extend(a.iter().copied().zip(b.iter().copied()));
+                }
+                (ExprKind::Sub(a1, a2), ExprKind::Sub(b1, b2))
+                | (ExprKind::Div(a1, a2), ExprKind::Div(b1, b2))
+                | (ExprKind::Pow(a1, a2), ExprKind::Pow(b1, b2)) => {
+                    pending.push((*a1, *b1));
+                    pending.push((*a2, *b2));
+                }
+                (ExprKind::Neg(a), ExprKind::Neg(b)) => pending.push((*a, *b)),
+                (
+                    ExprKind::Function { name: n1, args: a },
+                    ExprKind::Function { name: n2, args: b },
+                ) => {
+                    if n1 != n2 || a.len() != b.len() {
+                        return Err(failure(format!(
+                            "function heads differ: `{}`/{} vs `{}`/{}",
+                            graph.symbols.resolve(*n1).unwrap_or_default(),
+                            a.len(),
+                            graph.symbols.resolve(*n2).unwrap_or_default(),
+                            b.len()
+                        )));
+                    }
+                    pending.extend(a.iter().copied().zip(b.iter().copied()));
+                }
+                _ => {
+                    return Err(failure(
+                        "structurally incompatible expressions (different operators)".to_string(),
+                    ));
                 }
             }
-            _ => Err(AlgebraError::DomainViolation {
-                domain: "Unification".to_string(),
-                reason: "Unification failed for structurally incompatible AST nodes".to_string(),
-            }),
         }
+        Ok(subst)
     }
 }
 

@@ -26,6 +26,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `UnificationEngine::unify` only handled a top-level symbol or number and failed on everything else. It is now a structural first-order unifier with an occurs check; `SubstitutionMap::apply` applies the result.
+- The CLI proof export gated its step on unifying an expression with its own simplification, which almost never succeeded and is not an equivalence test; it now uses the equivalence check.
 - `lagrange_inversion` divided `w / f` before differentiating, which is `0/0` at the expansion point for every `f` except the identity. It now computes the exact series of the inverse function and rejects non-invertible input.
 - Forced 2×2 linear systems omitted the Duhamel convolution of the forcing term.
 - The symbolic tier labelled a tangent-line approximation as order 3; it is a first-order expansion with an order-2 remainder.

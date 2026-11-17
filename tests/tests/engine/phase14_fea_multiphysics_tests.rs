@@ -393,3 +393,98 @@ fn uniaxial_patch_test_gives_the_exact_stress_in_plane_stress_and_plane_strain()
         );
     }
 }
+
+#[test]
+fn tetrahedral_solid_reproduces_uniaxial_stress_exactly() {
+    // A block stretched by an end displacement and free to contract sideways: a linear field,
+    // reproduced exactly by linear tetrahedra on any mesh.
+    let (lx, ly, lz, d, e, nu) = (4.0_f64, 2.0, 1.5, 0.02, 210.0, 0.25);
+    let mesh = FeaMesh::box_3d(lx, ly, lz, 4, 2, 2);
+    assert_eq!(mesh.elements.len(), 4 * 2 * 2 * 6);
+    let physics = PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: e,
+        poissons_ratio: nu,
+        density: 1.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    };
+    let fix = |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+        group_name: group.into(),
+        dof_index,
+        value,
+    };
+    let bcs = vec![
+        fix("left", 0, 0.0),
+        fix("right", 0, d),
+        fix("bottom", 1, 0.0),
+        fix("front", 2, 0.0),
+    ];
+    let sol = FeaEngine::solve(&mesh, &physics, &bcs).unwrap();
+    let eps = d / lx;
+    let sigma = e * eps;
+    for (k, v) in sol.von_mises_stresses.iter().enumerate() {
+        assert!(
+            (v - sigma).abs() < 1e-9 * sigma,
+            "element {k}: {v} vs {sigma}"
+        );
+    }
+    // Every node: u = eps x, v = -nu eps y, w = -nu eps z.
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = [eps * p[0], -nu * eps * p[1], -nu * eps * p[2]];
+        for c in 0..3 {
+            let got = sol.nodal_values[i * 3 + c];
+            assert!(
+                (got - want[c]).abs() < 1e-10,
+                "node {i} comp {c}: {got} vs {want:?}"
+            );
+        }
+    }
+    // The fixed end reacts with the total force sigma * ly * lz.
+    let total: f64 = mesh.boundary_groups["left"]
+        .iter()
+        .map(|&n| sol.reaction_forces[n * 3])
+        .sum();
+    assert!(
+        (total + sigma * ly * lz).abs() < 1e-8 * sigma * ly * lz,
+        "reaction {total}"
+    );
+}
+
+#[test]
+fn body_force_and_unsupported_elements_are_handled_honestly() {
+    // A hanging bar under its own weight (1-D) is covered elsewhere; here a 2-D plate hanging
+    // from its top edge must stretch downward (body force was ignored for 2-D elements).
+    let mesh = FeaMesh::plate_2d(2.0, 4.0, 4, 8);
+    let physics = PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 100.0,
+        poissons_ratio: 0.3,
+        density: 1.0,
+        body_force: vec![0.0, -1.0],
+        plane_stress: true,
+    };
+    let fix = |dof_index: usize| FeaBoundaryCondition::FixedDisplacement {
+        group_name: "top".into(),
+        dof_index,
+        value: 0.0,
+    };
+    let sol = FeaEngine::solve(&mesh, &physics, &[fix(0), fix(1)]).unwrap();
+    let bottom_v = sol.nodal_values[1]; // node 0 is the bottom-left corner (y = 0)
+    assert!(
+        bottom_v < -1e-3,
+        "plate must sag under its weight, got {bottom_v}"
+    );
+    // Reaction at the support balances the weight: body force x area.
+    let total: f64 = mesh.boundary_groups["top"]
+        .iter()
+        .map(|&n| sol.reaction_forces[n * 2 + 1])
+        .sum();
+    assert!((total - 8.0).abs() < 1e-8, "reaction {total} vs weight 8");
+
+    // An element type the elasticity solver does not implement is an error, not silence.
+    let mut quad = FeaMesh::new(2, algebra_engine::pde::ElementType::Quad4);
+    for p in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
+        quad.add_node(p.to_vec());
+    }
+    quad.add_element(vec![0, 1, 2, 3]);
+    assert!(FeaEngine::solve(&quad, &physics, &[]).is_err());
+}

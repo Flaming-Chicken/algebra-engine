@@ -145,13 +145,35 @@ impl CatExprEvaluator {
 impl MultiFidelityOp<CatEvalInput, CatEvalOutput> for CatExprEvaluator {
     type Error = CatEvalError;
 
+    /// Evaluate at the requested fidelity and report whether it overran `budget.hard_timeout`.
+    ///
+    /// A tier cannot be interrupted part-way (simplification and bridge verification run to
+    /// completion), so the budget is enforced as a measurement: the result is returned in full
+    /// and `budget_exceeded` says that it took longer than the hard timeout, letting a scheduler
+    /// stop escalating to higher tiers.
     fn eval_with_fidelity(
         &self,
         input: &CatEvalInput,
         mode: FidelityMode,
         form: EvalForm,
-        _budget: &AnytimeBudget,
+        budget: &AnytimeBudget,
     ) -> Result<ApproxResult<CatEvalOutput>, Self::Error> {
+        let started = std::time::Instant::now();
+        let mut result = self.evaluate_tier(input, mode, form)?;
+        if started.elapsed() > budget.hard_timeout {
+            result.budget_exceeded = true;
+        }
+        Ok(result)
+    }
+}
+
+impl CatExprEvaluator {
+    fn evaluate_tier(
+        &self,
+        input: &CatEvalInput,
+        mode: FidelityMode,
+        form: EvalForm,
+    ) -> Result<ApproxResult<CatEvalOutput>, CatEvalError> {
         match mode {
             FidelityMode::NumericalApprox => {
                 let (numeric_value, ball) = self.eval_numeric_ball(input);
@@ -308,8 +330,7 @@ impl MultiFidelityOp<CatEvalInput, CatEvalOutput> for CatExprEvaluator {
                     });
                 }
 
-                let mut exact =
-                    self.eval_with_fidelity(input, FidelityMode::SymbolicExact, form, _budget)?;
+                let mut exact = self.evaluate_tier(input, FidelityMode::SymbolicExact, form)?;
                 exact.mode_used = FidelityMode::SymbolicHybrid;
                 exact.value.numeric_value = numeric_value;
                 exact.enclosure.method = "hybrid_ball+cat_bridge+simplifier".to_string();

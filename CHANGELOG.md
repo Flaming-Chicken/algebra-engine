@@ -43,6 +43,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `CatExprEvaluator::eval_with_fidelity` ignored its `AnytimeBudget`; `ApproxResult::budget_exceeded` is now set when a tier runs past the hard timeout.
 - `poly::groebner_basis` returned its input with zero polynomials removed; it now computes the reduced Groebner basis over the rationals. `SparseMonomial::cmp_grevlex` is a genuine graded reverse lexicographic order.
 - `Mesh3D::extrude_profile` capped non-convex outlines with a fan from one vertex (overlapping or inverted faces); it now ear-clips the polygon, handles either winding, and rejects degenerate or self-intersecting profiles.
 - `NacaAirfoil::generate_3d_mesh` and `HelicalSpring::generate_3d_mesh` returned open shells without end caps (so `compute_volume` was meaningless); they are now closed solids. The airfoil outline no longer repeats its leading-edge point. `ThreadedScrew` meshes are documented as open surfaces.

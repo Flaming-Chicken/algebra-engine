@@ -160,48 +160,99 @@ impl AnytimeHandle {
         }
     }
 
-    /// Progressively refine the enclosure within the remaining frame budget.
-    pub fn refine_step(&mut self) -> bool {
+    /// Adopt `candidate` as the current enclosure if it is sound: contained in the current one and
+    /// strictly smaller. Returns whether it was adopted.
+    ///
+    /// An enclosure may only shrink because a more precise evaluation justified it, so the caller
+    /// supplies the re-evaluated ball. A candidate that is not contained in the current ball, or
+    /// not tighter, is rejected and the current ball is kept. Only real intervals, complex disks
+    /// and Lie-manifold balls can be compared; other kinds are never replaced.
+    pub fn refine_with(&mut self, candidate: UniversalBall) -> bool {
+        const SLACK: f64 = 1e-12;
+        let accepted = match (&self.current_ball, &candidate) {
+            (
+                UniversalBall::RealInterval { min, max },
+                UniversalBall::RealInterval {
+                    min: new_min,
+                    max: new_max,
+                },
+            ) => {
+                *new_min >= *min - SLACK
+                    && *new_max <= *max + SLACK
+                    && (new_max - new_min) < (max - min)
+            }
+            (
+                UniversalBall::ComplexDisk {
+                    center_re,
+                    center_im,
+                    radius,
+                },
+                UniversalBall::ComplexDisk {
+                    center_re: new_re,
+                    center_im: new_im,
+                    radius: new_radius,
+                },
+            ) => {
+                let offset = (new_re - center_re).hypot(new_im - center_im);
+                offset + new_radius <= *radius + SLACK && new_radius < radius
+            }
+            (
+                UniversalBall::LieManifoldAffine {
+                    center,
+                    uncertainty,
+                    ..
+                },
+                UniversalBall::LieManifoldAffine {
+                    center: new_center,
+                    uncertainty: new_uncertainty,
+                    ..
+                },
+            ) => {
+                let contained = (0..6).all(|i| {
+                    (new_center[i] - center[i]).abs() + new_uncertainty[i] <= uncertainty[i] + SLACK
+                });
+                let tighter = (0..6).any(|i| new_uncertainty[i] < uncertainty[i]);
+                contained && tighter
+            }
+            _ => false,
+        };
+        if accepted {
+            self.current_ball = candidate;
+            self.is_exact = match &self.current_ball {
+                UniversalBall::RealInterval { min, max } => max - min <= 1e-15,
+                UniversalBall::ComplexDisk { radius, .. } => *radius <= 1e-15,
+                UniversalBall::LieManifoldAffine { uncertainty, .. } => {
+                    uncertainty.iter().all(|&u| u <= 1e-15)
+                }
+                _ => self.is_exact,
+            };
+        }
+        accepted
+    }
+
+    /// One refinement step: ask `reevaluate` for a more precise ball and adopt it if it is sound.
+    /// Returns `false` when the handle is exact, the frame budget is spent, or the evaluator
+    /// produced nothing usable.
+    pub fn refine_step<F>(&mut self, reevaluate: &mut F) -> bool
+    where
+        F: FnMut(&UniversalBall) -> Option<UniversalBall>,
+    {
         if self.is_exact || self.start_time.elapsed() >= self.frame_budget {
             return false;
         }
-
-        // Tighten enclosure bounds
-        match &mut self.current_ball {
-            UniversalBall::RealInterval { min, max } => {
-                let center = (*min + *max) * 0.5;
-                let half_span = (*max - *min) * 0.4; // Tighten by 20%
-                *min = center - half_span;
-                *max = center + half_span;
-                if half_span <= 1e-15 {
-                    self.is_exact = true;
-                }
-            }
-            UniversalBall::ComplexDisk { radius, .. } => {
-                *radius *= 0.5;
-                if *radius <= 1e-15 {
-                    self.is_exact = true;
-                }
-            }
-            UniversalBall::LieManifoldAffine { uncertainty, .. } => {
-                for u in uncertainty.iter_mut() {
-                    *u *= 0.5;
-                }
-                if uncertainty.iter().all(|&u| u <= 1e-15) {
-                    self.is_exact = true;
-                }
-            }
-            _ => {
-                self.is_exact = true;
-            }
+        match reevaluate(&self.current_ball) {
+            Some(candidate) => self.refine_with(candidate),
+            None => false,
         }
-
-        true
     }
 
-    /// Run progressive refinement until the time budget is exhausted or exactness is achieved.
-    pub fn run_to_budget(&mut self) {
-        while self.refine_step() {
+    /// Run refinement with `reevaluate` until the time budget is exhausted, the ball is exact, or
+    /// the evaluator stops improving the enclosure.
+    pub fn run_to_budget<F>(&mut self, mut reevaluate: F)
+    where
+        F: FnMut(&UniversalBall) -> Option<UniversalBall>,
+    {
+        while self.refine_step(&mut reevaluate) {
             if self.start_time.elapsed() >= self.frame_budget {
                 break;
             }

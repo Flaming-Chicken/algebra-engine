@@ -184,7 +184,7 @@ impl MultiFidelityOp<CatEvalInput, CatEvalOutput> for CatExprEvaluator {
                 }
 
                 let graph = input.graph.clone();
-                let approx_expr = if let Some(var) = &input.var_hint {
+                let (approx_expr, linearised) = if let Some(var) = &input.var_hint {
                     let pt = input.eval_point.unwrap_or(0.0);
                     let pt_expr = graph.float(pt);
                     let x_sym = graph.symbol(var);
@@ -195,12 +195,18 @@ impl MultiFidelityOp<CatEvalInput, CatEvalOutput> for CatExprEvaluator {
                         let dx = graph.sub(x_sym, pt_expr);
                         let term = graph.mul([df_a, dx]);
                         let lin = graph.add([f_a, term]);
-                        Simplifier::simplify(&graph, lin).unwrap_or(lin)
+                        (Simplifier::simplify(&graph, lin).unwrap_or(lin), true)
                     } else {
-                        Simplifier::simplify(&graph, input.expr).unwrap_or(input.expr)
+                        (
+                            Simplifier::simplify(&graph, input.expr).unwrap_or(input.expr),
+                            false,
+                        )
                     }
                 } else {
-                    Simplifier::simplify(&graph, input.expr).unwrap_or(input.expr)
+                    (
+                        Simplifier::simplify(&graph, input.expr).unwrap_or(input.expr),
+                        false,
+                    )
                 };
 
                 let out = CatEvalOutput {
@@ -214,14 +220,20 @@ impl MultiFidelityOp<CatEvalInput, CatEvalOutput> for CatExprEvaluator {
                     value: out,
                     mode_used: FidelityMode::SymbolicApprox,
                     form: EvalForm::Canonical,
-                    enclosure: ErrorEnclosure {
-                        kind: UncertaintyKind::Asymptotic {
-                            order: 3,
-                            constant_bound: None,
-                        },
-                        abs_err: None,
-                        rel_err: None,
-                        method: "taylor_order_3".to_string(),
+                    // The tangent line f(a) + f'(a)(x - a) leaves a remainder O((x - a)^2); with no
+                    // expansion variable the expression is only simplified, which is exact.
+                    enclosure: if linearised {
+                        ErrorEnclosure {
+                            kind: UncertaintyKind::Asymptotic {
+                                order: 2,
+                                constant_bound: None,
+                            },
+                            abs_err: None,
+                            rel_err: None,
+                            method: "taylor_order_1".to_string(),
+                        }
+                    } else {
+                        ErrorEnclosure::exact("simplify")
                     },
                     remainder_term: None,
                     validity: DomainCondition {
@@ -342,7 +354,7 @@ mod tests {
         assert_eq!(r1.mode_used, FidelityMode::SymbolicApprox);
         assert!(matches!(
             r1.enclosure.kind,
-            UncertaintyKind::Asymptotic { order: 3, .. }
+            UncertaintyKind::Asymptotic { order: 2, .. }
         ));
 
         let r2 = evaluator

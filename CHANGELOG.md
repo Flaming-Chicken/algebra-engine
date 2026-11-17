@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [Unreleased]
 
 ### Added
+- `DysonSeries::first_order_term_between` (integral from `t0` to `t`) and `WeilJet::ito_drift`.
 - `ProofTrace::export_lean4_with` and `export_coq_with`: each step is a theorem about the real expressions it rewrote (closed by `ring`; unsupported steps are listed as comments). The CLI and agent export use them.
 - `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
 - Closed forms for second-order linear recurrences with distinct or repeated real roots.
@@ -14,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
 ### Changed
+- `AnytimeHandle::refine_step` and `run_to_budget` take a re-evaluation closure and `refine_with` accepts only sound (contained, tighter) balls; enclosures no longer shrink by a fixed factor.
 - Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
 - `pade!` returns `AlgebraResult<ExprId>` and computes a real approximant (it returned a placeholder quotient).
 - `creative_telescoping_integral`, `EmpiricalDistributionMut::{pdf, cdf}` and an unreachable AI provider return errors instead of a fixed Gaussian ODE, constants and a canned `f(x)` explanation.
@@ -21,6 +23,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- The symbolic tier labelled a tangent-line approximation as order 3; it is a first-order expansion with an order-2 remainder.
+- `DysonSeries::first_order_term` returned the integrand when the integral had no closed form.
 - `sum k^2` returned `k^2 * n` (any non-symbol summand was treated as constant).
 - `y' = 1` returned an expression containing `1 / 0`.
 - The Fibonacci recurrence returned `0`.

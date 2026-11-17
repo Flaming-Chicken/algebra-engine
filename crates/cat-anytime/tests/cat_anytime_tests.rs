@@ -59,9 +59,49 @@ fn test_anytime_handle_latency_and_refinement() {
 
     assert_eq!(handle.current_ball.radius(), 0.5);
 
-    // Run progressive refinement
-    handle.run_to_budget();
+    // Refinement only adopts balls a re-evaluation justified: a tighter ball inside the current one.
+    let mut halve = |ball: &UniversalBall| match ball {
+        UniversalBall::ComplexDisk {
+            center_re,
+            center_im,
+            radius,
+        } => Some(UniversalBall::complex_disk(
+            *center_re,
+            *center_im,
+            radius / 2.0,
+        )),
+        _ => None,
+    };
+    handle.run_to_budget(&mut halve);
     assert!(handle.current_ball.radius() < 0.5);
+
+    // Unsound candidates are rejected: wider, not contained, or equal.
+    let before = handle.current_ball.clone();
+    assert!(!handle.refine_with(UniversalBall::complex_disk(1.0, 2.0, 5.0)));
+    assert!(!handle.refine_with(UniversalBall::complex_disk(9.0, 9.0, 1e-9)));
+    assert!(!handle.refine_with(before.clone()));
+    assert_eq!(handle.current_ball, before);
+
+    // With nothing to re-evaluate with, nothing shrinks.
+    let mut fresh = AnytimeHandle::start(&term, Duration::from_millis(8));
+    fresh.run_to_budget(|_| None);
+    assert_eq!(fresh.current_ball.radius(), 0.5);
+
+    // Real intervals: a contained tighter interval is adopted, a wider one is not.
+    let interval = CatTerm::new(
+        ObjId(0),
+        EnrichedSpine::new(
+            ScalarId(0),
+            UniversalBall::RealInterval { min: 0.0, max: 2.0 },
+        ),
+        DiagramId(0),
+    );
+    let mut h = AnytimeHandle::start(&interval, Duration::from_millis(8));
+    assert!(h.refine_with(UniversalBall::RealInterval { min: 0.5, max: 1.5 }));
+    assert!(!h.refine_with(UniversalBall::RealInterval {
+        min: -1.0,
+        max: 3.0
+    }));
 }
 
 #[test]

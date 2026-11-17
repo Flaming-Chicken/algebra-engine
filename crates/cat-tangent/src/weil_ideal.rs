@@ -91,8 +91,10 @@ impl WeilJet {
                 }
             }
             CalculusKind::Ito => {
-                // In Itô calculus: (dW)^2 = dt.
-                // The cross term (self.tangent * rhs.tangent) dW^2 contributes to deterministic dt drift!
+                // The jet keeps the coefficient of \epsilon^2 = (dW)^2 in `second_order`, and in
+                // Itô calculus (dW)^2 = dt, so that coefficient *is* the dt drift: for a product
+                // it contains the cross term `self.tangent * rhs.tangent`, giving
+                // d(XY) = X dY + Y dX + dX dY. Read it with [`WeilJet::ito_drift`].
                 Self {
                     primal: p,
                     tangent: t,
@@ -113,6 +115,15 @@ impl WeilJet {
                     kind: self.kind,
                 }
             }
+        }
+    }
+
+    /// Coefficient of `dt` when this jet is read in Itô calculus, using `(dW)^2 = dt`: the
+    /// `second_order` coefficient. Zero in the other calculi, where `\epsilon^2` carries no drift.
+    pub fn ito_drift(&self) -> f64 {
+        match self.kind {
+            CalculusKind::Ito => self.second_order,
+            _ => 0.0,
         }
     }
 

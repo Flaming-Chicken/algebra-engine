@@ -1,4 +1,4 @@
-//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6).
+//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B10, B12).
 //!
 //! Each test asserts the correct behaviour and was written to fail on the code it replaced.
 
@@ -396,4 +396,94 @@ fn system_commands_do_what_they_say_or_report_that_they_cannot() {
     assert!(run("export docx x+1").is_error);
     assert!(run("log debug").is_error);
     assert!(run("preset quadratic").is_error);
+}
+
+#[test]
+fn symbolic_tier_labels_the_tangent_line_with_its_real_order() {
+    use algebra_core::ExprGraph;
+    use algebra_engine::cat_eval::{CatEvalInput, CatExprEvaluator};
+    use cat_anytime::{AnytimeBudget, MultiFidelityOp};
+    use cat_core::enclosure::{EvalForm, FidelityMode, UncertaintyKind};
+
+    let g = ExprGraph::new();
+    let x = g.symbol("x");
+    let expr = g.function("sin", [x]);
+    let mut input = CatEvalInput::new(g, expr);
+    input.var_hint = Some("x".into());
+    input.eval_point = Some(0.0);
+
+    let tier1 = CatExprEvaluator::new()
+        .eval_with_fidelity(
+            &input,
+            FidelityMode::SymbolicApprox,
+            EvalForm::Canonical,
+            &AnytimeBudget::default(),
+        )
+        .unwrap();
+    // Tangent line of sin at 0 is x, with remainder O(x^2): order 2 from a first-order expansion.
+    match tier1.enclosure.kind {
+        UncertaintyKind::Asymptotic { order, .. } => assert_eq!(order, 2),
+        other => panic!("expected an asymptotic enclosure, got {other:?}"),
+    }
+    assert_eq!(tier1.enclosure.method, "taylor_order_1");
+
+    // Without an expansion variable the expression is only simplified: an exact result.
+    let g2 = ExprGraph::new();
+    let e2 = g2.add([g2.symbol("y"), g2.integer(0)]);
+    let plain = CatExprEvaluator::new()
+        .eval_with_fidelity(
+            &CatEvalInput::new(g2, e2),
+            FidelityMode::SymbolicApprox,
+            EvalForm::Canonical,
+            &AnytimeBudget::default(),
+        )
+        .unwrap();
+    assert!(matches!(plain.enclosure.kind, UncertaintyKind::Exact));
+}
+
+#[test]
+fn dyson_first_order_term_integrates_over_the_interval() {
+    use algebra_advanced::quantum::DysonSeries;
+    let g = ExprGraph::new();
+    let t = g.symbols.get_or_intern("t");
+    // H_I = 2 (constant): -i * 2 * (t - t0).
+    let term = DysonSeries::first_order_term_between(&g, g.integer(2), t, g.symbol("t0"));
+    let text = show(&g, Simplifier::simplify(&g, term).unwrap());
+    assert!(
+        text.contains("t0") && text.contains("t") && text.contains("i"),
+        "{text}"
+    );
+    assert!(!text.contains("H_I"), "{text}");
+
+    // An integrand without a closed form stays an integral instead of being returned as-is.
+    let h = g.function("unknown_h", [g.symbol("t")]);
+    let unevaluated = DysonSeries::first_order_term(&g, h, t);
+    assert!(
+        show(&g, unevaluated)
+            != show(
+                &g,
+                g.mul([g.integer(-1), g.constant(algebra_core::Constant::I), h])
+            ),
+        "the integrand was returned in place of its integral"
+    );
+}
+
+#[test]
+fn ito_product_rule_carries_the_quadratic_variation_drift() {
+    use cat_tangent::weil_ideal::{CalculusKind, WeilJet};
+    // W is a Brownian path: dW has unit tangent. d(W^2) = 2 W dW + dt.
+    let w = WeilJet::var(0.7, CalculusKind::Ito);
+    let square = w.mul(&w);
+    assert!((square.tangent - 1.4).abs() < 1e-12);
+    assert!((square.ito_drift() - 1.0).abs() < 1e-12);
+    // d(W^3) = 3 W^2 dW + 3 W dt: multiply once more.
+    let cube = square.mul(&w);
+    assert!(
+        (cube.ito_drift() - 3.0 * 0.7).abs() < 1e-12,
+        "{}",
+        cube.ito_drift()
+    );
+    // No drift in ordinary or Stratonovich calculus.
+    let smooth = WeilJet::var(0.7, CalculusKind::Continuous);
+    assert_eq!(smooth.mul(&smooth).ito_drift(), 0.0);
 }

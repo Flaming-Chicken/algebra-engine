@@ -32,11 +32,11 @@ code. No item remains unchecked. Fixed defects have a regression test in
 | ID | Item | Status | Evidence at `dev` |
 | :--- | :--- | :--- | :--- |
 | A1 | `pade!` macro | **Fixed** | `pade!` now calls `calculus::pade_approximant`, which solves the exact rational system from the Taylor coefficients and errors when they are not rational. The macro now returns `AlgebraResult<ExprId>` |
-| A2 | `MathOperation::Clifford` products | **Open** | `executor.rs:1968` ignores `a_coords`/`b_coords`; returns the string `a · b + a ∧ b` |
+| A2 | `MathOperation::Clifford` products | **Fixed** | Clifford vector product and rotor rotation compute real results (Euclidean signature for rotations), cross-checked against the `algebra-advanced` multivector implementation; wrong sizes or other signatures are errors |
 | A3 | `MathOperation::Cartan` ignores the form string | **Fixed** | Cartan operations parse the typed form (`dx`, `2 dx + dz`, `dx^dy`, constant coefficients) and print the resulting terms; unreadable input is an error. Coefficients are still constants (C5) |
-| A4 | `System` Log/Preset/Export/Clear, `AiQuery` echo only | **Open** | `executor.rs:2730-2748` format a confirmation string and change no state |
+| A4 | `System` Log/Preset/Export/Clear, `AiQuery` echo only | **Fixed** | `export <format> <expr>` renders the expression (latex, unicode, mathml). `log`, `preset` and AI queries return errors saying where they are handled; `clear` is session state and is intercepted by `Session` |
 | A5 | `creative_telescoping_integral` | **Open** | `risch.rs:129` ignores its four arguments and returns the fixed Gaussian ODE |
-| A6 | `puiseux_series` | **Open** | `series.rs:119` ignores `_expr`; emits symbolic coefficients `a_p_q` |
+| A6 | `puiseux_series` | **Partly fixed** | denominator 1 returns the Taylor series; fractional exponents return an explicit not-implemented error instead of placeholder coefficients. A real Puiseux expansion is still open |
 | A7 | `EmpiricalDistributionMut::{pdf, cdf}` | **Open** | `distributions.rs:56,60` return constants |
 | A8 | `ZeilbergerAlgorithm` / `AlmkvistZeilberger` | **Open** | Three hard-coded showcase proofs; no general creative telescoping |
 | A9 | `ProofTrace::export_lean4/export_coq` | **Open** | Static boilerplate ending in `sorry`; trace ignored |
@@ -77,7 +77,7 @@ changed:
 
 ## 3. Fixed since the first audit
 
-17 Nov 2026, after the ledger was verified: A1 (`pade!`), A3 (Cartan input), B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
+17 Nov 2026, after the ledger was verified: A1 (`pade!`), A2 (Clifford), A3 (Cartan input), A4 (`export`), A6 (honest errors),, B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
 
 Released in 0.3.2 and 0.4.0 (see `CHANGELOG.md`): limits through radicals and variable exponents, two-sided limits
 through `abs`/`sign`, formatter precedence and exponent rendering, base and radical merging in the simplifier, Itô
@@ -86,9 +86,9 @@ number-theory output, the GUI plan status, and the documentation corrections to 
 
 ## 4. Open work, in priority order
 
-1. **Make stubs honest before making them real.** A1 and A3 are done. For the rest of A1–A11, either implement the feature or return an explicit
+1. **Make stubs honest before making them real.** A1–A4 and A6 are done. For the rest of A1–A11, either implement the feature or return an explicit
    "not implemented" error and remove the claim from ROADMAP, README and the notebook help. A wrong answer
-   presented as a result is worse than a refusal. Clifford (A2), the `System` commands (A4) and `puiseux_series` (A6) are the smallest.
+   presented as a result is worse than a refusal. A5 (creative telescoping), A7 (empirical distribution) and A9 (Lean/Coq export) are the smallest.
 2. **Numerical and symbolic correctness (B1–B12).** B1–B4 and B6 are fixed, with tests in
    `tests/tests/engine/known_defect_tests.rs`. For each remaining item add a failing test, then fix. Each fix needs a test that fails on the old code.
 3. **Panic hygiene.** About 63 production `panic!`/`unwrap` sites per `AUDIT-PANICS-AND-UNWRAPS.md`; replace

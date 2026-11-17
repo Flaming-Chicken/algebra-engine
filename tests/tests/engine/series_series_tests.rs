@@ -38,8 +38,11 @@ fn test_puiseux_series_expansion() {
     let x_sym = graph.symbols.get_or_intern("x");
     let zero = graph.integer(0);
 
-    let _puiseux = graph.puiseux_series(x, x_sym, zero, 2, 2).unwrap();
+    // Denominator 1 is the Taylor series; fractional exponents are reported as unsupported.
+    let taylor = graph.puiseux_series(x, x_sym, zero, 1, 2).unwrap();
     assert!(!graph.is_empty());
+    assert_ne!(taylor, zero);
+    assert!(graph.puiseux_series(x, x_sym, zero, 2, 2).is_err());
 }
 
 #[test]

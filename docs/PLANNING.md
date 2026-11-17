@@ -65,10 +65,11 @@ code. No item remains unchecked. Fixed defects have a regression test in
 C1 (IGA Jacobian), C2 (differential pseudo-remainder), C4 (gear and screw builders), C5 (Cartan forms hold no
 `ExprId` coefficients), C6 (neural-ODE adjoint), C7 (control: Routh–Hurwitz, Ackermann), C8 (PDE
 classification), C10 (FEA solver: dense, no CG or CSR), C11 (interconnect indexing), C13 (visualizer routing),
-C14 (e-graph extraction, wavefront, unification) and C15 (LSP completion catalogue) are in files that have not
+C14 (e-graph extraction, wavefront; unification is done, see below) and C15 (LSP completion catalogue) are in files that have not
 changed since the plan, so they are **Open**. Three were checked directly after the files turned out to have
 changed:
 
+- **C14 unification Fixed.** `UnificationEngine::unify` is first-order Martelli–Montanari: structural decomposition of functions, operators and arithmetic nodes, an occurs check, and a most general unifier whose `apply` makes both sides equal. It is syntactic (no commutativity). The CLI proof export no longer uses unification to gate steps; it records the simplification only when the equivalence check confirms it.
 - **C3 Open.** `cad/mod.rs:581-612` solves only `Distance` and `Coincident` constraints, by placing a point along
   the x-axis; every other constraint is ignored (`_ => {}`).
 - **C9 Open.** No `safetensors` or Candle code exists; `mcts.rs` computes its policy head from the lemma registry.

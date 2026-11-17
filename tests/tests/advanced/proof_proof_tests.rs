@@ -77,3 +77,52 @@ fn test_proof_trace_export_states_the_actual_steps() {
     assert!(coq.contains("Proof. intros; ring. Qed."), "{coq}");
     assert!(coq.contains("not translated"), "{coq}");
 }
+
+#[test]
+fn test_unification_is_structural_with_occurs_check() {
+    use algebra_advanced::proof::UnificationEngine;
+    let graph = ExprGraph::new();
+    let engine = UnificationEngine::new();
+    let (x, y, z) = (graph.symbol("x"), graph.symbol("y"), graph.symbol("z"));
+    let three = graph.integer(3);
+    let f = |args: &[algebra_core::ExprId]| graph.function("f", args.iter().copied());
+    let g1 = |a| graph.function("g", [a]);
+
+    // f(x, g(y)) with f(z, g(3)): x -> z, y -> 3, and both sides become the same term.
+    let (left, right) = (f(&[x, g1(y)]), f(&[z, g1(three)]));
+    let subst = engine.unify(&graph, left, right).unwrap();
+    assert_eq!(subst.apply(&graph, left), subst.apply(&graph, right));
+    assert_eq!(subst.apply(&graph, y), three);
+
+    // Bindings chain: f(x, y) with f(y, 3) gives x = y = 3.
+    let (left, right) = (f(&[x, y]), f(&[y, three]));
+    let subst = engine.unify(&graph, left, right).unwrap();
+    assert_eq!(subst.apply(&graph, x), three);
+    assert_eq!(subst.apply(&graph, left), subst.apply(&graph, right));
+
+    // Occurs check: x cannot equal f(x).
+    assert!(engine.unify(&graph, x, f(&[x])).is_err());
+    // Different heads, different arities and clashing constants fail.
+    assert!(engine.unify(&graph, f(&[x]), g1(x)).is_err());
+    assert!(engine.unify(&graph, f(&[x]), f(&[x, y])).is_err());
+    assert!(engine.unify(&graph, graph.integer(1), three).is_err());
+    // Operators match argument by argument.
+    let sum_left = graph.add([x, three]);
+    let sum_right = graph.add([y, three]);
+    let subst = engine.unify(&graph, sum_left, sum_right).unwrap();
+    assert_eq!(
+        subst.apply(&graph, sum_left),
+        subst.apply(&graph, sum_right)
+    );
+    // Syntactic, not up to arithmetic: x + 3 does not unify with y + 5.
+    assert!(
+        engine
+            .unify(&graph, sum_left, graph.add([y, graph.integer(5)]))
+            .is_err()
+    );
+    assert!(
+        engine
+            .unify(&graph, graph.add([x, y]), graph.mul([x, y]))
+            .is_err()
+    );
+}

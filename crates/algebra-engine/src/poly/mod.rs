@@ -14,6 +14,7 @@
 //! - Sturm, J. C. F. (1829). Mémoire sur la résolution des équations numériques. *Bulletin des Sciences de Férussac*, 11, 419–422.
 //! - Durand, E. (1960). *Solutions Numériques des Équations Algébriques*; Kerner, I. O. (1966). Ein Gesamtschrittverfahren zur Berechnung der Nullstellen von Polynomen. *Numer. Math.*, 8, 290–294.
 
+pub mod exact;
 pub mod grobner;
 pub mod multivariate;
 pub mod roots;

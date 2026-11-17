@@ -74,7 +74,7 @@ changed:
 - **C3 Open.** `cad/mod.rs:581-612` solves only `Distance` and `Coincident` constraints, by placing a point along
   the x-axis; every other constraint is ignored (`_ => {}`).
 - **C9 Open.** No `safetensors` or Candle code exists; `mcts.rs` computes its policy head from the lemma registry.
-- **C12 Open.** `poly/grobner.rs` uses `f64` coefficients (`1.0 / lt.coeff`), not exact rationals, and the Frobenius
+- **C12 Partly fixed.** `poly::exact` adds `ExactPoly` (rational coefficients) and `ExactGrobner`: Buchberger with the product criterion, minimalisation and full reduction, giving the unique reduced basis and an exact ideal-membership test. Verified on the Cox–Little–O'Shea examples (grlex `{x², xy, y² − x/2}`; lex `{x − z, y − 2z², z⁴ + z²/2 − 1/4}`) and a non-dyadic case. The older `GrobnerBasis` on `MultiPoly` still uses `f64` and is now documented as numeric. The Frobenius method appears only in the module doc of `ode/symbolic.rs`: implement it or remove the claim.
   method appears only in the module doc of `ode/symbolic.rs`: either implement it or remove the claim.
 
 ## 3. Fixed since the first audit

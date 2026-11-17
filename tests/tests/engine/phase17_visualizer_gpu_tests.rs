@@ -115,3 +115,31 @@ fn test_visualizer_and_gpu_dsl_macros() {
     let shader = wgsl_grid!("x * x");
     assert!(shader.wgsl_source.contains("x * x"));
 }
+
+#[test]
+fn test_sqrt_surface_height_selects_a_component_of_w() {
+    use algebra_engine::visualizer::{RiemannHeight, RiemannSurface};
+    let (re, im, modulus) = (
+        RiemannSurface::sqrt_surface_with(2.0, 6, 12, RiemannHeight::Real),
+        RiemannSurface::sqrt_surface_with(2.0, 6, 12, RiemannHeight::Imaginary),
+        RiemannSurface::sqrt_surface_with(2.0, 6, 12, RiemannHeight::Modulus),
+    );
+    // The default view is the real part.
+    assert_eq!(
+        RiemannSurface::sqrt_surface(2.0, 6, 12).vertices,
+        re.vertices
+    );
+    assert_eq!(re.vertices.len(), im.vertices.len());
+    let mut distinct = false;
+    for ((a, b), m) in re.vertices.iter().zip(&im.vertices).zip(&modulus.vertices) {
+        // Same (x, y) base point in all three views.
+        assert_eq!((a[0], a[1]), (b[0], b[1]));
+        // w^2 = z: Re(w)^2 - Im(w)^2 = x and 2 Re(w) Im(w) = y.
+        assert!((a[2] * a[2] - b[2] * b[2] - a[0]).abs() < 1e-9);
+        assert!((2.0 * a[2] * b[2] - a[1]).abs() < 1e-9);
+        // |w| = sqrt(|z|).
+        assert!((m[2] - a[0].hypot(a[1]).sqrt()).abs() < 1e-9);
+        distinct |= (a[2] - b[2]).abs() > 1e-6;
+    }
+    assert!(distinct, "the real and imaginary views must differ");
+}

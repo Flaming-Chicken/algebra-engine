@@ -94,6 +94,120 @@ pub struct VectorField {
 }
 
 impl DifferentialForm {
+    /// Parse a form with constant coefficients such as `dx`, `2 dx^dy`, `dx + 3 dy` or `5`.
+    ///
+    /// Terms are separated by `+` or `-`; a term is an optional numeric coefficient followed by a
+    /// wedge (`^`, `∧` or `*`) of coordinate differentials named after `coord_names`. Every term
+    /// must have the same degree. Anything else is an error.
+    pub fn parse(input: &str, dim: usize, coord_names: &[String]) -> AlgebraResult<Self> {
+        let invalid = |why: String| AlgebraError::EvaluationError(format!("form `{input}`: {why}"));
+        let text: String = input.replace('∧', "^").replace(' ', "");
+        if text.is_empty() {
+            return Err(invalid("empty".into()));
+        }
+        // Split into signed terms.
+        let mut start = 0;
+        let mut sign = 1.0;
+        let bytes: Vec<char> = text.chars().collect();
+        let mut pieces: Vec<(f64, String)> = Vec::new();
+        for (i, &ch) in bytes.iter().enumerate() {
+            if (ch == '+' || ch == '-') && i > start {
+                pieces.push((sign, bytes[start..i].iter().collect()));
+                sign = if ch == '-' { -1.0 } else { 1.0 };
+                start = i + 1;
+            } else if (ch == '+' || ch == '-') && i == start {
+                sign = if ch == '-' { -sign } else { sign };
+                start = i + 1;
+            }
+        }
+        pieces.push((sign, bytes[start..].iter().collect()));
+
+        let mut form: Option<DifferentialForm> = None;
+        for (sign, piece) in pieces {
+            if piece.is_empty() {
+                return Err(invalid("dangling operator".into()));
+            }
+            let mut coefficient = sign;
+            let mut indices: Vec<usize> = Vec::new();
+            for factor in piece.split(['^', '*']) {
+                // A coefficient may be glued to the differential (`2dx`, spaces removed above).
+                let (number, differential) = match factor.find('d') {
+                    Some(at) if at > 0 => factor.split_at(at),
+                    _ => ("", factor),
+                };
+                if !number.is_empty() {
+                    coefficient *= number
+                        .parse::<f64>()
+                        .map_err(|_| invalid(format!("cannot read `{number}`")))?;
+                }
+                let factor = differential;
+                if let Ok(v) = factor.parse::<f64>() {
+                    coefficient *= v;
+                } else if let Some(name) = factor.strip_prefix('d') {
+                    let index = coord_names
+                        .iter()
+                        .position(|c| c == name)
+                        .filter(|&i| i < dim)
+                        .ok_or_else(|| invalid(format!("unknown coordinate `{name}`")))?;
+                    indices.push(index);
+                } else {
+                    return Err(invalid(format!("cannot read `{factor}`")));
+                }
+            }
+            let (basis, blade_sign) = FormBasis::new(indices.clone());
+            let term = if blade_sign == 0 {
+                DifferentialForm::zero(dim, indices.len(), coord_names.to_vec())
+            } else {
+                let mut map = BTreeMap::new();
+                map.insert(basis, coefficient * blade_sign as f64);
+                DifferentialForm {
+                    dim,
+                    degree: indices.len(),
+                    coord_names: coord_names.to_vec(),
+                    terms: map,
+                }
+            };
+            form = Some(match form {
+                None => term,
+                Some(acc) => acc.add(&term)?,
+            });
+        }
+        form.ok_or_else(|| invalid("no terms".into()))
+    }
+
+    /// Render as `2 dx∧dy + 3 dz`, or `0` for the zero form.
+    pub fn to_text(&self) -> String {
+        if self.terms.is_empty() {
+            return "0".to_string();
+        }
+        let mut out = String::new();
+        for (basis, &coefficient) in &self.terms {
+            let blade = basis
+                .indices
+                .iter()
+                .map(|&i| format!("d{}", self.coord_names.get(i).map_or("?", String::as_str)))
+                .collect::<Vec<_>>()
+                .join("∧");
+            let magnitude = coefficient.abs();
+            let body = match (blade.is_empty(), (magnitude - 1.0).abs() < 1e-12) {
+                (true, _) => format!("{magnitude}"),
+                (false, true) => blade,
+                (false, false) => format!("{magnitude} {blade}"),
+            };
+            if out.is_empty() {
+                if coefficient < 0.0 {
+                    out.push('-');
+                }
+            } else {
+                out.push_str(if coefficient < 0.0 { " - " } else { " + " });
+            }
+            out.push_str(&body);
+        }
+        out
+    }
+}
+
+impl DifferentialForm {
     /// Create a zero $k$-form in $\mathbb{R}^n$.
     pub fn zero(dim: usize, degree: usize, coord_names: Vec<String>) -> Self {
         Self {

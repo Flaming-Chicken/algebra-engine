@@ -1813,150 +1813,104 @@ impl OperationExecutor {
 
             MathOperation::Cartan(kind) => {
                 let coords: [String; 4] = ["x".into(), "y".into(), "z".into(), "t".into()];
+                let parse = |text: &str, dim: usize| -> Result<DifferentialForm, String> {
+                    if dim == 0 || dim > coords.len() {
+                        return Err(format!("dimension must be between 1 and {}", coords.len()));
+                    }
+                    DifferentialForm::parse(text, dim, &coords[..dim]).map_err(|e| e.to_string())
+                };
+                let report = |label: String, form: DifferentialForm, latex: String| {
+                    let out = format!("{label} = {} (degree {})", form.to_text(), form.degree);
+                    OperationResult::success(out.clone(), latex, out)
+                };
                 match kind {
                     CartanOpKind::Wedge {
                         form1_str,
                         form2_str,
                         dim,
-                    } => {
-                        let f1 = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let f2 =
-                            DifferentialForm::dx(1.min(*dim - 1), *dim, coords[..*dim].to_vec())
-                                .unwrap_or_else(|_| {
-                                    DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                                });
-                        let res = f1.wedge(&f2);
-                        match res {
-                            Ok(w) => {
-                                let out = format!(
-                                    "Wedge Product ({} ∧ {}): degree = {}",
-                                    form1_str, form2_str, w.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\omega_1 \\wedge \\omega_2 \\in \\Omega^{{{}}}(M)",
-                                        w.degree
-                                    ),
-                                    out,
-                                )
-                            }
+                    } => match (parse(form1_str, *dim), parse(form2_str, *dim)) {
+                        (Ok(f1), Ok(f2)) => match f1.wedge(&f2) {
+                            Ok(w) => report(
+                                format!("Wedge Product ({form1_str}) ∧ ({form2_str})"),
+                                w,
+                                "\\omega_1 \\wedge \\omega_2".to_string(),
+                            ),
                             Err(e) => OperationResult::error(e.to_string()),
-                        }
-                    }
+                        },
+                        (Err(e), _) | (_, Err(e)) => OperationResult::error(e),
+                    },
                     CartanOpKind::ExteriorDerivative { form_str, dim } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let res = f.exterior_derivative();
-                        match res {
-                            Ok(df) => {
-                                let out = format!(
-                                    "Exterior Derivative d({}): degree = {}",
-                                    form_str, df.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\mathrm{{d}}\\omega \\in \\Omega^{{{}}}(M)",
-                                        df.degree
-                                    ),
-                                    out,
-                                )
-                            }
-                            Err(e) => OperationResult::error(e.to_string()),
+                        match parse(form_str, *dim) {
+                            Ok(f) => match f.exterior_derivative() {
+                                Ok(df) => report(
+                                    format!("Exterior Derivative d({form_str})"),
+                                    df,
+                                    "\\mathrm{d}\\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
+                            },
+                            Err(e) => OperationResult::error(e),
                         }
                     }
                     CartanOpKind::InteriorProduct {
                         form_str,
                         vector_field,
                         dim,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let vf = VectorField {
-                            dim: *dim,
-                            coord_names: coords[..*dim].to_vec(),
-                            components: vector_field.clone(),
-                        };
-                        let res = f.interior_product(&vf);
-                        match res {
-                            Ok(c) => {
-                                let out = format!(
-                                    "Interior Product i_X({}): degree = {}",
-                                    form_str, c.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\iota_X \\omega \\in \\Omega^{{{}}}(M)", c.degree),
-                                    out,
-                                )
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => {
+                            let vf = VectorField {
+                                dim: *dim,
+                                coord_names: coords[..*dim].to_vec(),
+                                components: vector_field.clone(),
+                            };
+                            match f.interior_product(&vf) {
+                                Ok(c) => report(
+                                    format!("Interior Product i_X({form_str})"),
+                                    c,
+                                    "\\iota_X \\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
                             }
-                            Err(e) => OperationResult::error(e.to_string()),
                         }
-                    }
+                        Err(e) => OperationResult::error(e),
+                    },
                     CartanOpKind::LieDerivative {
                         form_str,
                         vector_field,
                         dim,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let vf = VectorField {
-                            dim: *dim,
-                            coord_names: coords[..*dim].to_vec(),
-                            components: vector_field.clone(),
-                        };
-                        let res = f.lie_derivative(&vf);
-                        match res {
-                            Ok(l) => {
-                                let out = format!(
-                                    "Lie Derivative L_X({}): degree = {}",
-                                    form_str, l.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\mathcal{{L}}_X \\omega \\in \\Omega^{{{}}}(M)",
-                                        l.degree
-                                    ),
-                                    out,
-                                )
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => {
+                            let vf = VectorField {
+                                dim: *dim,
+                                coord_names: coords[..*dim].to_vec(),
+                                components: vector_field.clone(),
+                            };
+                            match f.lie_derivative(&vf) {
+                                Ok(l) => report(
+                                    format!("Lie Derivative L_X({form_str})"),
+                                    l,
+                                    "\\mathcal{L}_X \\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
                             }
-                            Err(e) => OperationResult::error(e.to_string()),
                         }
-                    }
+                        Err(e) => OperationResult::error(e),
+                    },
                     CartanOpKind::HodgeStar {
                         form_str,
                         dim,
                         is_minkowski,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let res = f.hodge_star(*is_minkowski);
-                        match res {
-                            Ok(star) => {
-                                let out =
-                                    format!("Hodge Star ⋆({}): degree = {}", form_str, star.degree);
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\star\\omega \\in \\Omega^{{{}}}(M)", star.degree),
-                                    out,
-                                )
-                            }
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => match f.hodge_star(*is_minkowski) {
+                            Ok(star) => report(
+                                format!("Hodge Star ⋆({form_str})"),
+                                star,
+                                "\\star\\omega".to_string(),
+                            ),
                             Err(e) => OperationResult::error(e.to_string()),
-                        }
-                    }
+                        },
+                        Err(e) => OperationResult::error(e),
+                    },
                 }
             }
 

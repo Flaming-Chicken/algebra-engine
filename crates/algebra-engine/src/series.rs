@@ -5,7 +5,7 @@
 //! **Holonomic D-finite Functions**, and **Linear Recurrence Solvers**.
 
 use crate::calculus::SymbolicCalculus;
-use algebra_core::{AlgebraResult, ExprGraph, ExprId, SymbolId};
+use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, SymbolId};
 
 /// Series expansion and reversion algorithms extension trait.
 pub trait SymbolicSeries {
@@ -196,18 +196,71 @@ impl RecurrenceSolver {
             .unwrap_or_else(|| "n".to_string());
         let n = graph.symbol(&n_name);
 
-        if coeffs.len() == 1 {
-            // First-order recurrence a_n = c1 * a_{n-1} -> a_n = a_0 * c1^n
-            let c1 = graph.float(coeffs[0]);
-            let a0 = graph.float(*initial_conditions.first().unwrap_or(&1.0));
-            let c1_pow_n = graph.pow(c1, n);
-            Ok(graph.mul([a0, c1_pow_n]))
-        } else {
-            // General order linear recurrence representation: a_0 * r_1^n + a_1 * r_2^n
-            let r1 = graph.float(coeffs[0]);
-            let a0 = graph.float(*initial_conditions.first().unwrap_or(&1.0));
-            let r1_pow_n = graph.pow(r1, n);
-            Ok(graph.mul([a0, r1_pow_n]))
+        let constant = |v: f64| {
+            if v.fract() == 0.0 && v.abs() < 1e15 {
+                graph.integer(v as i64)
+            } else {
+                graph.float(v)
+            }
+        };
+        let simplify = |e: ExprId| crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e);
+        let unsupported = |why: &str| AlgebraError::EvaluationError(format!("recurrence: {why}"));
+
+        match coeffs.len() {
+            0 => Err(unsupported("no coefficients given")),
+            1 => {
+                // a_n = c1 a_{n-1}  =>  a_n = a_0 c1^n
+                let a0 = constant(*initial_conditions.first().unwrap_or(&1.0));
+                Ok(graph.mul([a0, graph.pow(constant(coeffs[0]), n)]))
+            }
+            2 => {
+                // a_n = c1 a_{n-1} + c2 a_{n-2}: characteristic polynomial r^2 = c1 r + c2.
+                let (c1, c2) = (coeffs[0], coeffs[1]);
+                if initial_conditions.len() < 2 {
+                    return Err(unsupported(
+                        "a second-order recurrence needs two initial values",
+                    ));
+                }
+                if c2 == 0.0 {
+                    return Err(unsupported("degenerate recurrence (c2 = 0)"));
+                }
+                let (a0, a1) = (initial_conditions[0], initial_conditions[1]);
+                let discriminant = c1 * c1 + 4.0 * c2;
+                if discriminant == 0.0 {
+                    // Repeated root r = c1/2: a_n = (a_0 + (a_1/r - a_0) n) r^n.
+                    let r = c1 / 2.0;
+                    let slope = constant(a1 / r - a0);
+                    let linear = graph.add([constant(a0), graph.mul([slope, n])]);
+                    return Ok(simplify(graph.mul([linear, graph.pow(constant(r), n)])));
+                }
+                if discriminant < 0.0 {
+                    return Err(unsupported(
+                        "complex characteristic roots are not supported",
+                    ));
+                }
+                // Distinct real roots r1, r2 = (c1 +- sqrt(D)) / 2.
+                let root = discriminant.sqrt();
+                let sqrt_d = if (root.round() * root.round() - discriminant).abs() < 1e-9 {
+                    constant(root.round())
+                } else {
+                    graph.function("sqrt", [constant(discriminant)])
+                };
+                let two = graph.integer(2);
+                let r1 = graph.div(graph.add([constant(c1), sqrt_d]), two);
+                let r2 = graph.div(graph.sub(constant(c1), sqrt_d), two);
+                let gap = graph.sub(r1, r2);
+                // a_n = A r1^n + B r2^n with A + B = a_0 and A r1 + B r2 = a_1.
+                let big_a = graph.div(graph.sub(constant(a1), graph.mul([constant(a0), r2])), gap);
+                let big_b = graph.div(graph.sub(graph.mul([constant(a0), r1]), constant(a1)), gap);
+                let sum = graph.add([
+                    graph.mul([big_a, graph.pow(r1, n)]),
+                    graph.mul([big_b, graph.pow(r2, n)]),
+                ]);
+                Ok(simplify(sum))
+            }
+            order => Err(unsupported(&format!(
+                "order {order} is not supported (orders 1 and 2 are)"
+            ))),
         }
     }
 }

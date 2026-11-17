@@ -435,11 +435,13 @@ impl SymbolicSolver for ExprGraph {
     }
 
     fn solve_ode_linear(&self, p: ExprId, q: ExprId, x: SymbolId) -> AlgebraResult<ExprId> {
-        let int_p = self.integrate(p, x)?;
-        let mu = self.function("exp", [int_p]);
-        let neg_int_p = self.neg(int_p);
-        let inv_mu = self.function("exp", [neg_int_p]);
-        let mu_q = self.mul([mu, q]);
+        // Simplify each stage: with `p = 0` the integrating factor must collapse to 1 before it is
+        // multiplied into `q` and integrated again.
+        let simplify = |e: ExprId| Simplifier::simplify(self, e).unwrap_or(e);
+        let int_p = simplify(self.integrate(p, x)?);
+        let mu = simplify(self.function("exp", [int_p]));
+        let inv_mu = simplify(self.function("exp", [self.neg(int_p)]));
+        let mu_q = simplify(self.mul([mu, q]));
         let int_mu_q = self.integrate(mu_q, x)?;
         let sol = self.mul([inv_mu, int_mu_q]);
         Ok(Simplifier::simplify(self, sol).unwrap_or(sol))
@@ -448,16 +450,21 @@ impl SymbolicSolver for ExprGraph {
     fn solve_pde_heat_1d(
         &self,
         alpha: ExprId,
-        _x: SymbolId,
-        _t: SymbolId,
+        x: SymbolId,
+        t: SymbolId,
     ) -> AlgebraResult<(ExprId, ExprId)> {
-        let alpha_sq = self.pow(alpha, self.integer(2));
-        let neg_alpha_sq = self.neg(alpha_sq);
-        let spatial_sol = self.function("cos", [self.symbol("k_x")]);
-        let temporal_sol = self.function(
-            "exp",
-            [self.mul([neg_alpha_sq, self.symbol("k_x"), self.symbol("t")])],
-        );
+        // u = X(x) T(t): X'' = -k^2 X gives X = cos(k x); T' = -alpha^2 k^2 T gives
+        // T = exp(-alpha^2 k^2 t).
+        let k = self.symbol("k_x");
+        let x_sym = self.symbol(&self.symbols.resolve(x).unwrap_or_default());
+        let t_sym = self.symbol(&self.symbols.resolve(t).unwrap_or_default());
+        let spatial_sol = self.function("cos", [self.mul([k, x_sym])]);
+        let decay = self.neg(self.mul([
+            self.pow(alpha, self.integer(2)),
+            self.pow(k, self.integer(2)),
+            t_sym,
+        ]));
+        let temporal_sol = self.function("exp", [decay]);
         Ok((spatial_sol, temporal_sol))
     }
 

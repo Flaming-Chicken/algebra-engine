@@ -98,18 +98,35 @@ impl UniversalBridge {
     }
 
     /// Convert a 1-variable Weyl differential operator $P \in A_1$ into a Differential Polynomial for Ritt-Wu reduction.
-    pub fn weyl_to_diff_polynomial(op: &WeylDOperator, var_idx: usize) -> DiffPolynomial {
+    ///
+    /// A differential polynomial has no explicit independent variable, so only
+    /// constant-coefficient operators $\sum c_k \partial^k$ correspond to it. An operator with
+    /// an $x^j$ factor (`j > 0`) or more than one variable is rejected rather than having that
+    /// factor dropped.
+    pub fn weyl_to_diff_polynomial(
+        op: &WeylDOperator,
+        var_idx: usize,
+    ) -> Result<DiffPolynomial, String> {
+        if op.num_vars != 1 {
+            return Err(format!(
+                "only one-variable operators convert; this one has {} variables",
+                op.num_vars
+            ));
+        }
         let mut terms = Vec::with_capacity(op.terms.len());
         for t in &op.terms {
-            let order = if !t.monomial.d_powers.is_empty() {
-                t.monomial.d_powers[0]
-            } else {
-                0
-            };
+            if t.monomial.x_powers.iter().any(|&p| p > 0) {
+                return Err(
+                    "the operator has a non-constant coefficient (an x power); a differential \
+                     polynomial cannot represent it"
+                        .to_string(),
+                );
+            }
+            let order = t.monomial.d_powers.first().copied().unwrap_or(0);
             let indet = DiffIndeterminate::new(var_idx, order);
             terms.push(DiffTerm::new(t.coeff, vec![(indet, 1)]));
         }
-        DiffPolynomial::new(terms)
+        Ok(DiffPolynomial::new(terms))
     }
 
     /// Decompose product of two angular momentum states into spherical tensor harmonics irreps via Clebsch-Gordan series.
@@ -189,19 +206,38 @@ impl From<Octonion> for [f64; 8] {
     }
 }
 
-impl From<DiffPolynomial> for WeylDOperator {
-    fn from(poly: DiffPolynomial) -> Self {
+/// A differential polynomial is a Weyl operator only when it is linear in a single differential
+/// indeterminate: each term must be `c * y^(k)` (or a constant), which maps to `c * d^k`.
+/// Products or powers of derivatives (`y * y'`, `(y')^2`) and several indeterminates have no
+/// image in the Weyl algebra and are rejected.
+impl TryFrom<DiffPolynomial> for WeylDOperator {
+    type Error = String;
+
+    fn try_from(poly: DiffPolynomial) -> Result<Self, Self::Error> {
+        let mut variable: Option<usize> = None;
         let mut terms = Vec::with_capacity(poly.terms.len());
         for t in poly.terms {
-            let max_order = t
-                .factors
-                .iter()
-                .map(|(ind, _)| ind.order)
-                .max()
-                .unwrap_or(0);
-            let monomial = WeylMonomial::new(vec![0], vec![max_order]);
-            terms.push(WeylTerm::new(t.coeff, monomial));
+            let order = match t.factors.as_slice() {
+                [] => 0,
+                [(indeterminate, 1)] => {
+                    if *variable.get_or_insert(indeterminate.var_index) != indeterminate.var_index {
+                        return Err("the polynomial involves more than one indeterminate".into());
+                    }
+                    indeterminate.order
+                }
+                _ => {
+                    return Err(
+                        "a nonlinear term (a product or power of derivatives) has no \
+                         Weyl-algebra representation"
+                            .into(),
+                    );
+                }
+            };
+            terms.push(WeylTerm::new(
+                t.coeff,
+                WeylMonomial::new(vec![0], vec![order]),
+            ));
         }
-        WeylDOperator { num_vars: 1, terms }
+        Ok(WeylDOperator { num_vars: 1, terms })
     }
 }

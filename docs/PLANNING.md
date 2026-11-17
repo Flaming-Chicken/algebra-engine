@@ -63,11 +63,12 @@ code. No item remains unchecked. Fixed defects have a regression test in
 ### C. Oversimplifications
 
 C1 (IGA Jacobian), C2 (differential pseudo-remainder), C4 (gear and screw builders), C5 (Cartan forms hold no
-`ExprId` coefficients), C6 (neural-ODE adjoint), C10 (FEA solver: dense, no CG or CSR), C11 (interconnect indexing), C13 (visualizer routing),
+`ExprId` coefficients), C6 (neural-ODE adjoint), C10 (FEA solver: dense, no CG or CSR), C13 (visualizer routing),
 C14 (e-graph extraction, wavefront; unification is done, see below) are in files that have not
 changed since the plan, so they are **Open**. Three were checked directly after the files turned out to have
 changed:
 
+- **C11 Fixed.** Weyl-operator and differential-polynomial conversions no longer lose information silently: `weyl_to_diff_polynomial` returns an error for an operator with an `x` power or several variables, and `TryFrom<DiffPolynomial> for WeylDOperator` accepts only terms linear in one indeterminate (so `y·y'` and `(y')²` are rejected). Linear constant-coefficient operators round-trip exactly.
 - **C15 Partly fixed.** LSP hover now evaluates the lines above the cursor first, so earlier definitions are in scope (it evaluated the hovered line alone), and `completions_at` offers names defined above the cursor ahead of the catalogue. Still open: the catalogue itself is a hand-written list, not generated from a central function registry (none exists).
 - **C14 unification Fixed.** `UnificationEngine::unify` is first-order Martelli–Montanari: structural decomposition of functions, operators and arithmetic nodes, an occurs check, and a most general unifier whose `apply` makes both sides equal. It is syntactic (no commutativity). The CLI proof export no longer uses unification to gate steps; it records the simplification only when the equivalence check confirms it.
 - **C8 Fixed.** PDEs are classified as linear, semilinear, quasilinear or fully nonlinear by where the highest derivative sits (Burgers is quasilinear, KdV and sine-Gordon semilinear, Monge–Ampère fully nonlinear); ODEs keep linear/nonlinear. The linearity test is now term by term, so powers and products of derivatives are no longer missed.

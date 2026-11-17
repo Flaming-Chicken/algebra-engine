@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ## [Unreleased]
 
+### Changed
+- `UniversalBridge::weyl_to_diff_polynomial` returns `Result` and `DiffPolynomial` to `WeylDOperator` is now `TryFrom`: conversions that would drop an `x` power, flatten a nonlinear term or merge indeterminates are errors instead of silently wrong output.
+
 ### Added
 - `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
 - `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).

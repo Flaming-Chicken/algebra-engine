@@ -482,8 +482,8 @@ impl FeaEngine {
             }
         }
 
-        // 3. Apply Dirichlet Fixed Constraints (Row/Column elimination with penalty)
-        let penalty = 1e12 * e_mod;
+        // 3. Collect the Dirichlet constraints; they are eliminated from the system exactly.
+        let mut fixed: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
         for bc in bcs {
             if let FeaBoundaryCondition::FixedDisplacement {
                 group_name,
@@ -495,15 +495,14 @@ impl FeaEngine {
                 for &node_idx in nodes {
                     let global_dof = node_idx * dof_per_node + dof_index;
                     if global_dof < total_dof {
-                        k_global[global_dof][global_dof] += penalty;
-                        f_global[global_dof] += penalty * value;
+                        fixed.insert(global_dof, *value);
                     }
                 }
             }
         }
 
         // 4. Solve Linear System K u = F via Gaussian Elimination with Partial Pivoting
-        let displacement = Self::solve_linear_system(&mut k_global, &mut f_global)?;
+        let (displacement, reactions) = Self::solve_with_fixed(&k_global, &f_global, &fixed)?;
 
         // 5. Compute von Mises Stresses across elements
         let mut von_mises = Vec::new();
@@ -553,7 +552,7 @@ impl FeaEngine {
             nodal_values: displacement,
             dof_per_node,
             von_mises_stresses: von_mises,
-            reaction_forces: vec![0.0; total_dof],
+            reaction_forces: reactions,
             max_magnitude: max_mag,
         })
     }
@@ -649,8 +648,8 @@ impl FeaEngine {
             }
         }
 
-        // 2. Apply Boundary Conditions
-        let penalty = 1e12 * conductivity;
+        // 2. Apply Boundary Conditions (prescribed temperatures are eliminated exactly)
+        let mut fixed: std::collections::BTreeMap<usize, f64> = std::collections::BTreeMap::new();
         for bc in bcs {
             match bc {
                 FeaBoundaryCondition::PrescribedTemperature {
@@ -659,8 +658,7 @@ impl FeaEngine {
                 } => {
                     if let Some(nodes) = mesh.boundary_groups.get(group_name) {
                         for &node_idx in nodes {
-                            k_global[node_idx][node_idx] += penalty;
-                            f_global[node_idx] += penalty * temperature;
+                            fixed.insert(node_idx, *temperature);
                         }
                     }
                 }
@@ -681,7 +679,7 @@ impl FeaEngine {
         }
 
         // 3. Solve Linear System
-        let temperature = Self::solve_linear_system(&mut k_global, &mut f_global)?;
+        let (temperature, reactions) = Self::solve_with_fixed(&k_global, &f_global, &fixed)?;
         let max_t = temperature
             .iter()
             .copied()
@@ -691,9 +689,55 @@ impl FeaEngine {
             nodal_values: temperature,
             dof_per_node: 1,
             von_mises_stresses: Vec::new(),
-            reaction_forces: Vec::new(),
+            reaction_forces: reactions,
             max_magnitude: max_t,
         })
+    }
+
+    /// Solve `K u = f` with some unknowns prescribed (`fixed`: index to value) by eliminating
+    /// them: the free unknowns satisfy `K_ff u_f = f_f - K_fc u_c`, which is exactly the
+    /// constrained problem and keeps the matrix well conditioned (a penalty of 1e12 loses
+    /// about twelve digits). Returns the full solution and the reaction at every unknown
+    /// (`K u - f`: zero at free unknowns, the force the support supplies at fixed ones).
+    fn solve_with_fixed(
+        k: &[Vec<f64>],
+        f: &[f64],
+        fixed: &std::collections::BTreeMap<usize, f64>,
+    ) -> AlgebraResult<(Vec<f64>, Vec<f64>)> {
+        let n = f.len();
+        let free: Vec<usize> = (0..n).filter(|i| !fixed.contains_key(i)).collect();
+        let mut a: Vec<Vec<f64>> = free
+            .iter()
+            .map(|&i| free.iter().map(|&j| k[i][j]).collect())
+            .collect();
+        let mut b: Vec<f64> = free
+            .iter()
+            .map(|&i| f[i] - fixed.iter().map(|(&c, &v)| k[i][c] * v).sum::<f64>())
+            .collect();
+        let solved = if free.is_empty() {
+            Vec::new()
+        } else {
+            Self::solve_linear_system(&mut a, &mut b)?
+        };
+        let mut u = vec![0.0; n];
+        for (&i, &v) in free.iter().zip(&solved) {
+            u[i] = v;
+        }
+        for (&c, &v) in fixed {
+            if c < n {
+                u[c] = v;
+            }
+        }
+        let reactions = (0..n)
+            .map(|i| {
+                if fixed.contains_key(&i) {
+                    k[i].iter().zip(&u).map(|(a, b)| a * b).sum::<f64>() - f[i]
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        Ok((u, reactions))
     }
 
     /// Systems with more unknowns than this are solved by sparse conjugate gradients instead of
@@ -706,8 +750,7 @@ impl FeaEngine {
     /// singular (typically an unconstrained structure with rigid-body motion, or a thermal
     /// problem with no boundary condition) and is reported as an error rather than solved by
     /// skipping the equation. The solution is then checked against the original system: a
-    /// relative residual above `1e-6` (severe ill-conditioning, for example from the penalty
-    /// constraints) is an error too.
+    /// relative residual above `1e-6` (severe ill-conditioning) is an error too.
     #[allow(clippy::needless_range_loop)]
     fn solve_linear_system(a: &mut [Vec<f64>], b: &mut [f64]) -> AlgebraResult<Vec<f64>> {
         let n = b.len();
@@ -718,8 +761,8 @@ impl FeaEngine {
         }
         let original_a: Vec<Vec<f64>> = a.to_vec();
         let original_b: Vec<f64> = b.to_vec();
-        // Each row is judged against its own magnitude: penalty constraints make some rows ~1e12
-        // times stiffer than others, so a single global scale would flag healthy pivots.
+        // Each row is judged against its own magnitude, so a stiff row does not make healthy
+        // pivots in softer rows look negligible.
         let mut row_scale: Vec<f64> = (0..n)
             .map(|i| a[i].iter().fold(0.0_f64, |m, v| m.max(v.abs())))
             .collect();

@@ -6,5 +6,5 @@ pub mod egraph;
 pub mod lattice;
 
 pub use buckingham_pi::{BuckinghamPi, PiGroup};
-pub use egraph::{EClass, EGraph, ENode, RewriteRule, RuleTier};
+pub use egraph::{EClass, EGraph, ENode, ExtractedTerm, RewriteRule, RuleTier};
 pub use lattice::{EquivalenceEdge, EquivalenceKind};

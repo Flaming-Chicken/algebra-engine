@@ -27,6 +27,9 @@ pub struct InvoluteGear {
     pub face_width: f64,
     /// Central bore hole radius (e.g. for shaft mounting).
     pub bore_radius: f64,
+    /// Profile shift coefficient $x$ (rack displacement $x m$; positive thickens the tooth and
+    /// lengthens the addendum, avoiding undercut on small pinions). $0$ is a standard gear.
+    pub profile_shift: f64,
 }
 
 impl InvoluteGear {
@@ -39,6 +42,7 @@ impl InvoluteGear {
             helix_angle_deg: 0.0,
             face_width,
             bore_radius: module * (teeth as f64) * 0.15,
+            profile_shift: 0.0,
         }
     }
 
@@ -51,7 +55,14 @@ impl InvoluteGear {
             helix_angle_deg,
             face_width,
             bore_radius: module * (teeth as f64) * 0.15,
+            profile_shift: 0.0,
         }
+    }
+
+    /// The same gear with profile shift coefficient `x`.
+    pub fn with_profile_shift(mut self, x: f64) -> Self {
+        self.profile_shift = x;
+        self
     }
 
     /// Pitch circle diameter $d = m z$.
@@ -64,71 +75,73 @@ impl InvoluteGear {
         self.pitch_diameter() * (self.pressure_angle_deg * PI / 180.0).cos()
     }
 
-    /// Tip / Addendum circle diameter $d_a = d + 2m$.
+    /// Tip / Addendum circle diameter $d_a = d + 2(1 + x)m$.
     pub fn tip_diameter(&self) -> f64 {
-        self.pitch_diameter() + 2.0 * self.module
+        self.pitch_diameter() + 2.0 * (1.0 + self.profile_shift) * self.module
     }
 
-    /// Root / Dedendum circle diameter $d_f = d - 2.5m$.
+    /// Root / Dedendum circle diameter $d_f = d - 2(1.25 - x)m$.
     pub fn root_diameter(&self) -> f64 {
-        self.pitch_diameter() - 2.5 * self.module
+        self.pitch_diameter() - 2.0 * (1.25 - self.profile_shift) * self.module
     }
 
-    /// Generate 2D tooth cross-section profile boundary points.
+    /// Half the angular width of a tooth on the circle of radius `r` (radians): the involute
+    /// geometry psi + inv(alpha) - inv(alpha_r), where psi = (pi/2 + 2 x tan(alpha)) / z
+    /// is the half-width at the pitch circle and cos(alpha_r) = r_b / r. Never negative (a
+    /// tooth that would be thinner than a point is cut off there).
+    pub fn tooth_half_angle(&self, r: f64) -> f64 {
+        let alpha = self.pressure_angle_deg.to_radians();
+        let rb = self.base_diameter() / 2.0;
+        let inv = |a: f64| a.tan() - a;
+        let psi = (PI / 2.0 + 2.0 * self.profile_shift * alpha.tan()) / self.teeth as f64;
+        let alpha_r = (rb / r.max(rb)).clamp(-1.0, 1.0).acos();
+        (psi + inv(alpha) - inv(alpha_r)).max(0.0)
+    }
+
+    /// Generate the 2D tooth outline, counter-clockwise, as boundary points.
+    ///
+    /// Each tooth is centred on `i 2pi/z`. Its flanks are true involutes of the base circle
+    /// (`samples_per_tooth` points each) from the base circle (or the root circle, along a radial
+    /// line, when the root lies inside the base circle) out to the tip circle, so the tooth
+    /// thickness on the pitch circle is `pi m / 2 + 2 x m tan(alpha)`. The tip and root arcs are
+    /// each represented by a midpoint. The outline is star-shaped about the axis, and an
+    /// over-thick tooth that would overlap its neighbour is limited to the available space.
     pub fn generate_2d_profile(&self, samples_per_tooth: usize) -> Vec<[f64; 2]> {
         let z = self.teeth;
         let rb = self.base_diameter() / 2.0;
         let ra = self.tip_diameter() / 2.0;
         let rf = self.root_diameter() / 2.0;
         let d_theta = 2.0 * PI / (z as f64);
+        let n_samples = samples_per_tooth.max(4);
+        let polar = |r: f64, a: f64| [r * a.cos(), r * a.sin()];
+        // Flank start radius: the base circle, or the root when the root is outside it.
+        let r_start = rf.max(rb);
+        let limit = 0.5 * d_theta * 0.98;
+        let half = |r: f64| self.tooth_half_angle(r).min(limit);
 
         let mut points = Vec::new();
-
         for i in 0..z {
-            let base_angle = (i as f64) * d_theta;
-
-            // 1. Root dedendum arc
-            points.push([
-                rf * (base_angle - d_theta * 0.25).cos(),
-                rf * (base_angle - d_theta * 0.25).sin(),
-            ]);
-
-            // 2. Involute rising flank
-            let max_t = if ra * ra >= rb * rb {
-                ((ra * ra - rb * rb) / (rb * rb)).sqrt()
-            } else {
-                0.5
-            };
-            let n_samples = samples_per_tooth.max(4);
-            for s in 0..=n_samples {
-                let t = (s as f64 / n_samples as f64) * max_t;
-                // Involute parametric equation: x = rb(cos t + t sin t), y = rb(sin t - t cos t)
-                let inv_x = rb * (t.cos() + t * t.sin());
-                let inv_y = rb * (t.sin() - t * t.cos());
-                let rot_angle = base_angle;
-                let rx = inv_x * rot_angle.cos() - inv_y * rot_angle.sin();
-                let ry = inv_x * rot_angle.sin() + inv_y * rot_angle.cos();
-                points.push([rx, ry]);
+            let c = (i as f64) * d_theta;
+            // Root arc midpoint, then the radial run-in below the base circle if there is one.
+            points.push(polar(rf, c - 0.5 * d_theta));
+            if rf < r_start {
+                points.push(polar(rf, c - half(r_start)));
             }
-
-            // 3. Tip addendum arc
-            points.push([
-                ra * (base_angle + d_theta * 0.25).cos(),
-                ra * (base_angle + d_theta * 0.25).sin(),
-            ]);
-
-            // 4. Involute falling flank
+            // Rising (leading) flank: the angular half-width shrinks as r grows.
+            for s in 0..=n_samples {
+                let r = r_start + (ra - r_start) * (s as f64 / n_samples as f64);
+                points.push(polar(r, c - half(r)));
+            }
+            points.push(polar(ra, c));
+            // Falling flank, mirrored.
             for s in (0..=n_samples).rev() {
-                let t = (s as f64 / n_samples as f64) * max_t;
-                let inv_x = rb * (t.cos() + t * t.sin());
-                let inv_y = -rb * (t.sin() - t * t.cos());
-                let rot_angle = base_angle + d_theta * 0.5;
-                let rx = inv_x * rot_angle.cos() - inv_y * rot_angle.sin();
-                let ry = inv_x * rot_angle.sin() + inv_y * rot_angle.cos();
-                points.push([rx, ry]);
+                let r = r_start + (ra - r_start) * (s as f64 / n_samples as f64);
+                points.push(polar(r, c + half(r)));
+            }
+            if rf < r_start {
+                points.push(polar(rf, c + half(r_start)));
             }
         }
-
         points
     }
 

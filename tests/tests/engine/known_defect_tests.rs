@@ -699,3 +699,88 @@ fn the_prover_uses_trigonometric_hyperbolic_and_exponential_side_relations() {
     ));
     assert!(!prove(f("sin", x), f("cos", x)));
 }
+
+fn shoelace(points: &[[f64; 2]]) -> f64 {
+    let n = points.len();
+    (0..n)
+        .map(|i| points[i][0] * points[(i + 1) % n][1] - points[(i + 1) % n][0] * points[i][1])
+        .sum::<f64>()
+        / 2.0
+}
+
+/// Every undirected edge of a closed manifold mesh is used by exactly two triangles, once in each
+/// direction.
+fn assert_closed_and_oriented(mesh: &algebra_engine::cad::Mesh3D) {
+    use std::collections::HashMap;
+    let mut directed: HashMap<(usize, usize), usize> = HashMap::new();
+    for t in &mesh.triangles {
+        for k in 0..3 {
+            *directed.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
+        }
+    }
+    for (&(a, b), &count) in &directed {
+        assert_eq!(
+            count, 1,
+            "edge {a}->{b} used {count} times in one direction"
+        );
+        assert_eq!(
+            directed.get(&(b, a)),
+            Some(&1),
+            "edge {a}->{b} has no opposite edge"
+        );
+    }
+}
+
+#[test]
+fn gear_meshes_are_closed_solids_with_the_right_volume_and_a_bore() {
+    use algebra_engine::cad::InvoluteGear;
+    for gear in [
+        InvoluteGear::spur(2.0, 20, 5.0),
+        InvoluteGear::helical(1.5, 17, 8.0, 20.0),
+    ] {
+        let mesh = gear.generate_3d_mesh();
+        assert_closed_and_oriented(&mesh);
+
+        // Volume = (outline area - bore area) * face width, identical for the helical twist.
+        let outline = shoelace(&gear.generate_2d_profile(6));
+        let bore = gear.bore_radius.min(0.8 * gear.root_diameter() / 2.0);
+        let n = 48.0;
+        let bore_area = 0.5 * n * bore * bore * (2.0 * std::f64::consts::PI / n).sin();
+        let expected = (outline.abs() - bore_area) * gear.face_width;
+        let volume = mesh.compute_volume();
+        // A spur gear is an exact prism. A helical one is a piecewise-linear twist: the straight
+        // chords between layers cut slightly inside the true helicoid, so the volume is a little
+        // below (never above) area x width, by well under a percent with 8 layers.
+        let tolerance = if gear.helix_angle_deg == 0.0 {
+            1e-6
+        } else {
+            2e-3
+        };
+        assert!(
+            (volume - expected).abs() < tolerance * expected,
+            "z={}: volume {volume} vs {expected}",
+            gear.teeth
+        );
+        if gear.helix_angle_deg != 0.0 {
+            assert!(volume <= expected * (1.0 + 1e-9));
+        }
+        // The bore is a real hole: no vertex on the axis, and ring vertices at the bore radius.
+        assert!(mesh.vertices.iter().all(|v| v[0].hypot(v[1]) > 0.5 * bore));
+        assert!(
+            mesh.vertices
+                .iter()
+                .any(|v| (v[0].hypot(v[1]) - bore).abs() < 1e-9)
+        );
+    }
+}
+
+#[test]
+fn a_gear_without_a_bore_is_still_a_closed_solid() {
+    use algebra_engine::cad::InvoluteGear;
+    let mut gear = InvoluteGear::spur(2.0, 20, 5.0);
+    gear.bore_radius = 0.0;
+    let mesh = gear.generate_3d_mesh();
+    assert_closed_and_oriented(&mesh);
+    let expected = shoelace(&gear.generate_2d_profile(6)).abs() * gear.face_width;
+    assert!((mesh.compute_volume() - expected).abs() < 1e-6 * expected);
+}

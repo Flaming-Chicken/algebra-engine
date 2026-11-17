@@ -132,7 +132,14 @@ impl InvoluteGear {
         points
     }
 
-    /// Generate full 3D solid mesh of the spur or helical gear.
+    /// Generate the full 3D solid of the spur or helical gear as a closed, outward-oriented
+    /// triangle mesh: the toothed outer wall, a cylindrical bore of radius `bore_radius` (omitted
+    /// when it is zero), and two annular end caps.
+    ///
+    /// The tooth outline is star-shaped about the axis (its polar angle only increases), so each
+    /// cap is triangulated by merging the angular order of the outline with that of the bore
+    /// circle, which is valid for the non-convex outline (a fan from one outline vertex is not).
+    /// A helical gear twists the layers about the axis; the cross-section area is unchanged.
     pub fn generate_3d_mesh(&self) -> Mesh3D {
         let profile = self.generate_2d_profile(6);
         let n_prof = profile.len();
@@ -151,35 +158,125 @@ impl InvoluteGear {
             0.0
         };
 
-        for l in 0..n_layers {
-            let z_pos = (l as f64 / (n_layers - 1) as f64) * height;
-            let twist = (l as f64 / (n_layers - 1) as f64) * max_twist;
-            let cos_tw = twist.cos();
-            let sin_tw = twist.sin();
+        // The bore must stay inside the root circle to leave a wall.
+        let bore_radius = self
+            .bore_radius
+            .min(0.8 * self.root_diameter() / 2.0)
+            .max(0.0);
+        let n_bore = if bore_radius > 1e-9 { 48 } else { 0 };
+        let per_layer = n_prof + n_bore;
+        let start_angle = profile[0][1].atan2(profile[0][0]);
 
+        for l in 0..n_layers {
+            let fraction = l as f64 / (n_layers - 1) as f64;
+            let z_pos = fraction * height;
+            let twist = fraction * max_twist;
+            let (cos_tw, sin_tw) = (twist.cos(), twist.sin());
             for p in &profile {
-                let rx = p[0] * cos_tw - p[1] * sin_tw;
-                let ry = p[0] * sin_tw + p[1] * cos_tw;
-                mesh.add_vertex([rx, ry, z_pos]);
+                mesh.add_vertex([
+                    p[0] * cos_tw - p[1] * sin_tw,
+                    p[0] * sin_tw + p[1] * cos_tw,
+                    z_pos,
+                ]);
+            }
+            for j in 0..n_bore {
+                let angle = start_angle + 2.0 * PI * j as f64 / n_bore as f64;
+                // The bore is a round hole about the axis, so it is not twisted.
+                mesh.add_vertex([bore_radius * angle.cos(), bore_radius * angle.sin(), z_pos]);
             }
         }
 
-        // Side quads
+        // Outer wall (normals point away from the axis) and bore wall (towards the axis).
         for l in 0..n_layers - 1 {
-            let l0 = l * n_prof;
-            let l1 = (l + 1) * n_prof;
+            let (l0, l1) = (l * per_layer, (l + 1) * per_layer);
             for i in 0..n_prof {
                 let next = (i + 1) % n_prof;
                 mesh.add_triangle(l0 + i, l0 + next, l1 + next);
                 mesh.add_triangle(l0 + i, l1 + next, l1 + i);
             }
+            for j in 0..n_bore {
+                let (a, b) = (n_prof + j, n_prof + (j + 1) % n_bore);
+                mesh.add_triangle(l0 + a, l1 + b, l0 + b);
+                mesh.add_triangle(l0 + a, l1 + a, l1 + b);
+            }
         }
 
-        // Bottom and top cap fan
-        let top_offset = (n_layers - 1) * n_prof;
-        for i in 1..n_prof - 1 {
-            mesh.add_triangle(0, i + 1, i);
-            mesh.add_triangle(top_offset, top_offset + i, top_offset + i + 1);
+        // Polar angles (increasing, unwrapped from the first outline vertex).
+        let mut outline_angles = Vec::with_capacity(n_prof + 1);
+        let mut previous = start_angle;
+        let mut unwrapped = start_angle;
+        outline_angles.push(unwrapped);
+        for p in &profile[1..] {
+            let angle = p[1].atan2(p[0]);
+            let mut delta = angle - previous;
+            while delta < -PI {
+                delta += 2.0 * PI;
+            }
+            while delta > PI {
+                delta -= 2.0 * PI;
+            }
+            unwrapped += delta;
+            outline_angles.push(unwrapped);
+            previous = angle;
+        }
+        outline_angles.push(start_angle + 2.0 * PI);
+
+        // Triangulate an end cap. `layer_base` is the first vertex of the layer, `twist` the angle
+        // by which that layer's outline is rotated (the bore ring is not rotated), and `up`
+        // selects the winding (counter-clockwise seen from +z for the top cap).
+        let mut cap = |layer_base: usize, up: bool, twist: f64| {
+            let mut push = |a: usize, b: usize, c: usize| {
+                if up {
+                    mesh.add_triangle(a, b, c);
+                } else {
+                    mesh.add_triangle(a, c, b);
+                }
+            };
+            if n_bore == 0 {
+                // No bore: the solid-disc fans below close the ends.
+                return;
+            }
+            let step = 2.0 * PI / n_bore as f64;
+            // Start at the bore vertex at or just before the rotated outline's first vertex.
+            let first_bore = (twist / step).floor() as i64;
+            let bore_angle = |k: i64| start_angle + step * (first_bore + k) as f64;
+            let bore_index = |k: i64| (first_bore + k).rem_euclid(n_bore as i64) as usize;
+            let (mut i, mut k) = (0usize, 0i64);
+            while i < n_prof || k < n_bore as i64 {
+                let advance_outer = if i >= n_prof {
+                    false
+                } else if k >= n_bore as i64 {
+                    true
+                } else {
+                    outline_angles[i + 1] + twist <= bore_angle(k + 1)
+                };
+                let (outer, outer_next) = (layer_base + i % n_prof, layer_base + (i + 1) % n_prof);
+                let (inner, inner_next) = (
+                    layer_base + n_prof + bore_index(k),
+                    layer_base + n_prof + bore_index(k + 1),
+                );
+                if advance_outer {
+                    push(outer, outer_next, inner);
+                    i += 1;
+                } else {
+                    push(outer, inner_next, inner);
+                    k += 1;
+                }
+            }
+        };
+        let top = (n_layers - 1) * per_layer;
+        cap(0, false, 0.0);
+        cap(top, true, max_twist);
+
+        if n_bore == 0 {
+            // Solid disc: a fan from an axis vertex at each end.
+            let bottom_axis = mesh.add_vertex([0.0, 0.0, 0.0]);
+            let top_axis = mesh.add_vertex([0.0, 0.0, height]);
+            for i in 0..n_prof {
+                let next = (i + 1) % n_prof;
+                mesh.add_triangle(bottom_axis, next, i);
+                mesh.add_triangle(top_axis, top + i, top + next);
+            }
         }
 
         mesh

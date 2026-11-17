@@ -3,30 +3,13 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
-## [Unreleased]
-
-### Changed
-- `CodeGenerator::compile_fn1`, `compile_fn2` and `compile_fn_n` compile to bytecode once and evaluate on `f64` per call instead of cloning the graph and substituting symbolically on every call.
-- `VmCompiler` reports an unbound symbol as a compilation error; it used to compile it as the variable and return wrong numbers.
-- `AdjointSensitivitySolver::compute_gradient` back-propagates exactly through the RK4 steps of `NeuralOde::forward` (fourth-order accurate gradients). It was a first-order scheme with an error of about 1% at 100 steps, and it ignored its `vector_field` argument.
-- FEA solves report an under-constrained (singular) system as an error and verify the solution's residual. Previously a singular equation was skipped and its unknown reported as `0`, so a structure with rigid-body motion returned plausible-looking displacements.
-- `WavefrontSchedule::build` and `evaluate` return `Result` (`WavefrontError`): levels follow dependencies rather than edge listing order, cycles are detected, and a missing wire, an unsupported operation or a division by zero is an error instead of silently `0`. `Inv` and `Identity` are now evaluated.
-- `RittWuReducer::characteristic_set` computes a characteristic set (Ritt's procedure) instead of sorting its input; `{y'', y, y'}` now gives `{y}`.
-- `UniversalBridge::weyl_to_diff_polynomial` returns `Result` and `DiffPolynomial` to `WeylDOperator` is now `TryFrom`: conversions that would drop an `x` power, flatten a nonlinear term or merge indeterminates are errors instead of silently wrong output.
+## [0.5.0] - 2026-11-17
 
 ### Added
 - `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
 - `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
 - `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
 - `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
-
-### Fixed
-- `DiffPolynomial::differentiate` left repeated indeterminates in a term (`y'` twice), which made degrees and leaders wrong; it now normalises.
-- LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.
-
-## [0.5.0] - 2026-11-17
-
-### Added
 - Notebook export (`urae_notebook::export`): LaTeX, SymPy and Lean 4 files are built from the parsed document. The LaTeX export previously wrapped the raw buffer, the Python export put it in a docstring, and the Lean export was a two-line stub.
 - `DysonSeries::first_order_term_between` (integral from `t0` to `t`) and `WeilJet::ito_drift`.
 - `ProofTrace::export_lean4_with` and `export_coq_with`: each step is a theorem about the real expressions it rewrote (closed by `ring`; unsupported steps are listed as comments). The CLI and agent export use them.
@@ -37,6 +20,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
 ### Changed
+- `CodeGenerator::compile_fn1`, `compile_fn2` and `compile_fn_n` compile to bytecode once and evaluate on `f64` per call instead of cloning the graph and substituting symbolically on every call.
+- `VmCompiler` reports an unbound symbol as a compilation error; it used to compile it as the variable and return wrong numbers.
+- `AdjointSensitivitySolver::compute_gradient` back-propagates exactly through the RK4 steps of `NeuralOde::forward` (fourth-order accurate gradients). It was a first-order scheme with an error of about 1% at 100 steps, and it ignored its `vector_field` argument.
+- FEA solves report an under-constrained (singular) system as an error and verify the solution's residual. Previously a singular equation was skipped and its unknown reported as `0`, so a structure with rigid-body motion returned plausible-looking displacements.
+- `WavefrontSchedule::build` and `evaluate` return `Result` (`WavefrontError`): levels follow dependencies rather than edge listing order, cycles are detected, and a missing wire, an unsupported operation or a division by zero is an error instead of silently `0`. `Inv` and `Identity` are now evaluated.
+- `RittWuReducer::characteristic_set` computes a characteristic set (Ritt's procedure) instead of sorting its input; `{y'', y, y'}` now gives `{y}`.
+- `UniversalBridge::weyl_to_diff_polynomial` returns `Result` and `DiffPolynomial` to `WeylDOperator` is now `TryFrom`: conversions that would drop an `x` power, flatten a nonlinear term or merge indeterminates are errors instead of silently wrong output.
 - Differential-equation classification reports PDEs as linear, semilinear, quasilinear or nonlinear by the location of the nonlinearity (the KdV equation is now semilinear, Burgers quasilinear). Powers and products of derivatives are detected as nonlinear.
 - Production code no longer contains reachable `unwrap`, `expect` or `panic!` calls outside documented operator panics; the workspace lints `clippy::unwrap_used`, `expect_used` and `panic` are on (test code exempt). A failed notebook launch is reported instead of panicking, and a poisoned token lock is recovered.
 - `KnotInvariants::kauffman_bracket` and `jones_polynomial` return `Result` and compute a state sum (previously a lookup table for three knots and a product of `A^±1` otherwise). A positive `σ₁³` now gives `A⁻⁷ − A⁻³ − A⁵`, the standard right-handed trefoil (the old table held its mirror image).
@@ -48,6 +38,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `DiffPolynomial::differentiate` left repeated indeterminates in a term (`y'` twice), which made degrees and leaders wrong; it now normalises.
+- LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.
 - `StateSpaceSystem::is_stable` judged systems with three or more states by the sign of the trace; it now applies Routh-Hurwitz (continuous) or Schur-Cohn (discrete) to the characteristic polynomial.
 - `frequency_response` returned zeros for every system that was not a two-state SISO one, and ignored the sample time of discrete systems; it now evaluates `C(sI - A)^-1 B + D` in general.
 - `pole_placement_ackermann` supports any controllable single-input system (it stopped at two states).

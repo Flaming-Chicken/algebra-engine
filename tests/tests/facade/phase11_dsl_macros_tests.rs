@@ -51,7 +51,7 @@ fn test_macro_limits_series_pade() {
     assert_ne!(puiseux_res, zero);
 
     // 5. pade!
-    let pade_res = pade!(&graph, x, x_sym, zero, 2, 2);
+    let pade_res = pade!(&graph, x, x_sym, zero, 2, 2).unwrap();
     assert_ne!(pade_res, zero);
 }
 

@@ -24,16 +24,16 @@ documents only when a finding needs its original evidence.
 
 "Open" means the cited code is unchanged since the plan was written and still shows the described behaviour.
 Items marked "reproduced" were run against `dev` (17 Nov 2026); the rest were confirmed by reading the cited
-code. No item remains unchecked. Reproduced defects have an `#[ignore]`d test in
-`tests/tests/engine/known_defect_tests.rs` that asserts the correct behaviour; remove the `#[ignore]` when fixing.
+code. No item remains unchecked. Fixed defects have a regression test in
+`tests/tests/engine/known_defect_tests.rs`.
 
 ### A. Silent stubs (feature claims that return placeholder output)
 
 | ID | Item | Status | Evidence at `dev` |
 | :--- | :--- | :--- | :--- |
-| A1 | `pade!` macro | **Open** | `macros.rs:110` computes a Taylor series and then returns the symbol quotient `P_num / Q_den`; it never builds a Padé approximant |
+| A1 | `pade!` macro | **Fixed** | `pade!` now calls `calculus::pade_approximant`, which solves the exact rational system from the Taylor coefficients and errors when they are not rational. The macro now returns `AlgebraResult<ExprId>` |
 | A2 | `MathOperation::Clifford` products | **Open** | `executor.rs:1968` ignores `a_coords`/`b_coords`; returns the string `a · b + a ∧ b` |
-| A3 | `MathOperation::Cartan` ignores the form string | **Open** | `executor.rs:1822` builds `DifferentialForm::dx(0, …)` regardless of `form1_str` |
+| A3 | `MathOperation::Cartan` ignores the form string | **Fixed** | Cartan operations parse the typed form (`dx`, `2 dx + dz`, `dx^dy`, constant coefficients) and print the resulting terms; unreadable input is an error. Coefficients are still constants (C5) |
 | A4 | `System` Log/Preset/Export/Clear, `AiQuery` echo only | **Open** | `executor.rs:2730-2748` format a confirmation string and change no state |
 | A5 | `creative_telescoping_integral` | **Open** | `risch.rs:129` ignores its four arguments and returns the fixed Gaussian ODE |
 | A6 | `puiseux_series` | **Open** | `series.rs:119` ignores `_expr`; emits symbolic coefficients `a_p_q` |
@@ -47,12 +47,12 @@ code. No item remains unchecked. Reproduced defects have an `#[ignore]`d test in
 
 | ID | Item | Status | Evidence at `dev` |
 | :--- | :--- | :--- | :--- |
-| B1 | `summation` wrong on non-trivial summands | **Open, reproduced** | Any non-symbol summand is treated as constant: `sum k^2` returns `k^2 · (n - 1 + 1)`. Test `known_defect_summation_of_a_non_constant_summand` |
-| B2 | `caputo_derivative` wrong for α ≠ 0.5 | **Open** | `calculus.rs:900`: kernel exponent is `n − α`; the Caputo kernel is `(t − τ)^(n − α − 1)`. They agree only at α = n − ½ |
-| B3 | `solve_pde_heat_1d` | **Open** | `solver.rs:456`: spatial part is `cos(k_x)` with no `x`; decay uses `k_x`, not `k_x²` |
-| B4 | `solve_ode_linear` with `p = 0` | **Open, reproduced** | `y' = 1` returns `1 / 0`. Test `known_defect_linear_ode_with_zero_coefficient` |
+| B1 | `summation` wrong on non-trivial summands | **Fixed** | polynomial summands in the summation variable are summed by Faulhaber's formula (degree up to 12); anything else is an error |
+| B2 | `caputo_derivative` wrong for α ≠ 0.5 | **Fixed** | kernel exponent is `α + 1 − n` |
+| B3 | `solve_pde_heat_1d` | **Fixed** | modes are `cos(k_x x)` and `exp(-α² k_x² t)`, using the symbols passed in |
+| B4 | `solve_ode_linear` with `p = 0` | **Fixed** | `y' = 1` gives `x`; each stage is simplified before it is integrated again |
 | B5 | `laurent_series` / `lagrange_inversion` | **Partly fixed** | Laurent now handles pole order 0 and simplifies; Lagrange inversion unchanged |
-| B6 | `RecurrenceSolver::solve_linear_constant` order ≥ 2 | **Open, reproduced** | Fibonacci returns `0`. Test `known_defect_second_order_recurrence` |
+| B6 | `RecurrenceSolver::solve_linear_constant` order ≥ 2 | **Fixed** | orders 1 and 2 (distinct real roots, repeated root); complex roots and order ≥ 3 return an error |
 | B7 | `differential.rs` forcing term drops the Duhamel integral | **Open** | File unchanged |
 | B8 | `cat_eval.rs` stamps an order-3 enclosure on a linear tangent | **Open** | `cat_eval.rs:195-224` builds `f(a) + f'(a)(x − a)` and labels it `taylor_order_3` |
 | B9 | `scheduler.rs` shrinks enclosures by a constant factor without re-evaluating | **Open** | `scheduler.rs:173-188` multiplies spans by 0.4 and radii by 0.5 |
@@ -77,6 +77,8 @@ changed:
 
 ## 3. Fixed since the first audit
 
+17 Nov 2026, after the ledger was verified: A1 (`pade!`), A3 (Cartan input), B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
+
 Released in 0.3.2 and 0.4.0 (see `CHANGELOG.md`): limits through radicals and variable exponents, two-sided limits
 through `abs`/`sign`, formatter precedence and exponent rendering, base and radical merging in the simplifier, Itô
 rules for `dW`, `x²−b²` logarithmic integrals, cleared-fraction and `ln` equation solving, composite labelling in
@@ -84,11 +86,11 @@ number-theory output, the GUI plan status, and the documentation corrections to 
 
 ## 4. Open work, in priority order
 
-1. **Make stubs honest before making them real.** For A1–A11, either implement the feature or return an explicit
+1. **Make stubs honest before making them real.** A1 and A3 are done. For the rest of A1–A11, either implement the feature or return an explicit
    "not implemented" error and remove the claim from ROADMAP, README and the notebook help. A wrong answer
-   presented as a result is worse than a refusal. `pade!` (A1), Cartan (A3) and the heat PDE (B3) are the smallest.
-2. **Numerical and symbolic correctness (B1–B12).** B1, B4 and B6 already have
-   `#[ignore]`d tests; add one per remaining item, then fix. Each fix needs a test that fails on the old code.
+   presented as a result is worse than a refusal. Clifford (A2), the `System` commands (A4) and `puiseux_series` (A6) are the smallest.
+2. **Numerical and symbolic correctness (B1–B12).** B1–B4 and B6 are fixed, with tests in
+   `tests/tests/engine/known_defect_tests.rs`. For each remaining item add a failing test, then fix. Each fix needs a test that fails on the old code.
 3. **Panic hygiene.** About 63 production `panic!`/`unwrap` sites per `AUDIT-PANICS-AND-UNWRAPS.md`; replace
    them with typed errors, then enable `clippy::unwrap_used` for non-test code.
 4. **ROADMAP scope with no implementation.** Listed in `ROADMAP.md` section 2.1; decide per item whether to

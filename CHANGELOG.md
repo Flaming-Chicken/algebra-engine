@@ -9,7 +9,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
 
 ### Added
-- `#[ignore]`d regression tests for three reproduced defects (linear ODE with zero coefficient, summation of a non-constant summand, second-order recurrences), to be enabled when each is fixed.
+- `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
+- Closed forms for second-order linear recurrences with distinct or repeated real roots.
+- Cartan operations (wedge, `d`, interior product, Lie derivative, Hodge star) read the form that was typed (`dx`, `2 dx + dz`, `dx^dy`).
+- Summation of any polynomial summand by Faulhaber's formula (degree up to 12).
+
+### Changed
+- `pade!` returns `AlgebraResult<ExprId>` and computes a real approximant (it returned a placeholder quotient).
+- Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
+
+### Fixed
+- `sum k^2` returned `k^2 * n` (any non-symbol summand was treated as constant).
+- `y' = 1` returned an expression containing `1 / 0`.
+- The Fibonacci recurrence returned `0`.
+- Caputo derivative used the wrong kernel exponent for orders other than n - 1/2.
+- `solve_pde_heat_1d` returned `cos(k_x)` with no `x` and a decay rate of `k_x` instead of `k_x^2`.
 
 ## [0.4.0] - 2026-11-17
 

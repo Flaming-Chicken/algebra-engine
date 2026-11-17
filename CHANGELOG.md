@@ -3,6 +3,14 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+- Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
+
+### Added
+- `#[ignore]`d regression tests for three reproduced defects (linear ODE with zero coefficient, summation of a non-constant summand, second-order recurrences), to be enabled when each is fixed.
+
 ## [0.4.0] - 2026-11-17
 
 ### Added

@@ -3,7 +3,28 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-17
+
+### Added
+- Overhaul (`23f508b`): `cat-core` 4-fidelity evaluation, BSGS tensor canonicalisation, generalised transforms and a polyglot DSL.
+- CAS depth overhaul with multivalued and uncertainty support, and an audit regression suite (`4c2a293`).
+- Unified API, stream and workbench layers, naming clean-up, and a GUI architecture plan (`ab4d0f7`).
+- Integration by parts for `x^n` times `exp`, `sin`, `cos` and `ln` for any degree, and `1/(x^2 - b^2)` integrated as a logarithm.
+- Limits at +infinity by dominant-term analysis (radicals, variable exponents); two-sided limits through `abs`, `sign`, `floor` and `ceil` compare the one-sided values.
+- Factoring of a difference of squares with multi-term roots (`a^2 + 2ab + b^2 - c^2`), using an exact multivariate polynomial square root.
+- The simplifier merges repeated bases (`x * x` is `x^2`) and combines square roots of positive rationals (`sqrt(2) * sqrt(8)` is `4`).
+
+### Changed
+- All three formatters (LaTeX, Unicode, MathML) print with operator precedence: parentheses where needed, negative terms as subtraction. Output text changes, so anything matching printed strings must be updated.
+- `ROADMAP.md` marks phases 8, 28 and 30 as Partial or Foundation, with what the code does.
+
+### Fixed
+- `factor_primes` printed a composite that Pollard rho could not split as a prime; it is now marked `[composite, not factored]`.
+- `exp(2*x) = 7` returned `ln(-sqrt(7))` as a root; roots of equations quadratic in `e^x` print as `ln(7)/2` and `ln(7)/2 + i*pi`.
+- An equation that is an identity after clearing denominators (`(x - 1)/(x - 1) = 1`) returned no solutions; it returns the variable, as `x = x` does.
+- The Unicode parser converted only the first `sqrt(` in an input.
+
+## [0.3.2] - 2026-11-15
 
 ### Added
 - Salvaged `Magnitude` (`cat-numbers`), `Hecs<T>` hexagonal coordinates, and `Pose<T>` SE(3) kinematics (`urscript_pose`), re-exported via `urae::prelude`.

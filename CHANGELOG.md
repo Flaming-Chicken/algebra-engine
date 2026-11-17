@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [Unreleased]
 
 ### Changed
+- `AdjointSensitivitySolver::compute_gradient` back-propagates exactly through the RK4 steps of `NeuralOde::forward` (fourth-order accurate gradients). It was a first-order scheme with an error of about 1% at 100 steps, and it ignored its `vector_field` argument.
 - FEA solves report an under-constrained (singular) system as an error and verify the solution's residual. Previously a singular equation was skipped and its unknown reported as `0`, so a structure with rigid-body motion returned plausible-looking displacements.
 - `WavefrontSchedule::build` and `evaluate` return `Result` (`WavefrontError`): levels follow dependencies rather than edge listing order, cycles are detected, and a missing wire, an unsupported operation or a division by zero is an error instead of silently `0`. `Inv` and `Identity` are now evaluated.
 - `RittWuReducer::characteristic_set` computes a characteristic set (Ritt's procedure) instead of sorting its input; `{y'', y, y'}` now gives `{y}`.

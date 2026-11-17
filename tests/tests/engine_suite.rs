@@ -214,3 +214,6 @@ mod exact_groebner_tests;
 
 #[path = "engine/differential_reduction_tests.rs"]
 mod differential_reduction_tests;
+
+#[path = "engine/adjoint_gradient_tests.rs"]
+mod adjoint_gradient_tests;

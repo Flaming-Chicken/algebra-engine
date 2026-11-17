@@ -357,115 +357,146 @@ impl ThreadedScrew {
         }
     }
 
-    /// Generate the 3D mesh of the screw: a helical thread surface with a shank and head.
+    /// Minor (root) radius of the thread: the nominal radius minus the thread depth.
+    pub fn minor_radius(&self) -> f64 {
+        self.nominal_diameter / 2.0 - self.thread_depth()
+    }
+
+    /// Radial depth of the thread profile (crest to root), as a fraction of the pitch that
+    /// depends on the standard: ISO 60 degrees `0.6134 P`, Acme and square `0.5 P`.
+    pub fn thread_depth(&self) -> f64 {
+        match self.thread_standard {
+            ThreadStandard::IsoMetric60 => 0.6134 * self.pitch,
+            ThreadStandard::Acme29 | ThreadStandard::Square => 0.5 * self.pitch,
+        }
+    }
+
+    /// Radius of the threaded surface at axial phase `u` in `[0, pitch)` (the profile is periodic
+    /// in the pitch): a root flat, a rising flank, a crest flat and a falling flank. The flank
+    /// width follows the thread angle (30 degrees from the radial direction for ISO, 14.5 for
+    /// Acme, 0 for the square thread).
+    pub fn thread_radius(&self, u: f64) -> f64 {
+        let u = u.rem_euclid(self.pitch);
+        let (r_major, r_minor) = (self.nominal_diameter / 2.0, self.minor_radius());
+        let depth = r_major - r_minor;
+        let half_angle: f64 = match self.thread_standard {
+            ThreadStandard::IsoMetric60 => 30.0,
+            ThreadStandard::Acme29 => 14.5,
+            ThreadStandard::Square => 0.0,
+        };
+        let flank = (depth * half_angle.to_radians().tan()).min(0.45 * self.pitch);
+        let crest = match self.thread_standard {
+            ThreadStandard::IsoMetric60 => 0.125 * self.pitch,
+            ThreadStandard::Acme29 => 0.37 * self.pitch,
+            ThreadStandard::Square => 0.5 * self.pitch,
+        }
+        .min(self.pitch - 2.0 * flank);
+        let root = self.pitch - crest - 2.0 * flank;
+        if u < root {
+            r_minor
+        } else if u < root + flank {
+            r_minor + depth * (u - root) / flank.max(1e-12)
+        } else if u < root + flank + crest {
+            r_major
+        } else {
+            r_major - depth * (u - root - flank - crest) / flank.max(1e-12)
+        }
+    }
+
+    /// Head outline radius at polar angle `theta` (hexagon with the given across-flats width, or a
+    /// circle), and the head height.
+    fn head_shape(&self) -> Option<(f64, bool, f64)> {
+        let d = self.nominal_diameter;
+        match self.head_type {
+            BoltHeadType::Hexagonal => Some((1.6 * d, true, 0.65 * d)),
+            BoltHeadType::SocketCap => Some((1.5 * d, false, d)),
+            BoltHeadType::CountersunkFlat => Some((2.0 * d, false, 0.5 * d)),
+            BoltHeadType::None => None,
+        }
+    }
+
+    /// Generate the 3D mesh of the screw as a closed, outward-oriented solid: the threaded
+    /// section (a helical profile of radius [`ThreadedScrew::thread_radius`]), the plain shank,
+    /// the head (a hexagon or a cylinder; none for a stud) and flat end faces.
     ///
-    /// This is an *open surface* mesh for visualisation, not a closed solid: threads and ends
-    /// are not capped, so [`Mesh3D::is_closed`] is false and `compute_volume` is not the screw's
-    /// volume. Use the gear, airfoil and spring meshes (closed solids) for volume-based analysis.
+    /// The surface is one grid over polar angle and height: each row is a closed polar curve
+    /// `r(theta)` at height `z`, consecutive rows are joined by quads, and a step in radius
+    /// (shank to head, thread to shank) is a pair of rows at the same height, which becomes an
+    /// annular face. The two end rows are closed with fans from the axis, valid because every
+    /// row is star-shaped about the axis. The thread is a piecewise-linear approximation sampled
+    /// at 96 angles and 24 heights per pitch.
     pub fn generate_3d_mesh(&self) -> Mesh3D {
+        const N_THETA: usize = 96; // a multiple of 6 so a hexagon's corners are sampled exactly
+        const ROWS_PER_PITCH: f64 = 24.0;
         let mut mesh = Mesh3D::new(format!("Screw_M{}_P{}", self.nominal_diameter, self.pitch));
         let r_major = self.nominal_diameter / 2.0;
-        let r_minor = r_major - 0.6134 * self.pitch; // ISO thread depth
+        let thread_length = self.thread_length.clamp(0.0, self.total_length);
+        let theta_at = |i: usize| 2.0 * PI * i as f64 / N_THETA as f64;
 
-        let turns = (self.thread_length / self.pitch).max(1.0);
-        let steps_per_turn = 16;
-        let total_steps = (turns * steps_per_turn as f64) as usize;
+        // Rows: (height, radius as a function of the column's polar angle).
+        type Radius<'a> = Box<dyn Fn(f64) -> f64 + 'a>;
+        let mut rows: Vec<(f64, Radius)> = Vec::new();
+        let pitch = self.pitch;
+        let helical = move |z: f64| -> Radius<'_> {
+            Box::new(move |theta: f64| self.thread_radius(z - pitch * theta / (2.0 * PI)))
+        };
+        let constant = |r: f64| -> Radius<'_> { Box::new(move |_| r) };
 
-        // Generate helical thread ridge and root vertices
-        for i in 0..=total_steps {
-            let theta = (i as f64 / steps_per_turn as f64) * 2.0 * PI;
-            let z = (i as f64 / total_steps as f64) * self.thread_length;
-            let cos_t = theta.cos();
-            let sin_t = theta.sin();
-
-            // Root vertex
-            mesh.add_vertex([r_minor * cos_t, r_minor * sin_t, z]);
-            // Crest vertex
-            mesh.add_vertex([r_major * cos_t, r_major * sin_t, z + self.pitch * 0.25]);
-        }
-
-        // Helical side surface triangles
-        for i in 0..total_steps {
-            let i0 = i * 2;
-            let i1 = i0 + 1;
-            let i2 = i0 + 2;
-            let i3 = i0 + 3;
-            mesh.add_triangle(i0, i1, i3);
-            mesh.add_triangle(i0, i3, i2);
-        }
-
-        // Add bolt head if configured
-        match self.head_type {
-            BoltHeadType::Hexagonal => {
-                let head_height = self.nominal_diameter * 0.7;
-                let head_radius = self.nominal_diameter * 0.9;
-                let z_base = self.total_length;
-                let hex_pts = 6;
-                let base_idx = mesh.vertices.len();
-
-                // Hex bottom
-                for k in 0..hex_pts {
-                    let ang = (k as f64 / hex_pts as f64) * 2.0 * PI;
-                    mesh.add_vertex([head_radius * ang.cos(), head_radius * ang.sin(), z_base]);
-                }
-                // Hex top
-                for k in 0..hex_pts {
-                    let ang = (k as f64 / hex_pts as f64) * 2.0 * PI;
-                    mesh.add_vertex([
-                        head_radius * ang.cos(),
-                        head_radius * ang.sin(),
-                        z_base + head_height,
-                    ]);
-                }
-
-                // Hex sides
-                for k in 0..hex_pts {
-                    let nxt = (k + 1) % hex_pts;
-                    mesh.add_triangle(base_idx + k, base_idx + nxt, base_idx + hex_pts + nxt);
-                    mesh.add_triangle(
-                        base_idx + k,
-                        base_idx + hex_pts + nxt,
-                        base_idx + hex_pts + k,
-                    );
-                }
-
-                // Top hex cap
-                for k in 1..hex_pts - 1 {
-                    mesh.add_triangle(
-                        base_idx + hex_pts,
-                        base_idx + hex_pts + k,
-                        base_idx + hex_pts + k + 1,
-                    );
-                }
+        if thread_length > 1e-9 {
+            let n = (thread_length / pitch * ROWS_PER_PITCH).ceil().max(2.0) as usize;
+            for k in 0..=n {
+                let z = thread_length * k as f64 / n as f64;
+                rows.push((z, helical(z)));
             }
-            BoltHeadType::SocketCap => {
-                let head_height = self.nominal_diameter * 1.0;
-                let head_radius = self.nominal_diameter * 0.75;
-                let z_base = self.total_length;
-                let n_circ = 16;
-                let base_idx = mesh.vertices.len();
-
-                for k in 0..n_circ {
-                    let ang = (k as f64 / n_circ as f64) * 2.0 * PI;
-                    mesh.add_vertex([head_radius * ang.cos(), head_radius * ang.sin(), z_base]);
-                    mesh.add_vertex([
-                        head_radius * ang.cos(),
-                        head_radius * ang.sin(),
-                        z_base + head_height,
-                    ]);
+        } else {
+            rows.push((0.0, constant(r_major)));
+        }
+        if self.total_length > thread_length + 1e-9 {
+            // Plain shank: a step from the thread to the full diameter, then up to the top.
+            rows.push((thread_length, constant(r_major)));
+            rows.push((self.total_length, constant(r_major)));
+        }
+        if let Some((across_flats, hexagonal, height)) = self.head_shape() {
+            let z0 = self.total_length;
+            let head = move |theta: f64| -> f64 {
+                if hexagonal {
+                    // Polar form of a regular hexagon with the given width across flats.
+                    let apothem = across_flats / 2.0;
+                    let sector = theta.rem_euclid(PI / 3.0) - PI / 6.0;
+                    apothem / sector.cos()
+                } else {
+                    across_flats / 2.0
                 }
-                for k in 0..n_circ {
-                    let k0 = base_idx + k * 2;
-                    let k1 = k0 + 1;
-                    let k2 = base_idx + ((k + 1) % n_circ) * 2;
-                    let k3 = k2 + 1;
-                    mesh.add_triangle(k0, k2, k3);
-                    mesh.add_triangle(k0, k3, k1);
-                }
-            }
-            _ => {}
+            };
+            rows.push((z0, Box::new(head)));
+            rows.push((z0 + height, Box::new(head)));
         }
 
+        for (z, radius) in &rows {
+            for i in 0..N_THETA {
+                let theta = theta_at(i);
+                let r = radius(theta);
+                mesh.add_vertex([r * theta.cos(), r * theta.sin(), *z]);
+            }
+        }
+        let n_rows = rows.len();
+        for j in 0..n_rows - 1 {
+            for i in 0..N_THETA {
+                let next = (i + 1) % N_THETA;
+                let (a, b) = (j * N_THETA + i, j * N_THETA + next);
+                let (c, d) = ((j + 1) * N_THETA + next, (j + 1) * N_THETA + i);
+                mesh.add_triangle(a, b, c);
+                mesh.add_triangle(a, c, d);
+            }
+        }
+        let bottom = mesh.add_vertex([0.0, 0.0, rows[0].0]);
+        let top = mesh.add_vertex([0.0, 0.0, rows[n_rows - 1].0]);
+        let last = (n_rows - 1) * N_THETA;
+        for i in 0..N_THETA {
+            let next = (i + 1) % N_THETA;
+            mesh.add_triangle(bottom, next, i);
+            mesh.add_triangle(top, last + i, last + next);
+        }
         mesh
     }
 }

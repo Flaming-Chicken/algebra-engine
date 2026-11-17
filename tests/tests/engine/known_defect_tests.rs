@@ -861,13 +861,6 @@ fn the_closure_diagnostic_distinguishes_closed_open_and_misoriented_meshes() {
     let mut flipped = tetra.clone();
     flipped.triangles[0].swap(1, 2);
     assert!(!flipped.is_closed());
-    // The screw is documented as an open surface and reports so.
-    use algebra_engine::cad::ThreadedScrew;
-    assert!(
-        !ThreadedScrew::metric_bolt(8.0, 1.25, 30.0)
-            .generate_3d_mesh()
-            .is_closed()
-    );
 }
 
 #[test]
@@ -1047,4 +1040,108 @@ fn the_evaluator_reports_when_a_tier_overran_its_hard_timeout() {
         assert_eq!(within.mode_used, over.mode_used);
         assert_eq!(within.value.numeric_value, over.value.numeric_value);
     }
+}
+
+#[test]
+fn screws_are_closed_solids_whose_volume_matches_the_thread_geometry() {
+    use algebra_engine::cad::{BoltHeadType, ThreadedScrew};
+    let mut cases: Vec<(&str, ThreadedScrew)> = vec![
+        ("M8 hex bolt", ThreadedScrew::metric_bolt(8.0, 1.25, 30.0)),
+        ("M6 socket cap", ThreadedScrew::socket_screw(6.0, 1.0, 20.0)),
+        (
+            "T12 Acme lead screw",
+            ThreadedScrew::lead_screw(12.0, 3.0, 60.0),
+        ),
+    ];
+    let mut stud = ThreadedScrew::metric_bolt(10.0, 1.5, 25.0);
+    stud.head_type = BoltHeadType::None;
+    stud.thread_length = 0.0;
+    cases.push(("plain stud", stud));
+
+    for (name, screw) in cases {
+        let mesh = screw.generate_3d_mesh();
+        assert!(
+            mesh.is_closed(),
+            "{name}: {} boundary edges",
+            mesh.boundary_edge_count()
+        );
+
+        // Independent volume: the thread region is pi * L_thread * mean(r^2) over one pitch
+        // (every height sees the full period around the axis), the shank a plain cylinder,
+        // the head a hexagonal or round prism.
+        let r_major = screw.nominal_diameter / 2.0;
+        let l_thread = screw.thread_length.min(screw.total_length);
+        let samples = 200_000;
+        let mean_r2 = (0..samples)
+            .map(|k| {
+                let r = screw.thread_radius((k as f64 + 0.5) / samples as f64 * screw.pitch);
+                r * r
+            })
+            .sum::<f64>()
+            / samples as f64;
+        let thread = if l_thread > 0.0 {
+            std::f64::consts::PI * l_thread * mean_r2
+        } else {
+            0.0
+        };
+        let shank = std::f64::consts::PI * r_major * r_major * (screw.total_length - l_thread);
+        let d = screw.nominal_diameter;
+        let head = match screw.head_type {
+            BoltHeadType::Hexagonal => {
+                let apothem = 0.8 * d;
+                2.0 * 3.0_f64.sqrt() * apothem * apothem * 0.65 * d
+            }
+            BoltHeadType::SocketCap => std::f64::consts::PI * (0.75 * d).powi(2) * d,
+            BoltHeadType::CountersunkFlat => std::f64::consts::PI * d * d * 0.5 * d,
+            BoltHeadType::None => 0.0,
+        };
+        let expected = thread + shank + head;
+        let volume = mesh.compute_volume();
+        assert!(
+            (volume - expected).abs() < 0.01 * expected,
+            "{name}: volume {volume} vs {expected}"
+        );
+        // The solid is a real screw: wider than the root cylinder, and no wider than the head.
+        assert!(volume > std::f64::consts::PI * screw.minor_radius().powi(2) * screw.total_length);
+    }
+}
+
+#[test]
+fn thread_profiles_are_periodic_bounded_and_differ_by_standard() {
+    use algebra_engine::cad::{ThreadStandard, ThreadedScrew};
+    for standard in [
+        ThreadStandard::IsoMetric60,
+        ThreadStandard::Acme29,
+        ThreadStandard::Square,
+    ] {
+        let mut screw = ThreadedScrew::metric_bolt(10.0, 2.0, 20.0);
+        screw.thread_standard = standard;
+        let (lo, hi) = (screw.minor_radius(), 5.0);
+        for k in 0..1000 {
+            let u = k as f64 * 0.01;
+            let r = screw.thread_radius(u);
+            assert!(
+                r >= lo - 1e-12 && r <= hi + 1e-12,
+                "{standard:?}: r({u}) = {r}"
+            );
+            assert!(
+                (r - screw.thread_radius(u + screw.pitch)).abs() < 1e-9,
+                "periodic"
+            );
+        }
+        // Both extremes are reached.
+        let values: Vec<f64> = (0..2000)
+            .map(|k| screw.thread_radius(k as f64 * 0.001))
+            .collect();
+        assert!(values.iter().any(|&r| (r - lo).abs() < 1e-9));
+        assert!(values.iter().any(|&r| (r - hi).abs() < 1e-9));
+    }
+    let mut iso = ThreadedScrew::metric_bolt(10.0, 2.0, 20.0);
+    let mut square = iso.clone();
+    iso.thread_standard = ThreadStandard::IsoMetric60;
+    square.thread_standard = ThreadStandard::Square;
+    assert!(
+        iso.minor_radius() < square.minor_radius(),
+        "ISO threads are deeper than square"
+    );
 }

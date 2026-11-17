@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [0.5.0] - 2026-11-17
 
 ### Added
+- `ThreadedScrew::thread_radius`, `thread_depth` and `minor_radius`; the Acme 29 degree and square thread profiles are now distinct from the ISO 60 degree profile.
 - `Mesh3D::boundary_edge_count` and `Mesh3D::is_closed`: detect open boundaries and inconsistent winding.
 - `GpuKernelDescriptor::validate` (structural WGSL checks) and `SimdPolyVector::{checked_add, checked_multiply}`.
 - `cat_egraph::EGraph::rebuild` (congruence closure) and `extract_term`/`ExtractedTerm` (the cheapest expression as a tree). `EGraph::add` now hash-conses.
@@ -43,6 +44,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `ThreadedScrew::generate_3d_mesh` returned an open ribbon surface (hundreds of open edges) regardless of the thread standard; it is now a closed solid with a threaded section, shank, hex or round head and end faces.
 - `CatExprEvaluator::eval_with_fidelity` ignored its `AnytimeBudget`; `ApproxResult::budget_exceeded` is now set when a tier runs past the hard timeout.
 - `poly::groebner_basis` returned its input with zero polynomials removed; it now computes the reduced Groebner basis over the rationals. `SparseMonomial::cmp_grevlex` is a genuine graded reverse lexicographic order.
 - `Mesh3D::extrude_profile` capped non-convex outlines with a fan from one vertex (overlapping or inverted faces); it now ear-clips the polygon, handles either winding, and rejects degenerate or self-intersecting profiles.

@@ -10,7 +10,10 @@
 //! - **2nd-Order Linear Constant Coefficient ODEs**: $a y'' + b y' + c y = f(x)$ with characteristic polynomial roots and Wronskian Variation of Parameters.
 //! - **Cauchy-Euler Equations**: $a x^2 y'' + b x y' + c y = 0$ via power ansatz $y = x^r$.
 //! - **Systems of Linear ODEs**: $\mathbf{y}' = \mathbf{A}\mathbf{y}$ via Matrix Exponential $e^{\mathbf{A}t}$.
-//! - **Frobenius Series Method**: Indicial equation roots around regular singular points.
+//! - **Frobenius Series Method**: [`SymbolicOdeSolver::frobenius_series_at_zero`] solves
+//!   $x^2 y'' + x P(x) y' + Q(x) y = 0$ at the regular singular point $x = 0$ when $P$ and $Q$ have
+//!   rational Taylor coefficients and the indicial roots are rational (see its documentation for
+//!   the cases it declines).
 
 use crate::calculus::SymbolicCalculus;
 use crate::matrix::SymbolicMatrix;
@@ -40,6 +43,113 @@ pub enum OdeType {
 pub struct SymbolicOdeSolver;
 
 impl SymbolicOdeSolver {
+    /// Frobenius series solutions of $x^2 y'' + x P(x) y' + Q(x) y = 0$ about the regular singular
+    /// point $x = 0$, where $P$ and $Q$ are analytic there.
+    ///
+    /// The indicial equation is $r(r-1) + P(0) r + Q(0) = 0$. For each root $r$ the series
+    /// $y = x^r \sum_{n \ge 0} a_n x^n$ has $a_0 = 1$ and
+    /// $$a_n = -\frac{\sum_{k<n} a_k \left((r+k) P_{n-k} + Q_{n-k}\right)}{F(r+n)},\quad
+    /// F(s) = s(s-1) + P_0 s + Q_0,$$
+    /// with $P_j, Q_j$ the Taylor coefficients of $P, Q$. Returns the truncated series through
+    /// order `order`.
+    ///
+    /// The larger root always gives a solution. The smaller root gives a second one unless the
+    /// roots differ by an integer and the recurrence is resonant with a non-zero right-hand side,
+    /// in which case the second solution contains a logarithm and only the first is returned. Errors when the coefficients of $P$ or $Q$ are not exact
+    /// rationals or when the indicial roots are complex or irrational.
+    pub fn frobenius_series_at_zero(
+        graph: &ExprGraph,
+        p: ExprId,
+        q: ExprId,
+        x: SymbolId,
+        order: usize,
+    ) -> AlgebraResult<Vec<ExprId>> {
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        use num_traits::{One, Signed, ToPrimitive, Zero};
+        let fail = |why: &str| AlgebraError::EvaluationError(format!("frobenius: {why}"));
+        let zero = graph.integer(0);
+        let coefficients = |e: ExprId| -> AlgebraResult<Vec<BigRational>> {
+            crate::calculus::taylor_coeffs_vec(graph, e, x, zero, order)
+                .iter()
+                .map(|&c| crate::calculus::exact_rational(graph, c))
+                .collect::<Option<_>>()
+                .ok_or_else(|| fail("P and Q need exact rational Taylor coefficients at 0"))
+        };
+        let (p_coeffs, q_coeffs) = (coefficients(p)?, coefficients(q)?);
+        let (p0, q0) = (p_coeffs[0].clone(), q_coeffs[0].clone());
+
+        // Indicial roots: r^2 + (P0 - 1) r + Q0 = 0, which must have rational roots.
+        let b = &p0 - BigRational::one();
+        let discriminant = &b * &b - BigRational::from_integer(BigInt::from(4)) * &q0;
+        if discriminant.is_negative() {
+            return Err(fail("the indicial roots are complex"));
+        }
+        let rational_sqrt = |v: &BigRational| -> Option<BigRational> {
+            let (n, d) = (v.numer().sqrt(), v.denom().sqrt());
+            (&n * &n == *v.numer() && &d * &d == *v.denom()).then(|| BigRational::new(n, d))
+        };
+        let root = rational_sqrt(&discriminant)
+            .ok_or_else(|| fail("the indicial roots are irrational"))?;
+        let two = BigRational::from_integer(BigInt::from(2));
+        let larger = (-&b + &root) / &two;
+        let smaller = (-&b - &root) / &two;
+
+        let indicial = |s: &BigRational| s * (s - BigRational::one()) + &p0 * s + &q0;
+        let series = |r: &BigRational| -> AlgebraResult<Option<ExprId>> {
+            let mut a = vec![BigRational::one()];
+            for n in 1..=order {
+                let mut sum = BigRational::zero();
+                for (k, ak) in a.iter().enumerate().take(n) {
+                    let shift = r + BigRational::from_integer(BigInt::from(k));
+                    sum += ak * (&shift * &p_coeffs[n - k] + &q_coeffs[n - k]);
+                }
+                let denominator = indicial(&(r + BigRational::from_integer(BigInt::from(n))));
+                if denominator.is_zero() {
+                    // Resonance: the recurrence is 0 * a_n = -sum. A zero right-hand side leaves
+                    // a_n free (take 0); otherwise the solution needs a logarithm.
+                    if sum.is_zero() {
+                        a.push(BigRational::zero());
+                        continue;
+                    }
+                    return Ok(None);
+                }
+                a.push(-sum / denominator);
+            }
+            let mut terms = Vec::new();
+            for (n, c) in a.iter().enumerate() {
+                if c.is_zero() {
+                    continue;
+                }
+                let value = crate::calculus::rational_expr(graph, c)?;
+                let power = graph.pow(
+                    graph.symbol(&graph.symbols.resolve(x).unwrap_or_default()),
+                    graph.integer(n as i64),
+                );
+                terms.push(if n == 0 {
+                    value
+                } else {
+                    graph.mul([value, power])
+                });
+            }
+            let polynomial = graph.add(terms);
+            let exponent = match (r.numer().to_i64(), r.denom().to_i64()) {
+                (Some(n), Some(d)) => graph.rational(n, d),
+                _ => return Err(fail("exponent too large")),
+            };
+            let x_expr = graph.symbol(&graph.symbols.resolve(x).unwrap_or_default());
+            let leading = graph.pow(x_expr, exponent);
+            Ok(Some(graph.mul([leading, polynomial])))
+        };
+
+        let mut solutions = Vec::new();
+        solutions.extend(series(&larger)?);
+        if larger != smaller {
+            solutions.extend(series(&smaller)?);
+        }
+        Ok(solutions)
+    }
+
     /// Solve 1st-Order Linear ODE $y'(x) + P(x) y(x) = Q(x)$ for $y(x)$.
     ///
     /// $$y(x) = e^{-\int P(x)dx} \left( \int e^{\int P(x)dx} Q(x) dx + C_1 \right)$$

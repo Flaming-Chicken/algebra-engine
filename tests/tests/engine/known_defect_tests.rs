@@ -601,3 +601,58 @@ fn lagrange_inversion_returns_the_series_of_the_inverse_function() {
             .is_err()
     );
 }
+
+#[test]
+fn frobenius_series_solve_bessel_equations_at_the_origin() {
+    use algebra_engine::ode::symbolic::SymbolicOdeSolver;
+    let g = ExprGraph::new();
+    let x = g.symbols.get_or_intern("x");
+    let xe = g.symbol("x");
+    let x_squared = g.pow(xe, g.integer(2));
+
+    // Bessel of order 1/2: x^2 y'' + x y' + (x^2 - 1/4) y = 0. The roots 1/2 and -1/2 differ
+    // by an integer, but the resonance is harmless: solutions sin(x)/sqrt(x), cos(x)/sqrt(x).
+    let q = g.sub(x_squared, g.rational(1, 4));
+    let solutions =
+        SymbolicOdeSolver::frobenius_series_at_zero(&g, g.integer(1), q, x, 14).unwrap();
+    assert_eq!(solutions.len(), 2);
+    for at in [0.3_f64, 0.9, 1.7] {
+        let (s0, s1) = (eval_at(&g, solutions[0], at), eval_at(&g, solutions[1], at));
+        assert!(
+            (s0 - at.sin() / at.sqrt()).abs() < 1e-9,
+            "sin at {at}: {s0}"
+        );
+        assert!(
+            (s1 - at.cos() / at.sqrt()).abs() < 1e-9,
+            "cos at {at}: {s1}"
+        );
+    }
+
+    // Order 1: x^2 y'' + x y' + (x^2 - 1) y = 0. J_1 is the only series solution; the second
+    // one needs a logarithm and is not returned.
+    let q1 = g.sub(x_squared, g.integer(1));
+    let only = SymbolicOdeSolver::frobenius_series_at_zero(&g, g.integer(1), q1, x, 14).unwrap();
+    assert_eq!(only.len(), 1);
+    // J_1(x) = x/2 - x^3/16 + ..., so the monic series is 2 J_1(x); check against the known value
+    // J_1(1) = 0.44005058574493355.
+    assert!((eval_at(&g, only[0], 1.0) / 2.0 - 0.440_050_585_744_933_55).abs() < 1e-9);
+
+    // Euler equation x^2 y'' + (3/2 - 1) x ... : P = 1/2 gives roots 0 and 1/2 with Q = 0.
+    let euler =
+        SymbolicOdeSolver::frobenius_series_at_zero(&g, g.rational(3, 2), g.integer(0), x, 6)
+            .unwrap();
+    assert_eq!(euler.len(), 2);
+
+    // Complex and irrational indicial roots are refused.
+    assert!(
+        SymbolicOdeSolver::frobenius_series_at_zero(&g, g.integer(0), g.integer(1), x, 4).is_err()
+    );
+    assert!(
+        SymbolicOdeSolver::frobenius_series_at_zero(&g, g.integer(0), g.integer(-1), x, 4).is_err()
+    );
+    // Non-rational coefficients are refused.
+    let p_symbolic = g.add([g.integer(1), g.symbol("a")]);
+    assert!(
+        SymbolicOdeSolver::frobenius_series_at_zero(&g, p_symbolic, g.integer(0), x, 4).is_err()
+    );
+}

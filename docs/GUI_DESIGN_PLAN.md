@@ -3,6 +3,20 @@
 **Universal Rust Algebra Engine (URAE)**  
 *Unified UI/UX, Extreme-Viewport Resilience, Three-Tier Solution Modes, Universal Approximations & Series Generators, Multi-Modal In-App Documentation, Format Matrix, and Non-Blocking Monitor-Paced Execution across WebAssembly (`urae-wasm`), Native/Canvas `egui` (`urae-notebook`), CLI (`urae-cli`), LSP (`urae-lsp`), and Jupyter Kernel (`urae-kernel`)*
 
+## Implementation status (checked 17 Nov 2026 against `dev`)
+
+This document is a design only: **none of the five phases in section 18 has been started.** The baseline it describes in section 2 is accurate. Checked against the code: viewport meta at `index.html:5`, CDN KaTeX at `index.html:12-13`, `resizePadGraph` at `index.html:1504`, `.with_min_inner_size([600.0, 400.0])` at `lib.rs:191`, and `BackgroundEvaluator` defined at `worker.rs:221` but not used by `NotebookState`.
+
+| Phase | Named deliverables | Status |
+| :--- | :--- | :--- |
+| 1. Responsive tokens, state, monitor Hz | `ui/responsive.rs` (`UiMetrics`, `MonitorPacing`), `100dvh`/`100svh`, vendored KaTeX in `sw.js`, minimum window `[320, 240]`, `viewport-segments`, `ViewMode` / `WorkspaceLayoutPreset` reconciliation | Not started. None of these exist; the minimum window is still 600x400 and KaTeX still loads from the CDN, so the PWA is not fully offline. |
+| 2. Async workers, telemetry, cache governance | `public/compute_worker.js`, `NotebookState` routed through `BackgroundEvaluator`, `PlotCache` LRU and graph GC, three-state telemetry | Not started. `BackgroundEvaluator` exists but is unused by the notebook; there is no `compute_worker.js`. |
+| 3. Three-tier cascade, representations, Pade, generators | `SolveTier`, `SolutionPreference`, `RepresentationForm`, `ErrorTermKind`, `MathOperation::ConvertForm` / `Doc`, `SeriesGenerator`, exact Pade `[L/M]` | Not started. None of the types exist. **`pade!` (`macros.rs`) is a placeholder that returns the symbols `P_num / Q_den`** and should be implemented or removed regardless of this plan. |
+| 4. Menus, exports, `DocRegistry`, docs UX | shared `DocRegistry` and a coverage check, seven in-app doc surfaces, `urae-cli` `doc <topic>`, `.ipynb` export, unified export matrix | Not started. No `urae-docs` crate, no `DocRegistry`, no `.ipynb` support. |
+| 5. Reflow, plot parity, gestures, viewport matrix | Pad and Workbench reflow, Pointer Events pan/zoom, web `PlotScaleMode` / `PeriodicAnalysis`, `computeSafeCanvasSize`, the 25-viewport acceptance matrix | Not started. `PlotScaleMode` and `PeriodicAnalysis` already exist in `urae-notebook` (native); the web shell has neither, and there is no viewport acceptance test. |
+
+Suggested order, cheapest and most valuable first: the `pade!` fix (a correctness bug); the Phase 1 web basics (viewport meta, `100dvh`, local KaTeX in `sw.js`, minimum window size); then Phase 2 (route the notebook through `BackgroundEvaluator`); then Phases 3 to 5. The 25-viewport matrix can run in the existing headless-Chrome WASM job.
+
 ---
 
 ## Architecture Map (Table of Contents)

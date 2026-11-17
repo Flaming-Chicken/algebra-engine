@@ -107,7 +107,9 @@ fn test_pde_nonlinear_kdv() {
     let desc = DiffEqClassifier::classify(&graph, eq, None);
     assert_eq!(desc.kind, DiffEqKind::Pde);
     assert_eq!(desc.order, 3);
-    assert_eq!(desc.linearity, DiffEqLinearity::Nonlinear);
+    // Highest derivative u_xxx has a constant coefficient; only a lower-order term is
+    // nonlinear, so KdV is semilinear.
+    assert_eq!(desc.linearity, DiffEqLinearity::Semilinear);
 }
 
 #[test]
@@ -154,4 +156,55 @@ fn test_burgers_traveling_wave_reduction() {
     // Burgers shock with u_L = 2.0, u_R = 0.0, nu = 0.1
     let sol = PdeTravelingWaveReduction::burgers_shock(&graph, 2.0, 0.0, 0.1, x_sym, t_sym);
     assert!(sol.is_ok());
+}
+
+#[test]
+fn test_pde_nonlinearity_is_located_not_just_detected() {
+    let graph = ExprGraph::new();
+    let u = graph.symbol("u");
+    let d = |wrt: &str, order: u32| graph.derivative(u, wrt, order);
+    let classify = |eq| DiffEqClassifier::classify(&graph, eq, None).linearity;
+
+    // Heat equation u_t = u_xx: linear.
+    assert_eq!(
+        classify(graph.sub(d("t", 1), d("x", 2))),
+        DiffEqLinearity::Linear
+    );
+
+    // Burgers u_t + u u_x = 0: the coefficient of u_x is u, so quasilinear.
+    assert_eq!(
+        classify(graph.add([d("t", 1), graph.mul([u, d("x", 1)])])),
+        DiffEqLinearity::Quasilinear
+    );
+
+    // Sine-Gordon u_tt - u_xx + sin(u) = 0: nonlinearity only in the lower-order term.
+    assert_eq!(
+        classify(graph.add([d("t", 2), graph.neg(d("x", 2)), graph.function("sin", [u])])),
+        DiffEqLinearity::Semilinear
+    );
+
+    // Monge-Ampere u_xx u_yy - u_xy^2 = f: the highest derivatives multiply each other.
+    let u_xy = graph.derivative(graph.derivative(u, "x", 1), "y", 1);
+    let monge = graph.sub(
+        graph.mul([d("x", 2), d("y", 2)]),
+        graph.pow(u_xy, graph.integer(2)),
+    );
+    assert_eq!(classify(monge), DiffEqLinearity::Nonlinear);
+
+    // (u_xx)^2 + u_t = 0: highest derivative inside a power.
+    assert_eq!(
+        classify(graph.add([graph.pow(d("x", 2), graph.integer(2)), d("t", 1)])),
+        DiffEqLinearity::Nonlinear
+    );
+
+    // ODE vocabulary is unchanged: the pendulum is just nonlinear.
+    let theta = graph.symbol("theta");
+    let pendulum = graph.add([
+        graph.derivative(theta, "t", 2),
+        graph.function("sin", [theta]),
+    ]);
+    assert_eq!(
+        DiffEqClassifier::classify(&graph, pendulum, None).linearity,
+        DiffEqLinearity::Nonlinear
+    );
 }

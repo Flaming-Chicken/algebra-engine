@@ -220,3 +220,6 @@ mod adjoint_gradient_tests;
 
 #[path = "engine/iga_stiffness_tests.rs"]
 mod iga_stiffness_tests;
+
+#[path = "engine/cad_constraint_solver_tests.rs"]
+mod cad_constraint_solver_tests;

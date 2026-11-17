@@ -784,3 +784,88 @@ fn a_gear_without_a_bore_is_still_a_closed_solid() {
     let expected = shoelace(&gear.generate_2d_profile(6)).abs() * gear.face_width;
     assert!((mesh.compute_volume() - expected).abs() < 1e-6 * expected);
 }
+
+#[test]
+fn airfoil_and_spring_meshes_are_closed_solids_with_the_right_volume() {
+    use algebra_engine::cad::{HelicalSpring, NacaAirfoil};
+    // Airfoil: volume = section area x span (no twist by default).
+    let wing = NacaAirfoil::new("2412", 1.0, 3.0);
+    let mesh = wing.generate_3d_mesh();
+    assert!(
+        mesh.is_closed(),
+        "{} boundary edges",
+        mesh.boundary_edge_count()
+    );
+    let outline = wing.generate_2d_coordinates(20);
+    let area = shoelace(&outline).abs();
+    assert!(
+        (mesh.compute_volume() - area * wing.span).abs() < 1e-9,
+        "{} vs {}",
+        mesh.compute_volume(),
+        area * wing.span
+    );
+    // A symmetric 12% section has an area of about 0.082 chord^2 (0.6851 * t * c^2 ... roughly).
+    let symmetric = NacaAirfoil::new("0012", 1.0, 1.0).generate_3d_mesh();
+    assert!(symmetric.is_closed());
+    assert!(
+        (symmetric.compute_volume() - 0.0822).abs() < 0.002,
+        "{}",
+        symmetric.compute_volume()
+    );
+
+    // Spring: a tube of radius r_w along a helix of radius R: volume ~ pi r_w^2 * length.
+    let spring = HelicalSpring::new(1.0, 8.0, 3.0, 5.0);
+    let mesh = spring.generate_3d_mesh();
+    assert!(
+        mesh.is_closed(),
+        "{} boundary edges",
+        mesh.boundary_edge_count()
+    );
+    let turns = spring.active_coils;
+    let length = turns * ((2.0 * std::f64::consts::PI * 4.0).powi(2) + 3.0_f64.powi(2)).sqrt();
+    let expected = std::f64::consts::PI * 0.5 * 0.5 * length;
+    // An octagonal cross-section (8 sides) has 0.9745 of the circle's area.
+    let octagon = 0.5 * 8.0 * (2.0 * std::f64::consts::PI / 8.0).sin() / std::f64::consts::PI;
+    assert!(
+        (mesh.compute_volume() - expected * octagon).abs() < 0.02 * expected,
+        "{} vs {}",
+        mesh.compute_volume(),
+        expected * octagon
+    );
+}
+
+#[test]
+fn the_closure_diagnostic_distinguishes_closed_open_and_misoriented_meshes() {
+    use algebra_engine::cad::Mesh3D;
+    // A tetrahedron with outward winding is closed.
+    let mut tetra = Mesh3D::new("tetra");
+    for v in [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ] {
+        tetra.add_vertex(v);
+    }
+    for t in [[0, 2, 1], [0, 1, 3], [1, 2, 3], [0, 3, 2]] {
+        tetra.add_triangle(t[0], t[1], t[2]);
+    }
+    assert!(tetra.is_closed());
+    assert_eq!(tetra.boundary_edge_count(), 0);
+    // Dropping a face opens three edges.
+    let mut open = tetra.clone();
+    open.triangles.pop();
+    assert_eq!(open.boundary_edge_count(), 3);
+    assert!(!open.is_closed());
+    // Flipping one face leaves a consistent edge pair mismatch.
+    let mut flipped = tetra.clone();
+    flipped.triangles[0].swap(1, 2);
+    assert!(!flipped.is_closed());
+    // The screw is documented as an open surface and reports so.
+    use algebra_engine::cad::ThreadedScrew;
+    assert!(
+        !ThreadedScrew::metric_bolt(8.0, 1.25, 30.0)
+            .generate_3d_mesh()
+            .is_closed()
+    );
+}

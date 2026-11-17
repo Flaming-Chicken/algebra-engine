@@ -357,7 +357,11 @@ impl ThreadedScrew {
         }
     }
 
-    /// Generate full 3D solid mesh of the screw fastener.
+    /// Generate the 3D mesh of the screw: a helical thread surface with a shank and head.
+    ///
+    /// This is an *open surface* mesh for visualisation, not a closed solid: threads and ends
+    /// are not capped, so [`Mesh3D::is_closed`] is false and `compute_volume` is not the screw's
+    /// volume. Use the gear, airfoil and spring meshes (closed solids) for volume-based analysis.
     pub fn generate_3d_mesh(&self) -> Mesh3D {
         let mut mesh = Mesh3D::new(format!("Screw_M{}_P{}", self.nominal_diameter, self.pitch));
         let r_major = self.nominal_diameter / 2.0;
@@ -544,6 +548,12 @@ impl NacaAirfoil {
         // Combine clockwise boundary: upper from LE to TE, lower from TE back to LE
         let mut full_profile = upper;
         full_profile.extend(lower.into_iter().rev().skip(1));
+        // The lower surface ends at the leading edge again; drop that duplicate of the first point.
+        if let (Some(first), Some(last)) = (full_profile.first(), full_profile.last()) {
+            if (first[0] - last[0]).abs() < 1e-12 && (first[1] - last[1]).abs() < 1e-12 {
+                full_profile.pop();
+            }
+        }
         full_profile
     }
 
@@ -577,6 +587,25 @@ impl NacaAirfoil {
                 mesh.add_triangle(s0 + i, s0 + nxt, s1 + nxt);
                 mesh.add_triangle(s0 + i, s1 + nxt, s1 + i);
             }
+        }
+
+        // End caps: a fan from the centroid of the section, which lies inside an airfoil outline.
+        let (cx, cy) = profile
+            .iter()
+            .fold((0.0, 0.0), |(x, y), p| (x + p[0], y + p[1]));
+        let (cx, cy) = (cx / n_prof as f64, cy / n_prof as f64);
+        let last = (n_sections - 1) * n_prof;
+        let bottom_centre = mesh.add_vertex([cx, cy, 0.0]);
+        let twist_rad = self.twist_deg * PI / 180.0;
+        let top_centre = mesh.add_vertex([
+            cx * twist_rad.cos() - cy * twist_rad.sin(),
+            cx * twist_rad.sin() + cy * twist_rad.cos(),
+            self.span,
+        ]);
+        for i in 0..n_prof {
+            let nxt = (i + 1) % n_prof;
+            mesh.add_triangle(bottom_centre, nxt, i);
+            mesh.add_triangle(top_centre, last + i, last + nxt);
         }
 
         mesh
@@ -646,6 +675,24 @@ impl HelicalSpring {
                 mesh.add_triangle(s0 + k, s0 + nxt, s1 + nxt);
                 mesh.add_triangle(s0 + k, s1 + nxt, s1 + k);
             }
+        }
+
+        // End caps: a fan from the centre of the wire's circular cross-section at each end.
+        let ring_centre = |s: usize| {
+            let theta = (s as f64 / steps_per_turn as f64) * 2.0 * PI;
+            [
+                r_coil * theta.cos(),
+                r_coil * theta.sin(),
+                (s as f64 / steps_per_turn as f64) * self.pitch,
+            ]
+        };
+        let bottom_centre = mesh.add_vertex(ring_centre(0));
+        let top_centre = mesh.add_vertex(ring_centre(total_steps));
+        let top = total_steps * circ_steps;
+        for k in 0..circ_steps {
+            let nxt = (k + 1) % circ_steps;
+            mesh.add_triangle(bottom_centre, nxt, k);
+            mesh.add_triangle(top_centre, top + k, top + nxt);
         }
 
         mesh

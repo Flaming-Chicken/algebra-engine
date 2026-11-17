@@ -464,7 +464,10 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
                 trace.add_step("algebraic_simplification", expr_id, simp_id);
             }
         }
-        (Some(trace.export_lean4()), Some(trace.export_coq()))
+        (
+            Some(trace.export_lean4_with(graph)),
+            Some(trace.export_coq_with(graph)),
+        )
     } else {
         (None, None)
     };

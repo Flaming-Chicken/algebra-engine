@@ -349,9 +349,14 @@ fn test_creative_telescoping_definite_integration() {
     // Gaussian integrand: exp(-x * y^2)
     let integrand = graph.symbol("f"); // placeholder
 
+    // General creative telescoping is not implemented and must say so.
+    assert!(
+        RischIntegrator::creative_telescoping_integral(&graph, integrand, x_sym, y_sym).is_err()
+    );
+
+    // The Gaussian case is available directly.
     let (ode_op, certificate) =
-        RischIntegrator::creative_telescoping_integral(&graph, integrand, x_sym, y_sym).unwrap();
-    // Returns 2x d_x + 1
+        algebra_engine::weyl_dmodules::AlmkvistZeilberger::gaussian_integral_ode();
     assert_eq!(ode_op.num_vars, 1);
     assert_eq!(ode_op.terms.len(), 2);
     assert!(certificate.contains("exp"));

@@ -47,7 +47,7 @@ fn test_empirical_distribution_online_update() {
 
     let graph = ExprGraph::new();
     let x = graph.symbol("x");
-    let pdf = dist.pdf(&graph, x).unwrap();
-    assert!(!graph.is_empty());
-    assert!(pdf != x);
+    // Only moments are kept, so there is no density to return.
+    assert!(dist.pdf(&graph, x).is_err());
+    assert!(dist.cdf(&graph, x).is_err());
 }

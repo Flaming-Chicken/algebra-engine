@@ -213,19 +213,29 @@ impl AlgebraAgentInterface {
 
         #[cfg(all(feature = "agent", not(target_arch = "wasm32")))]
         {
-            if let Ok(response) = self.dispatch_http_query(config, prompt) {
-                return Ok(response);
-            }
+            // No canned fallback: a made-up explanation is worse than a clear failure.
+            self.dispatch_http_query(config, prompt).map_err(|e| {
+                let key = config.api_key.as_deref().unwrap_or("");
+                let reason = if key.is_empty() {
+                    e
+                } else {
+                    e.replace(key, "<redacted>")
+                };
+                format!(
+                    "AI provider '{}' could not be reached: {reason}",
+                    config.provider.name()
+                )
+            })
         }
 
-        // Fallback or offline explanation when live call is unreachable
-        let explanation = ExplanationGenerator::explain_differentiation("f(x)", "x", "f'(x)");
-        Ok(format!(
-            "[{} Co-Reasoning Output]:\nFor prompt: '{}'\n---\n{}",
-            config.provider.name(),
-            prompt,
-            explanation
-        ))
+        #[cfg(not(all(feature = "agent", not(target_arch = "wasm32"))))]
+        {
+            let _ = prompt;
+            Err(format!(
+                "AI provider '{}': live AI calls are not available in this build",
+                config.provider.name()
+            ))
+        }
     }
 
     #[cfg(all(feature = "agent", not(target_arch = "wasm32")))]
@@ -479,8 +489,8 @@ impl AlgebraAgentInterface {
 
                 Ok(json!({
                     "success": true,
-                    "lean4_proof": trace.export_lean4(),
-                    "coq_proof": trace.export_coq()
+                    "lean4_proof": trace.export_lean4_with(graph),
+                    "coq_proof": trace.export_coq_with(graph)
                 }))
             }
             _ => Ok(json!({

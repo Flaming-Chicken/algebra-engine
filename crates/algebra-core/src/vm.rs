@@ -196,11 +196,14 @@ impl<'a> VmCompiler<'a> {
                         self.instructions
                             .push(Instruction::LoadConst(std::f64::consts::E));
                     } else {
-                        // Unbound symbol treated as variable if default
-                        self.instructions.push(Instruction::LoadVar);
+                        // A symbol that is neither the variable, a parameter nor `pi`/`e` has
+                        // no value: reading it as the variable would silently give wrong numbers.
+                        return Err(VmError::CompilationError(format!(
+                            "unbound symbol `{name}`"
+                        )));
                     }
                 } else {
-                    self.instructions.push(Instruction::LoadVar);
+                    return Err(VmError::CompilationError("symbol with no name".to_string()));
                 }
             }
 

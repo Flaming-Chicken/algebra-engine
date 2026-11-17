@@ -2,6 +2,7 @@
 //!
 //! AST-to-Rust/C code generation and JIT numerical closure compilation.
 
+use algebra_core::vm::{BytecodeVM, VmCompiler};
 use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, SymbolId};
 use algebra_engine::numeric::{EvalContext, NumericalEval};
 
@@ -92,63 +93,110 @@ impl CodeGenerator {
         }
     }
 
-    /// Compile a single variable expression $f(x)$ into a fast Rust executable closure `Fn(f64) -> f64`.
-    pub fn compile_fn1(graph: &ExprGraph, expr: ExprId, var: SymbolId) -> impl Fn(f64) -> f64 {
-        let graph_clone = graph.clone();
-        move |x_val: f64| {
-            let val_node = graph_clone.float(x_val);
-            let sub = graph_clone.substitute(expr, var, val_node);
-            let ctx = EvalContext::new(53);
-            if let Ok(big_val) = graph_clone.evalf(sub, &ctx) {
-                big_val.to_f64()
-            } else {
-                f64::NAN
-            }
-        }
-    }
-
-    /// Compile a two-variable expression $f(x, y)$ into a fast Rust executable closure `Fn(f64, f64) -> f64`.
-    pub fn compile_fn2(
-        graph: &ExprGraph,
-        expr: ExprId,
-        var_x: SymbolId,
-        var_y: SymbolId,
-    ) -> impl Fn(f64, f64) -> f64 {
-        let graph_clone = graph.clone();
-        move |x_val: f64, y_val: f64| {
-            let x_node = graph_clone.float(x_val);
-            let y_node = graph_clone.float(y_val);
-            let sub1 = graph_clone.substitute(expr, var_x, x_node);
-            let sub2 = graph_clone.substitute(sub1, var_y, y_node);
-            let ctx = EvalContext::new(53);
-            if let Ok(big_val) = graph_clone.evalf(sub2, &ctx) {
-                big_val.to_f64()
-            } else {
-                f64::NAN
-            }
-        }
-    }
-
-    /// Compile an $N$-variable expression $f(x_1, \dots, x_n)$ into a fast Rust executable closure `Fn(&[f64]) -> f64`.
+    /// Compile an $N$-variable expression $f(x_1, \dots, x_n)$ into a Rust closure
+    /// `Fn(&[f64]) -> f64`.
+    ///
+    /// The expression is lowered once to bytecode and each call runs the bytecode virtual
+    /// machine on `f64`: the first variable is the machine's variable and the others are its
+    /// parameters, so a call does no allocation and no symbolic substitution. If the expression
+    /// uses something the bytecode compiler does not support, or a symbol that is not one of
+    /// `vars`, the closure falls back to substituting the arguments and evaluating the tree
+    /// (an unbound symbol then yields `NaN`, never a wrong number). Missing arguments yield `NaN`.
     pub fn compile_fn_n(
         graph: &ExprGraph,
         expr: ExprId,
         vars: &[SymbolId],
-    ) -> impl Fn(&[f64]) -> f64 {
+    ) -> impl Fn(&[f64]) -> f64 + use<> {
+        let names: Vec<String> = vars
+            .iter()
+            .map(|&v| graph.symbols.resolve(v).unwrap_or_default())
+            .collect();
+        let bound = free_symbols(graph, expr)
+            .into_iter()
+            .all(|symbol| vars.contains(&symbol) || is_builtin_constant(graph, symbol));
+        let program = if bound && !vars.is_empty() {
+            let params: Vec<String> = names[1..].to_vec();
+            VmCompiler::compile(graph, expr, &names[0], &params).ok()
+        } else {
+            None
+        };
+
         let graph_clone = graph.clone();
         let vars_vec = vars.to_vec();
+        let arity = vars.len();
         move |args: &[f64]| {
+            if args.len() < arity {
+                return f64::NAN;
+            }
+            if let Some(program) = &program {
+                return BytecodeVM::new()
+                    .eval_scalar(program, args[0], &args[1..arity])
+                    .unwrap_or(f64::NAN);
+            }
             let mut sub = expr;
             for (&v_sym, &val) in vars_vec.iter().zip(args.iter()) {
                 let val_node = graph_clone.float(val);
                 sub = graph_clone.substitute(sub, v_sym, val_node);
             }
             let ctx = EvalContext::new(53);
-            if let Ok(big_val) = graph_clone.evalf(sub, &ctx) {
-                big_val.to_f64()
-            } else {
-                f64::NAN
+            match graph_clone.evalf(sub, &ctx) {
+                Ok(big_val) => big_val.to_f64(),
+                Err(_) => f64::NAN,
             }
         }
     }
+
+    /// Compile a single variable expression $f(x)$ into a closure `Fn(f64) -> f64`
+    /// (bytecode-compiled, see [`CodeGenerator::compile_fn_n`]).
+    pub fn compile_fn1(
+        graph: &ExprGraph,
+        expr: ExprId,
+        var: SymbolId,
+    ) -> impl Fn(f64) -> f64 + use<> {
+        let f = Self::compile_fn_n(graph, expr, &[var]);
+        move |x| f(&[x])
+    }
+
+    /// Compile a two-variable expression $f(x, y)$ into a closure `Fn(f64, f64) -> f64`
+    /// (bytecode-compiled, see [`CodeGenerator::compile_fn_n`]).
+    pub fn compile_fn2(
+        graph: &ExprGraph,
+        expr: ExprId,
+        var_x: SymbolId,
+        var_y: SymbolId,
+    ) -> impl Fn(f64, f64) -> f64 + use<> {
+        let f = Self::compile_fn_n(graph, expr, &[var_x, var_y]);
+        move |x, y| f(&[x, y])
+    }
+}
+
+/// The symbols that occur in `expr`.
+fn free_symbols(graph: &ExprGraph, expr: ExprId) -> Vec<SymbolId> {
+    fn walk(graph: &ExprGraph, id: ExprId, out: &mut Vec<SymbolId>) {
+        match &graph.get(id).kind {
+            ExprKind::Symbol(s) => {
+                if !out.contains(s) {
+                    out.push(*s);
+                }
+            }
+            ExprKind::Add(items) | ExprKind::Mul(items) => {
+                items.iter().for_each(|&i| walk(graph, i, out))
+            }
+            ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
+                walk(graph, *a, out);
+                walk(graph, *b, out);
+            }
+            ExprKind::Neg(inner) => walk(graph, *inner, out),
+            ExprKind::Function { args, .. } => args.iter().for_each(|&a| walk(graph, a, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(graph, expr, &mut out);
+    out
+}
+
+/// `pi` and `e` are bound by the bytecode compiler itself.
+fn is_builtin_constant(graph: &ExprGraph, symbol: SymbolId) -> bool {
+    matches!(graph.symbols.resolve(symbol).as_deref(), Some("pi" | "e"))
 }

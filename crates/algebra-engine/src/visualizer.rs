@@ -107,12 +107,38 @@ impl DomainColoring {
     }
 }
 
+/// Which component of the multivalued function is drawn as the height of a Riemann surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RiemannHeight {
+    /// $\operatorname{Re} w$.
+    #[default]
+    Real,
+    /// $\operatorname{Im} w$.
+    Imaginary,
+    /// $|w|$.
+    Modulus,
+}
+
 /// Multi-Sheet Riemann Surface 3D Mesh Generator.
 pub struct RiemannSurface;
 
 impl RiemannSurface {
-    /// Generate 3D mesh for $w = \sqrt{z}$ ($2$ sheets stitched along negative real axis).
+    /// Generate 3D mesh for $w = \sqrt{z}$ ($2$ sheets stitched along negative real axis), with
+    /// $\operatorname{Re} w$ as the height. See [`RiemannSurface::sqrt_surface_with`] for the
+    /// other choices.
     pub fn sqrt_surface(radius: f64, n_radial: usize, n_angular: usize) -> Mesh3D {
+        Self::sqrt_surface_with(radius, n_radial, n_angular, RiemannHeight::Real)
+    }
+
+    /// Generate 3D mesh for $w = \sqrt{z}$ with the chosen quantity as the height above the
+    /// $z$-plane: $\operatorname{Re} w$, $\operatorname{Im} w$ or $|w|$. The real and imaginary
+    /// parts give the two classic views of the same surface; $|w| = \sqrt{r}$ ignores the sheet.
+    pub fn sqrt_surface_with(
+        radius: f64,
+        n_radial: usize,
+        n_angular: usize,
+        height: RiemannHeight,
+    ) -> Mesh3D {
         let mut vertices = Vec::new();
         let mut triangles = Vec::new();
 
@@ -130,10 +156,15 @@ impl RiemannSurface {
 
                 // w = sqrt(r) * e^{i theta / 2}
                 let w_re = r.sqrt() * (theta / 2.0).cos();
-                let _w_im = r.sqrt() * (theta / 2.0).sin();
+                let w_im = r.sqrt() * (theta / 2.0).sin();
 
-                // 3D coordinates: (x, y, Re(w))
-                vertices.push([x, y, w_re]);
+                // 3D coordinates: (x, y, chosen component of w)
+                let z = match height {
+                    RiemannHeight::Real => w_re,
+                    RiemannHeight::Imaginary => w_im,
+                    RiemannHeight::Modulus => w_re.hypot(w_im),
+                };
+                vertices.push([x, y, z]);
             }
         }
 

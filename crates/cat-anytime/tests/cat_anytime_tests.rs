@@ -23,14 +23,14 @@ fn test_wavefront_parallel_hypergraph_evaluation() {
     // Level 1: w3 = w2 * w0
     diag.add_edge(HyperEdge::binary(w2, w0, w3, HyperOp::Mul));
 
-    let schedule = WavefrontSchedule::build(&diag);
+    let schedule = WavefrontSchedule::build(&diag).unwrap();
     assert!(schedule.levels.len() >= 2);
 
     let mut initial_wires = HashMap::new();
     initial_wires.insert(w0, ScalarAtom::Integer(3));
     initial_wires.insert(w1, ScalarAtom::Integer(4));
 
-    let results = schedule.evaluate(initial_wires);
+    let results = schedule.evaluate(initial_wires).unwrap();
     // w2 = 3 + 4 = 7
     assert_eq!(results.get(&w2), Some(&ScalarAtom::Integer(7)));
     // w3 = 7 * 3 = 21
@@ -138,4 +138,92 @@ fn test_se3_rotor_1000_steps_zero_norm_drift() {
         "SE(3) rotor norm drift over 1000 steps was {:.3e}, must be < 1e-15",
         drift
     );
+}
+
+#[test]
+fn wavefront_levels_do_not_depend_on_edge_order() {
+    // w3 = w2 * w0 is listed BEFORE the edge that produces w2.
+    let mut diag = OpenHypergraph::new();
+    let (w0, w1, w2, w3) = (
+        diag.alloc_wire(),
+        diag.alloc_wire(),
+        diag.alloc_wire(),
+        diag.alloc_wire(),
+    );
+    diag.add_input_port(w0, ObjId(0));
+    diag.add_input_port(w1, ObjId(0));
+    diag.add_edge(HyperEdge::binary(w2, w0, w3, HyperOp::Mul));
+    diag.add_edge(HyperEdge::binary(w0, w1, w2, HyperOp::Add));
+
+    let schedule = WavefrontSchedule::build(&diag).unwrap();
+    assert_eq!(schedule.levels.len(), 2);
+    assert_eq!(schedule.levels[0].edges.len(), 1);
+    let mut inputs = HashMap::new();
+    inputs.insert(w0, ScalarAtom::Integer(3));
+    inputs.insert(w1, ScalarAtom::Integer(4));
+    let out = schedule.evaluate(inputs).unwrap();
+    assert_eq!(out.get(&w3), Some(&ScalarAtom::Integer(21)));
+}
+
+#[test]
+fn wavefront_reports_cycles_missing_wires_and_unsupported_operations() {
+    // A cycle: each edge feeds the other.
+    let mut cyclic = OpenHypergraph::new();
+    let (a, b) = (cyclic.alloc_wire(), cyclic.alloc_wire());
+    cyclic.add_edge(HyperEdge::binary(a, a, b, HyperOp::Add));
+    cyclic.add_edge(HyperEdge::binary(b, b, a, HyperOp::Add));
+    assert_eq!(
+        WavefrontSchedule::build(&cyclic).unwrap_err(),
+        WavefrontError::Cycle
+    );
+
+    // A wire read with no value is an error, not zero.
+    let mut diag = OpenHypergraph::new();
+    let (x, y, z) = (diag.alloc_wire(), diag.alloc_wire(), diag.alloc_wire());
+    diag.add_input_port(x, ObjId(0));
+    diag.add_edge(HyperEdge::binary(x, y, z, HyperOp::Add));
+    let schedule = WavefrontSchedule::build(&diag).unwrap();
+    let mut only_x = HashMap::new();
+    only_x.insert(x, ScalarAtom::Integer(1));
+    assert_eq!(
+        schedule.evaluate(only_x).unwrap_err(),
+        WavefrontError::MissingWire(y)
+    );
+
+    // An operation without a scalar meaning is reported.
+    let mut op = OpenHypergraph::new();
+    let (p, q, r) = (op.alloc_wire(), op.alloc_wire(), op.alloc_wire());
+    op.add_input_port(p, ObjId(0));
+    op.add_input_port(q, ObjId(0));
+    op.add_edge(HyperEdge::binary(p, q, r, HyperOp::LieBracket));
+    let schedule = WavefrontSchedule::build(&op).unwrap();
+    let mut inputs = HashMap::new();
+    inputs.insert(p, ScalarAtom::Integer(1));
+    inputs.insert(q, ScalarAtom::Integer(2));
+    assert!(matches!(
+        schedule.evaluate(inputs),
+        Err(WavefrontError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn wavefront_inverts_and_rejects_division_by_zero() {
+    let mut diag = OpenHypergraph::new();
+    let (x, y) = (diag.alloc_wire(), diag.alloc_wire());
+    diag.add_input_port(x, ObjId(0));
+    diag.add_edge(HyperEdge::unary(x, y, HyperOp::Inv));
+    let schedule = WavefrontSchedule::build(&diag).unwrap();
+
+    let mut two = HashMap::new();
+    two.insert(x, ScalarAtom::Integer(2));
+    assert_eq!(
+        schedule.evaluate(two).unwrap().get(&y),
+        Some(&ScalarAtom::Rational(1, 2))
+    );
+    let mut zero = HashMap::new();
+    zero.insert(x, ScalarAtom::Zero);
+    assert!(matches!(
+        schedule.evaluate(zero),
+        Err(WavefrontError::Arithmetic(_))
+    ));
 }

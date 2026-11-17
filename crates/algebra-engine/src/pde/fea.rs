@@ -696,6 +696,10 @@ impl FeaEngine {
         })
     }
 
+    /// Systems with more unknowns than this are solved by sparse conjugate gradients instead of
+    /// dense elimination (whose cost grows as n^3).
+    pub const SPARSE_THRESHOLD: usize = 400;
+
     /// Gaussian elimination with partial pivoting for the dense system `A x = b`.
     ///
     /// A pivot that is negligible next to the largest diagonal entry means the matrix is
@@ -707,6 +711,11 @@ impl FeaEngine {
     #[allow(clippy::needless_range_loop)]
     fn solve_linear_system(a: &mut [Vec<f64>], b: &mut [f64]) -> AlgebraResult<Vec<f64>> {
         let n = b.len();
+        if n > Self::SPARSE_THRESHOLD {
+            // Large systems: keep only the non-zeros and iterate (the matrices are symmetric
+            // positive definite once constrained).
+            return CsrMatrix::from_dense(a).conjugate_gradient(b, 1e-9, 50 * n + 1000);
+        }
         let original_a: Vec<Vec<f64>> = a.to_vec();
         let original_b: Vec<f64> = b.to_vec();
         // Each row is judged against its own magnitude: penalty constraints make some rows ~1e12
@@ -775,5 +784,135 @@ impl FeaEngine {
         }
 
         Ok(x)
+    }
+}
+
+/// Compressed sparse row storage for a square matrix.
+#[derive(Debug, Clone)]
+pub struct CsrMatrix {
+    n: usize,
+    row_start: Vec<usize>,
+    columns: Vec<usize>,
+    values: Vec<f64>,
+}
+
+impl CsrMatrix {
+    /// Keep the non-zero entries of a dense square matrix.
+    pub fn from_dense(a: &[Vec<f64>]) -> Self {
+        let n = a.len();
+        let mut row_start = Vec::with_capacity(n + 1);
+        let (mut columns, mut values) = (Vec::new(), Vec::new());
+        row_start.push(0);
+        for row in a {
+            for (j, &v) in row.iter().enumerate() {
+                if v != 0.0 {
+                    columns.push(j);
+                    values.push(v);
+                }
+            }
+            row_start.push(columns.len());
+        }
+        Self {
+            n,
+            row_start,
+            columns,
+            values,
+        }
+    }
+
+    /// Number of stored (non-zero) entries.
+    pub fn nnz(&self) -> usize {
+        self.values.len()
+    }
+
+    /// The product `A x`.
+    pub fn matvec(&self, x: &[f64]) -> Vec<f64> {
+        (0..self.n)
+            .map(|i| {
+                (self.row_start[i]..self.row_start[i + 1])
+                    .map(|k| self.values[k] * x[self.columns[k]])
+                    .sum()
+            })
+            .collect()
+    }
+
+    /// Componentwise backward error `max_i |b_i - (A x)_i| / (|b_i| + (|A| |x|)_i)` (rows with a
+    /// zero denominator count as exact). Unlike a norm of the residual it is not hidden by
+    /// penalty-constraint rows that are ~1e12 times stiffer than the rest.
+    pub fn backward_error(&self, x: &[f64], b: &[f64]) -> f64 {
+        let mut worst = 0.0_f64;
+        for i in 0..self.n {
+            let (mut ax, mut abs_ax) = (0.0, 0.0);
+            for k in self.row_start[i]..self.row_start[i + 1] {
+                let term = self.values[k] * x[self.columns[k]];
+                ax += term;
+                abs_ax += term.abs();
+            }
+            let denom = b[i].abs() + abs_ax;
+            if denom > 0.0 {
+                worst = worst.max((b[i] - ax).abs() / denom);
+            }
+        }
+        worst
+    }
+
+    /// Jacobi-preconditioned conjugate gradients for a symmetric positive definite system
+    /// `A x = b`. The diagonal preconditioner also neutralises the very stiff rows that penalty
+    /// constraints create. Stops when the componentwise [`CsrMatrix::backward_error`] reaches `tol`.
+    /// Returns an error if that does not happen within
+    /// `max_iter` iterations (an indefinite, singular or badly conditioned system) or if
+    /// `p^T A p` is not positive.
+    pub fn conjugate_gradient(
+        &self,
+        b: &[f64],
+        tol: f64,
+        max_iter: usize,
+    ) -> AlgebraResult<Vec<f64>> {
+        let n = self.n;
+        let fail = |why: String| AlgebraError::EvaluationError(format!("sparse solve: {why}"));
+        let mut inv_diag = vec![1.0; n];
+        for i in 0..n {
+            let d = (self.row_start[i]..self.row_start[i + 1])
+                .find(|&k| self.columns[k] == i)
+                .map_or(0.0, |k| self.values[k]);
+            if d <= 0.0 {
+                return Err(fail(format!(
+                    "equation {i} has a non-positive diagonal (the problem is under-constrained)"
+                )));
+            }
+            inv_diag[i] = 1.0 / d;
+        }
+        let norm_b = b.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if norm_b == 0.0 {
+            return Ok(vec![0.0; n]);
+        }
+        let mut x = vec![0.0; n];
+        let mut r = b.to_vec();
+        let mut z: Vec<f64> = r.iter().zip(&inv_diag).map(|(a, d)| a * d).collect();
+        let mut p = z.clone();
+        let mut rz: f64 = r.iter().zip(&z).map(|(a, b)| a * b).sum();
+        for _ in 0..max_iter {
+            let ap = self.matvec(&p);
+            let pap: f64 = p.iter().zip(&ap).map(|(a, b)| a * b).sum();
+            if pap <= 0.0 {
+                return Err(fail("the matrix is not positive definite".into()));
+            }
+            let alpha = rz / pap;
+            for i in 0..n {
+                x[i] += alpha * p[i];
+                r[i] -= alpha * ap[i];
+            }
+            if self.backward_error(&x, b) <= tol {
+                return Ok(x);
+            }
+            z = r.iter().zip(&inv_diag).map(|(a, d)| a * d).collect();
+            let rz_new: f64 = r.iter().zip(&z).map(|(a, b)| a * b).sum();
+            let beta = rz_new / rz;
+            rz = rz_new;
+            for i in 0..n {
+                p[i] = z[i] + beta * p[i];
+            }
+        }
+        Err(fail(format!("no convergence in {max_iter} iterations")))
     }
 }

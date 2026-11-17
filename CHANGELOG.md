@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
 ### Changed
+- `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.
 - `CustomShape::to_tri_mesh` returns `Result`; N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.
 - `CodeGenerator::compile_fn1`, `compile_fn2` and `compile_fn_n` compile to bytecode once and evaluate on `f64` per call instead of cloning the graph and substituting symbolically on every call.

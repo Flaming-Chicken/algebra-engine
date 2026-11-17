@@ -199,3 +199,61 @@ fn test_fea_dsl_macros() {
     .unwrap();
     assert_eq!(generic_sol.nodal_values.len(), 5);
 }
+
+#[test]
+fn large_systems_use_the_sparse_solver_and_match_the_exact_solution() {
+    use algebra_engine::pde::CsrMatrix;
+
+    // 1-D heat bar with 800 elements (801 unknowns, above the dense threshold): T is linear.
+    let mesh = FeaMesh::bar_1d(10.0, 800);
+    let physics = PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: 10.0,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: 0.0,
+    };
+    let bcs = vec![
+        FeaBoundaryCondition::PrescribedTemperature {
+            group_name: "left".into(),
+            temperature: 100.0,
+        },
+        FeaBoundaryCondition::PrescribedTemperature {
+            group_name: "right".into(),
+            temperature: 0.0,
+        },
+    ];
+    let sol = FeaEngine::solve(&mesh, &physics, &bcs).expect("sparse heat solve");
+    assert_eq!(sol.nodal_values.len(), 801);
+    for (i, t) in sol.nodal_values.iter().enumerate() {
+        let exact = 100.0 * (1.0 - i as f64 / 800.0);
+        assert!((t - exact).abs() < 1e-3, "node {i}: {t} vs {exact}");
+    }
+
+    // CSR storage and CG on a small SPD matrix with a known solution.
+    let a = vec![
+        vec![4.0, 1.0, 0.0],
+        vec![1.0, 3.0, 1.0],
+        vec![0.0, 1.0, 2.0],
+    ];
+    let csr = CsrMatrix::from_dense(&a);
+    assert_eq!(csr.nnz(), 7);
+    let x = csr.conjugate_gradient(&[1.0, 2.0, 3.0], 1e-12, 50).unwrap();
+    let back = csr.matvec(&x);
+    for (got, want) in back.iter().zip([1.0, 2.0, 3.0]) {
+        assert!((got - want).abs() < 1e-9);
+    }
+
+    // An indefinite or under-constrained matrix is an error, not an answer.
+    let indefinite = CsrMatrix::from_dense(&[vec![1.0, 2.0], vec![2.0, 1.0]]);
+    assert!(
+        indefinite
+            .conjugate_gradient(&[1.0, -1.0], 1e-12, 50)
+            .is_err()
+    );
+    let zero_diag = CsrMatrix::from_dense(&[vec![0.0, 1.0], vec![1.0, 0.0]]);
+    assert!(
+        zero_diag
+            .conjugate_gradient(&[1.0, 1.0], 1e-12, 50)
+            .is_err()
+    );
+}

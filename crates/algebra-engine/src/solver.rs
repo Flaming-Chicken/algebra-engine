@@ -363,16 +363,12 @@ impl SymbolicSolver for ExprGraph {
                     Ok(vec![])
                 }
             }
-            ExprKind::Div(num, den) => {
-                let num_roots = self.solveset(*num, target)?;
-                Ok(filter_nonzero_den(self, num_roots, *den, target))
-            }
+            ExprKind::Div(num, den) => solve_cleared_fraction(self, *num, *den, target),
             ExprKind::Mul(factors) => {
                 // If any factor has a target-dependent denominator, clear denominators first
                 if expr_has_target_denominator(self, eq, target) {
                     let (num, den) = to_rational_fraction(self, eq, target);
-                    let num_roots = self.solveset(num, target)?;
-                    return Ok(filter_nonzero_den(self, num_roots, den, target));
+                    return solve_cleared_fraction(self, num, den, target);
                 }
                 let mut all_roots = Vec::new();
                 for &f in factors {
@@ -403,8 +399,7 @@ impl SymbolicSolver for ExprGraph {
             _ => {
                 if expr_has_target_denominator(self, eq, target) {
                     let (num, den) = to_rational_fraction(self, eq, target);
-                    let num_roots = self.solveset(num, target)?;
-                    return Ok(filter_nonzero_den(self, num_roots, den, target));
+                    return solve_cleared_fraction(self, num, den, target);
                 }
                 if let Some(trans_roots) = solve_transcendental(self, eq, target) {
                     return Ok(trans_roots);
@@ -1164,6 +1159,26 @@ fn exact_rational_log(
         }
     }
     None
+}
+
+/// Roots of `num / den = 0` after clearing denominators.
+///
+/// If the numerator is identically zero the equation holds wherever it is defined
+/// (`(x - 1)/(x - 1) = 1`), so report the variable itself, as for `x = x`, rather than
+/// no solutions. Points where the denominator vanishes remain excluded in principle.
+fn solve_cleared_fraction(
+    graph: &ExprGraph,
+    num: ExprId,
+    den: ExprId,
+    target: SymbolId,
+) -> AlgebraResult<Vec<ExprId>> {
+    let simplified = Simplifier::simplify(graph, num).unwrap_or(num);
+    if is_symbolic_zero(graph, simplified) {
+        let name = graph.symbols.resolve(target).unwrap_or_default();
+        return Ok(vec![graph.symbol(&name)]);
+    }
+    let num_roots = graph.solveset(num, target)?;
+    Ok(filter_nonzero_den(graph, num_roots, den, target))
 }
 
 fn expr_has_target_denominator(graph: &ExprGraph, expr: ExprId, target: SymbolId) -> bool {

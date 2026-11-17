@@ -467,6 +467,24 @@ impl RischIntegrator {
             }
 
             if let (Some(_x_sq), Some(a_sq)) = (x_sq_opt, a_sq_opt) {
+                // x^2 - b^2 (negative real constant): num/(x^2 - b^2) integrates to
+                // num/(2b) * ln((x - b)/(x + b)), not an arctan of a complex argument.
+                {
+                    use crate::numeric::NumericalEval as _;
+                    let negative = graph
+                        .evalf(a_sq, &crate::numeric::EvalContext::default())
+                        .is_ok_and(|v| v.to_f64() < 0.0);
+                    if negative {
+                        let simplify = |e: ExprId| {
+                            crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e)
+                        };
+                        let b = simplify(graph.function("sqrt", [simplify(graph.neg(a_sq))]));
+                        let two_b = graph.mul([graph.integer(2), b]);
+                        let ratio = graph.div(graph.sub(x, b), graph.add([x, b]));
+                        let coefficient = simplify(graph.div(num, two_b));
+                        return Ok(graph.mul([coefficient, graph.function("ln", [ratio])]));
+                    }
+                }
                 let a = graph.function("sqrt", [a_sq]);
                 let inv_a = graph.div(num, a);
                 let x_over_a = graph.div(x, a);

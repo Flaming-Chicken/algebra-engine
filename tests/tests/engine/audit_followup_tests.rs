@@ -207,3 +207,112 @@ fn exp_quadratic_gives_clean_principal_roots() {
     assert!(roots[0].0.abs() < 1e-12 && (roots[1].0 - 2f64.ln()).abs() < 1e-12);
     assert!(roots.iter().all(|r| r.1.abs() < 1e-12));
 }
+
+// --- Products, radicals and repeated factors -------------------------------
+
+#[test]
+fn simplify_merges_repeated_bases_and_square_roots() {
+    let cases = [
+        ("simplify x*x", "x^2"),
+        ("simplify x*x*x", "x^3"),
+        ("simplify x^2*x^3", "x^5"),
+        ("simplify x*x^(-1)", "1"),
+        ("simplify 2*x*3*x", "6 · x^2"),
+        ("simplify sqrt(2)*sqrt(8)", "4"),
+        ("simplify sqrt(3)*sqrt(12)", "6"),
+        ("simplify sqrt(8)*sqrt(2)*x", "4 · x"),
+        // Not a perfect square: combined, not expanded.
+        ("simplify sqrt(2)*sqrt(3)", "√(6)"),
+        // Distinct bases are left alone and keep their order.
+        ("simplify x*y", "x · y"),
+    ];
+    for (cmd, expected) in cases {
+        assert_eq!(value(cmd), expected, "{cmd}");
+    }
+}
+
+#[test]
+fn symbolic_determinant_collects_repeated_factors() {
+    assert_eq!(value("det [[x,1],[1,x]]"), "x^2 - 1");
+    assert_eq!(value("det [[a,b],[c,d]]"), "a · d - b · c");
+}
+
+// --- 1/(x^2 - b^2) integrates to a logarithm --------------------------------
+
+#[test]
+fn quadratic_with_real_roots_integrates_to_logs() {
+    // Points are away from the poles, where the logarithm's argument is positive.
+    let cases = [
+        ("1/(x^2 - 4)", vec![3.0, 4.5, -3.5]),
+        ("3/(x^2 - 9)", vec![4.0, 6.0, -5.0]),
+        ("1/(x^2 - 2)", vec![2.0, 3.0, -2.5]),
+        ("2/(x^2 - 25)", vec![6.0, 9.0, -7.0]),
+    ];
+    for (src, points) in cases {
+        let graph = ExprGraph::new();
+        let x_sym = graph.symbols.get_or_intern("x");
+        let integrand = ExprParser::new(&graph).parse(src).unwrap();
+        let antiderivative = graph
+            .integrate(integrand, x_sym)
+            .unwrap_or_else(|e| panic!("`{src}` did not integrate: {e}"));
+        let text = value(&format!("integrate {src}, x"));
+        assert!(
+            text.contains("ln") && !text.contains("arctan"),
+            "{src}: {text}"
+        );
+        let back = graph.diff(antiderivative, x_sym);
+        for point in points {
+            let want = eval_at(&graph, integrand, point);
+            let got = eval_at(&graph, back, point);
+            assert!(
+                (want - got).abs() <= 1e-9 * want.abs().max(1.0),
+                "d/dx of the antiderivative of `{src}` at {point}: {got}, expected {want}"
+            );
+        }
+    }
+    // Positive constant is still an arctan.
+    assert!(value("integrate 1/(x^2 + 4), x").contains("arctan"));
+}
+
+// --- Difference of squares with multi-term roots ----------------------------
+
+#[test]
+fn factor_difference_of_squares_with_multi_term_roots() {
+    let cases = [
+        (
+            "factor a^2 + 2*a*b + b^2 - c^2",
+            "(a + b - c) · (a + b + c)",
+        ),
+        ("factor x^2 + 2*x*y + y^2 - 9", "(x + y - 3) · (x + y + 3)"),
+        (
+            "factor 4*a^2 - (b + c)^2",
+            "(2 · a - b - c) · (2 · a + b + c)",
+        ),
+        ("factor x^4 - y^4", "(x - y) · (x + y) · (x^2 + y^2)"),
+        ("factor x^2 - y^2", "(x - y) · (x + y)"),
+        // Not a difference of squares: unchanged.
+        ("factor a^2 + b^2 - c^2", "a^2 + b^2 - c^2"),
+    ];
+    for (cmd, expected) in cases {
+        assert_eq!(value(cmd), expected, "{cmd}");
+    }
+}
+
+// --- Identities after clearing denominators ---------------------------------
+
+#[test]
+fn equation_that_is_an_identity_on_its_domain_is_not_reported_as_unsolvable() {
+    // Holds for every x where it is defined; reported like `x = x`, as the variable.
+    assert_eq!(
+        value("solve (x - 1)/(x - 1) = 1, x"),
+        "Solutions for x: [x]"
+    );
+    assert_eq!(value("solve x/x = 1, x"), "Solutions for x: [x]");
+    // The only candidate, x = 1, is a removable singularity: no solution.
+    assert_eq!(
+        value("solve (x^2 - 1)/(x - 1) = 2, x"),
+        "Solutions for x: []"
+    );
+    // Ordinary rational equations are unaffected.
+    assert_eq!(value("solve 1/x = 0, x"), "Solutions for x: []");
+}

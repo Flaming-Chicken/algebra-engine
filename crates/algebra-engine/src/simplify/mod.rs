@@ -1165,6 +1165,87 @@ fn pre_simplify_algebraic_with_assumptions(
                         rest.push(f);
                     }
                 }
+                // sqrt(a) * sqrt(b) -> sqrt(a * b) for positive rationals a, b, so the
+                // radical simplifier can pull out squares: sqrt(2) * sqrt(8) -> sqrt(16) -> 4.
+                let sqrt_of_positive_rational = |g: &ExprGraph, f: ExprId| -> Option<BigRational> {
+                    if let ExprKind::Function { name, args } = &g.get(f).kind
+                        && args.len() == 1
+                        && g.symbols.resolve(*name).as_deref() == Some("sqrt")
+                    {
+                        return as_rat(g, args[0]).filter(|q| q > &BigRational::zero());
+                    }
+                    None
+                };
+                let radicands: Vec<BigRational> = rest
+                    .iter()
+                    .filter_map(|&f| sqrt_of_positive_rational(g, f))
+                    .collect();
+                if radicands.len() >= 2 {
+                    let product = radicands
+                        .into_iter()
+                        .fold(BigRational::one(), |acc, q| acc * q);
+                    let mut rebuilt: Vec<ExprId> = rest
+                        .iter()
+                        .copied()
+                        .filter(|&f| sqrt_of_positive_rational(g, f).is_none())
+                        .collect();
+                    if !coeff.is_one() {
+                        rebuilt.insert(0, crate::poly::expr_from_rational(g, &coeff));
+                    }
+                    rebuilt
+                        .push(g.function("sqrt", [crate::poly::expr_from_rational(g, &product)]));
+                    let combined = if rebuilt.len() == 1 {
+                        rebuilt[0]
+                    } else {
+                        g.mul(rebuilt)
+                    };
+                    return rec(g, combined, assumptions);
+                }
+                // Repeated bases with numeric exponents: x * x -> x^2, x^2 * x^3 -> x^5,
+                // x^(1/2) * x^(1/2) -> x. Only rewritten when a base actually repeats, so
+                // products without repeats keep their order.
+                let base_and_exponent =
+                    |g: &ExprGraph, f: ExprId| -> Option<(ExprId, BigRational)> {
+                        if as_rat(g, f).is_some() {
+                            return None;
+                        }
+                        if let ExprKind::Pow(b, e) = g.get(f).kind {
+                            return as_rat(g, e)
+                                .filter(|_| as_rat(g, b).is_none())
+                                .map(|q| (b, q));
+                        }
+                        Some((f, BigRational::one()))
+                    };
+                let mut grouped: Vec<(ExprId, BigRational)> = Vec::new();
+                let mut others: Vec<ExprId> = Vec::new();
+                let mut repeated = false;
+                for &f in &rest {
+                    match base_and_exponent(g, f) {
+                        Some((base, exp)) => {
+                            if let Some(slot) = grouped.iter_mut().find(|(b, _)| *b == base) {
+                                slot.1 += exp;
+                                repeated = true;
+                            } else {
+                                grouped.push((base, exp));
+                            }
+                        }
+                        None => others.push(f),
+                    }
+                }
+                if repeated {
+                    rest = grouped
+                        .into_iter()
+                        .filter(|(_, exp)| !exp.is_zero())
+                        .map(|(base, exp)| {
+                            if exp.is_one() {
+                                base
+                            } else {
+                                g.pow(base, crate::poly::expr_from_rational(g, &exp))
+                            }
+                        })
+                        .chain(others)
+                        .collect();
+                }
                 // Pairwise trig/reciprocal cancellations inside Mul
                 let mut changed = true;
                 while changed {

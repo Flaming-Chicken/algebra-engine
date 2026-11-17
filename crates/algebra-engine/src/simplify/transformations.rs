@@ -2660,6 +2660,15 @@ fn factor_multivariate_over_q(
         }
     }
 
+    // 3b. Difference of squares with multi-term roots: P^2 - Q^2 = (P - Q)(P + Q)
+    if let Some((root_p, root_q)) = mv_difference_of_squares(&prim) {
+        for combined in [mv_sub(&root_p, &root_q), mv_add(&root_p, &root_q)] {
+            let expr = mv_poly_to_expr(graph, &combined);
+            out_factors.push(factor_multivariate_over_q(graph, expr, syms).unwrap_or(expr));
+        }
+        return Some(graph.mul(out_factors));
+    }
+
     // 4. Four-term grouping check: A*C + A*D + B*C + B*D = (A + B)*(C + D)
     if prim.len() == 4 {
         let terms: Vec<(MonomialKey, num_rational::BigRational)> = prim.into_iter().collect();
@@ -2677,6 +2686,79 @@ fn factor_multivariate_over_q(
         }
     }
 
+    None
+}
+
+/// Exact square root of a multivariate polynomial over Q, if it is a perfect square.
+///
+/// Builds the root one leading term at a time: the first term is the square root of the
+/// leading term of `p`; each later term cancels the leading term of `p - root^2`.
+fn mv_poly_sqrt(p: &MvPoly) -> Option<MvPoly> {
+    use num_traits::{Signed as _, Zero as _};
+    let sqrt_rational = |q: &num_rational::BigRational| -> Option<num_rational::BigRational> {
+        if q.is_negative() {
+            return None;
+        }
+        let (n, d) = (q.numer().sqrt(), q.denom().sqrt());
+        (&n * &n == *q.numer() && &d * &d == *q.denom())
+            .then(|| num_rational::BigRational::new(n, d))
+    };
+    let (lead_mono, lead_coeff) = mv_leading_term(p)?;
+    if lead_mono.iter().any(|&(_, e)| e % 2 != 0) {
+        return None;
+    }
+    let root_coeff = sqrt_rational(&lead_coeff)?;
+    let root_mono: MonomialKey = lead_mono.iter().map(|&(a, e)| (a, e / 2)).collect();
+    let mut root = MvPoly::new();
+    root.insert(root_mono.clone(), root_coeff.clone());
+    let two_lead = &root_coeff * num_rational::BigRational::from_integer(2.into());
+    for _ in 0..(2 * p.len() + 2) {
+        let rem = mv_sub(p, &mv_mul(&root, &root));
+        if rem.is_empty() {
+            return Some(root);
+        }
+        let (rem_mono, rem_coeff) = mv_leading_term(&rem)?;
+        let next_mono = mv_div_monomial(&rem_mono, &root_mono)?;
+        let next_coeff = &rem_coeff / &two_lead;
+        if next_coeff.is_zero() {
+            return None;
+        }
+        *root
+            .entry(next_mono)
+            .or_insert_with(num_rational::BigRational::zero) += next_coeff;
+    }
+    None
+}
+
+/// Split `p` into `(P, Q)` with `p = P^2 - Q^2`, by finding a subset of its terms that is
+/// a perfect square whose complement is the negative of one (`a^2 + 2ab + b^2 - c^2`).
+fn mv_difference_of_squares(p: &MvPoly) -> Option<(MvPoly, MvPoly)> {
+    use num_traits::Signed as _;
+    let terms: Vec<(&MonomialKey, &num_rational::BigRational)> = p.iter().collect();
+    let n = terms.len();
+    if !(3..=12).contains(&n) {
+        return None;
+    }
+    for mask in 1..((1u32 << n) - 1) {
+        let mut positive = MvPoly::new();
+        let mut negative = MvPoly::new();
+        for (i, (m, c)) in terms.iter().enumerate() {
+            if mask & (1 << i) != 0 {
+                positive.insert((*m).clone(), (*c).clone());
+            } else {
+                negative.insert((*m).clone(), -(*c).clone());
+            }
+        }
+        // Cheap sign test on the leading coefficients before the square-root attempts.
+        if mv_leading_term(&positive).is_none_or(|(_, c)| c.is_negative())
+            || mv_leading_term(&negative).is_none_or(|(_, c)| c.is_negative())
+        {
+            continue;
+        }
+        if let (Some(root_p), Some(root_q)) = (mv_poly_sqrt(&positive), mv_poly_sqrt(&negative)) {
+            return Some((root_p, root_q));
+        }
+    }
     None
 }
 

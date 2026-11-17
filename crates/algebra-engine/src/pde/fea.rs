@@ -696,10 +696,25 @@ impl FeaEngine {
         })
     }
 
-    /// Gaussian elimination with partial pivoting for dense linear solver.
+    /// Gaussian elimination with partial pivoting for the dense system `A x = b`.
+    ///
+    /// A pivot that is negligible next to the largest diagonal entry means the matrix is
+    /// singular (typically an unconstrained structure with rigid-body motion, or a thermal
+    /// problem with no boundary condition) and is reported as an error rather than solved by
+    /// skipping the equation. The solution is then checked against the original system: a
+    /// relative residual above `1e-6` (severe ill-conditioning, for example from the penalty
+    /// constraints) is an error too.
     #[allow(clippy::needless_range_loop)]
     fn solve_linear_system(a: &mut [Vec<f64>], b: &mut [f64]) -> AlgebraResult<Vec<f64>> {
         let n = b.len();
+        let original_a: Vec<Vec<f64>> = a.to_vec();
+        let original_b: Vec<f64> = b.to_vec();
+        // Each row is judged against its own magnitude: penalty constraints make some rows ~1e12
+        // times stiffer than others, so a single global scale would flag healthy pivots.
+        let mut row_scale: Vec<f64> = (0..n)
+            .map(|i| a[i].iter().fold(0.0_f64, |m, v| m.max(v.abs())))
+            .collect();
+
         for i in 0..n {
             // Find pivot
             let mut max_row = i;
@@ -711,13 +726,17 @@ impl FeaEngine {
                 }
             }
 
-            if max_val < 1e-18 {
-                continue; // Singular / constrained DOF
+            // Elimination can leave a pivot that is round-off relative to its row: singular.
+            if max_val <= row_scale[max_row].max(1e-300) * 1e-12 {
+                return Err(AlgebraError::EvaluationError(format!(
+                    "singular system: no usable pivot for equation {i}                      (the problem is under-constrained)"
+                )));
             }
 
             // Swap rows
             a.swap(i, max_row);
             b.swap(i, max_row);
+            row_scale.swap(i, max_row);
 
             // Eliminate
             for k in i + 1..n {
@@ -737,11 +756,22 @@ impl FeaEngine {
             for j in i + 1..n {
                 sum -= a[i][j] * x[j];
             }
-            x[i] = if a[i][i].abs() > 1e-18 {
-                sum / a[i][i]
-            } else {
-                0.0
-            };
+            x[i] = sum / a[i][i];
+        }
+
+        // Verify against the original system.
+        let mut residual_sq = 0.0;
+        let mut rhs_sq = 0.0;
+        for i in 0..n {
+            let row: f64 = (0..n).map(|j| original_a[i][j] * x[j]).sum();
+            residual_sq += (row - original_b[i]).powi(2);
+            rhs_sq += original_b[i].powi(2);
+        }
+        if residual_sq.sqrt() > 1e-6 * rhs_sq.sqrt().max(1e-300) {
+            return Err(AlgebraError::EvaluationError(format!(
+                "linear solve failed its residual check (relative residual {:.2e}); the system is                  too ill-conditioned",
+                (residual_sq / rhs_sq.max(1e-300)).sqrt()
+            )));
         }
 
         Ok(x)

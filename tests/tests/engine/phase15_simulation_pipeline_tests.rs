@@ -113,16 +113,20 @@ fn test_naca_airfoil_thermal_simulation() {
 #[test]
 fn test_simulation_result_vtk_export() {
     let box_mesh = Mesh3D::cube(4.0, 4.0, 4.0);
-    let pipeline = SimulationPipeline::from_cad(box_mesh)
-        .with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+    // All three translations of the base are fixed. (Fixing only x left rigid-body motion, which
+    // the solver used to hide by returning zeros for the free equations.)
+    let mut pipeline = SimulationPipeline::from_cad(box_mesh);
+    for dof_index in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
             group_name: "fixed_base".into(),
-            dof_index: 0,
+            dof_index,
             value: 0.0,
-        })
-        .with_boundary_condition(FeaBoundaryCondition::PointForce {
-            group_name: "load_top".into(),
-            force_vector: vec![0.0, 0.0, -100.0],
         });
+    }
+    let pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "load_top".into(),
+        force_vector: vec![0.0, 0.0, -100.0],
+    });
 
     let result = pipeline.run_analysis().expect("Box FEA failed");
     let vtk_str = result.export_vtk_ascii();
@@ -155,4 +159,21 @@ fn test_simulate_cad_macro() {
 
     let result = simulate_cad!(cad, physics, bcs).expect("simulate_cad macro failed");
     assert!(result.max_magnitude() > 0.0);
+}
+
+#[test]
+fn test_under_constrained_structures_are_reported_not_solved_with_zeros() {
+    // Only the x translation of the base is fixed: the box can translate in y and z and rotate.
+    let pipeline = SimulationPipeline::from_cad(Mesh3D::cube(4.0, 4.0, 4.0))
+        .with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "fixed_base".into(),
+            dof_index: 0,
+            value: 0.0,
+        })
+        .with_boundary_condition(FeaBoundaryCondition::PointForce {
+            group_name: "load_top".into(),
+            force_vector: vec![0.0, 0.0, -100.0],
+        });
+    let error = pipeline.run_analysis().unwrap_err();
+    assert!(error.to_string().contains("singular"), "{error}");
 }

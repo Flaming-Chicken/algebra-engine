@@ -67,3 +67,72 @@ fn test_lsp_code_actions_simplification() {
     assert_eq!(actions[0].new_text, "x");
     assert!(actions[0].title.contains("Simplify with E-Graphs"));
 }
+
+#[test]
+fn test_lsp_hover_and_completions_use_the_document_above_the_cursor() {
+    use urae_lsp::{Position, UraeLanguageServer};
+    let doc = "a = 2
+b = a + 3
+b * a
+# comment
+rate == 3";
+    // `b * a` is 10 only if the definitions on lines 1 and 2 are in scope.
+    let hover = UraeLanguageServer::hover(
+        doc,
+        Position {
+            line: 2,
+            character: 0,
+        },
+    )
+    .unwrap();
+    assert!(hover.contents.contains("10"), "{}", hover.contents);
+
+    // Names defined above the cursor are offered, newest first; `==` is not a definition.
+    let items = UraeLanguageServer::completions_at(
+        doc,
+        Position {
+            line: 4,
+            character: 0,
+        },
+        "",
+    );
+    let labels: Vec<&str> = items.iter().map(|c| c.label.as_str()).collect();
+    let b = labels.iter().position(|l| *l == "b").expect("b offered");
+    let a = labels.iter().position(|l| *l == "a").expect("a offered");
+    assert!(b < a, "{labels:?}");
+    assert!(!labels.contains(&"rate"));
+    assert!(labels.contains(&"diff"), "catalogue still present");
+
+    // A definition below the cursor is not offered yet, and the prefix filters names.
+    let early = UraeLanguageServer::completions_at(
+        doc,
+        Position {
+            line: 1,
+            character: 0,
+        },
+        "b",
+    );
+    assert!(
+        early
+            .iter()
+            .all(|c| c.label != "b" || c.detail != "defined on line 2")
+    );
+    let filtered = UraeLanguageServer::completions_at(
+        doc,
+        Position {
+            line: 4,
+            character: 0,
+        },
+        "b",
+    );
+    assert!(
+        filtered
+            .iter()
+            .any(|c| c.label == "b" && c.detail.starts_with("defined"))
+    );
+    assert!(
+        !filtered
+            .iter()
+            .any(|c| c.label == "a" && c.detail.starts_with("defined"))
+    );
+}

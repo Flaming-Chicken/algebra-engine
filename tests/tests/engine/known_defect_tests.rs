@@ -968,7 +968,7 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
     let mesh = tetra.to_tri_mesh().unwrap();
     assert!(mesh.is_closed());
     assert!((mesh.compute_volume() - 1.0 / 6.0).abs() < 1e-12);
-    // Higher-dimensional polytopes, implicit surfaces and Booleans are reported, not faked.
+    // Higher-dimensional polytopes and Booleans are reported, not faked; implicit surfaces mesh.
     let four_d = CustomShape::PolytopeND {
         dim: 4,
         vertices: vec![],
@@ -979,7 +979,7 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
         expr_str: "x^2 + y^2 + z^2 - 1".into(),
         bbox: BoundingBox3D::new([-2.0; 3], [2.0; 3]),
     };
-    assert!(implicit.to_tri_mesh().is_err());
+    assert!(implicit.to_tri_mesh().unwrap().is_closed());
     let boolean = CustomShape::BooleanCSG {
         op: CsgBooleanOp::Union,
         left: Box::new(shape.clone()),

@@ -7,6 +7,7 @@
 //! - **Reduction of Order**: Converts $n$-th order ODEs $y^{(n)} = F(t, y, y', \dots, y^{(n-1)})$
 //!   into an $n$-dimensional first-order state vector system $\mathbf{x}' = \mathbf{f}(t, \mathbf{x})$.
 
+use crate::calculus::SymbolicCalculus;
 use crate::matrix::SymbolicMatrix;
 use crate::ode::symbolic::SymbolicOdeSolver;
 use crate::simplify::Simplifier;
@@ -61,16 +62,43 @@ impl DifferentialSystemSolver {
                     "Forcing vector must have length 2".into(),
                 ));
             }
-            let _var_t = graph.symbols.resolve(t).unwrap_or_else(|| "t".to_string());
+            // Particular solution by variation of parameters (Duhamel):
+            //   y_p(t) = integral_0^t Phi(t - tau) g(tau) d tau.
+            let t_name = graph.symbols.resolve(t).unwrap_or_else(|| "t".to_string());
+            let t_expr = graph.symbol(&t_name);
+            let tau_id = graph.symbols.get_or_intern("tau");
             let tau = graph.symbol("tau");
+            let shifted = graph.sub(t_expr, tau);
+            // Phi evaluated at (t - tau), forcing evaluated at tau.
+            let phi_shift = |entry: ExprId| graph.substitute(entry, t, shifted);
+            let g_tau = [
+                graph.substitute(g[0], t, tau),
+                graph.substitute(g[1], t, tau),
+            ];
+            let integrand = [
+                graph.add([
+                    graph.mul([phi_shift(p00), g_tau[0]]),
+                    graph.mul([phi_shift(p01), g_tau[1]]),
+                ]),
+                graph.add([
+                    graph.mul([phi_shift(p10), g_tau[0]]),
+                    graph.mul([phi_shift(p11), g_tau[1]]),
+                ]),
+            ];
+            let definite = |f: ExprId| -> ExprId {
+                let f = Simplifier::simplify(graph, f).unwrap_or(f);
+                match graph.integrate(f, tau_id) {
+                    Ok(anti) => graph.sub(
+                        graph.substitute(anti, tau_id, t_expr),
+                        graph.substitute(anti, tau_id, graph.integer(0)),
+                    ),
+                    // No closed form: keep the convolution integral rather than drop it.
+                    Err(_) => graph.integral(f, "tau", Some(graph.integer(0)), Some(t_expr)),
+                }
+            };
 
-            // g_p = int_0^t Phi(t - tau) * g(tau) dtau
-            let gp1 = graph.mul([p00, g[0]]);
-            let gp2 = graph.mul([p11, g[1]]);
-
-            let total1 = graph.add([yh1_simp, gp1]);
-            let total2 = graph.add([yh2_simp, gp2]);
-            let _ = tau;
+            let total1 = graph.add([yh1_simp, definite(integrand[0])]);
+            let total2 = graph.add([yh2_simp, definite(integrand[1])]);
 
             Ok(vec![
                 Simplifier::simplify(graph, total1).unwrap_or(total1),

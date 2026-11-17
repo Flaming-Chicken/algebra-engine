@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for URAE Ecosystem: Python Bindings, Jupyter Kernel, LSP Tooling, CLI, FFI, Facade & System Consolidation.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "ecosystem/phase18_python_kernel_tests.rs"]
 mod phase18_python_kernel_tests;
 

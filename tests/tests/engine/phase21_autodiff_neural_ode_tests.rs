@@ -100,7 +100,9 @@ fn test_neural_ode_trajectory_and_adjoint_sensitivity() {
 
     // Analytical dL/dtheta: x(1) * dx(1)/dtheta = exp(-0.5) * (-1.0 * exp(-0.5)) = -exp(-1.0)
     let analytical_grad = -(-1.0_f64).exp();
-    assert!((dl_dtheta[0] - analytical_grad).abs() < 1e-2);
+    // The adjoint now differentiates the RK4 steps themselves, so with 100 steps it is accurate
+    // to about 1e-9 (the earlier first-order scheme needed a 1e-2 tolerance).
+    assert!((dl_dtheta[0] - analytical_grad).abs() < 1e-8);
 }
 
 #[test]

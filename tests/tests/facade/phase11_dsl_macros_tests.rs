@@ -47,11 +47,13 @@ fn test_macro_limits_series_pade() {
     assert_ne!(laurent_res, zero);
 
     // 4. puiseux!
-    let puiseux_res = puiseux!(&graph, x, x_sym, zero, 2, 3).unwrap();
+    let puiseux_res = puiseux!(&graph, x, x_sym, zero, 1, 3).unwrap();
+    // Fractional exponents are not implemented and must say so rather than return placeholders.
+    assert!(puiseux!(&graph, x, x_sym, zero, 2, 3).is_err());
     assert_ne!(puiseux_res, zero);
 
     // 5. pade!
-    let pade_res = pade!(&graph, x, x_sym, zero, 2, 2);
+    let pade_res = pade!(&graph, x, x_sym, zero, 2, 2).unwrap();
     assert_ne!(pade_res, zero);
 }
 

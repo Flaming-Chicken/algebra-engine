@@ -1,9 +1,19 @@
 # Comprehensive Panic and Unwrap Audit Report
 
-**Date:** 16 November 2026  
-**Target:** `algebra-engine` Multi-Crate Workspace (19 Crates)  
-**Status:** Remediated & Verified  
-**Test Suite:** 690/690 Passed (0 Failures, 0 Skipped)  
+> **Update, 17 Nov 2026.** A recount of production code (everything outside tests, benches and examples) found 29
+> sites, not 63. All reachable ones were removed: guarded `unwrap`s became `map_or`/`let ... else`, poisoned-lock
+> handling recovers the guard, and the notebook launcher reports a failed start. The remaining intentional panics
+> are the matrix operators in `algebra-engine/src/api.rs` (documented `# Panics`, with `try_add`/`try_sub`/`try_mul`
+> as the fallible forms) and the `Uint` operators in `auto-promoters`, which mirror `std` division and
+> subtraction. The workspace now sets `clippy::unwrap_used`, `expect_used` and `panic` to warn, which the CI
+> `-D warnings` gate turns into errors; test code is exempt through `clippy.toml` and crate-level allows in the
+> test suites.
+
+**Original Date:** 16 November 2026  
+**Re-Audit Note:** Later re-verification found that several `.unwrap()`, `.expect()`, `panic!()`, and raw `assert!` call sites remain or re-entered production `crates/*/src` files (63 lines total across production sources; see Section 6 below).  
+**Target:** `algebra-engine` Multi-Crate Workspace (19 Crates at original audit)  
+**Status:** Partially Remediated — Follow-Up Required  
+**Original Test Snapshot:** 690/690 Passed (at time of initial report)  
 
 ---
 
@@ -114,3 +124,26 @@ The workspace comprises 19 distinct crates with strict safety standards (`unsafe
 1. **Deny Unwraps in Production Crates:** Keep `.unwrap()` and `.expect()` strictly confined to `#[cfg(test)]` modules and integration test files.
 2. **Use Checked/Saturating Arithmetic:** For indexing and bounded operations, prefer `.get()` or `.first()` / `.last()` with pattern matching.
 3. **Handle Poisoned Locks Gracefully:** For multi-threaded state (`RwLock` / `Mutex`), use `.unwrap_or_else(|p| p.into_inner())` instead of `.unwrap()`.
+
+---
+
+## 6. Re-Audit Findings (Production Sites Still Present)
+
+A subsequent automated scan (`crates/*/src` outside `#[cfg(test)]`) identified **63** remaining `.unwrap()` / `.expect()` / `panic!()` / raw `assert!` / `assert_eq!` lines in production code, including items marked remediated in Section 3 above:
+
+1. **Unwraps / Expects in Parsing, Execution & GUI Worker Paths**:
+   - `crates/urae-notebook/src/notebook/worker.rs:333, 359`: `self.line_tokens.write().unwrap()` (poisoned `RwLock` panic vector)
+   - `crates/urae-notebook/src/notebook/mod.rs:1588, 1704`: `target_line.split_once('=').unwrap()`, `rest[..start].chars().last().unwrap()`
+   - `crates/urae-notebook/src/app.rs:6553, 6696`: `.chars().next().unwrap()`
+   - `crates/urae-notebook/src/ui/theme.rs:522, 527, 552, 571, 608`: `.chars().next().unwrap()`
+   - `crates/urae-notebook/src/lib.rs:282`: `.unwrap()`
+   - `crates/algebra-core/src/parser.rs:938`: `clean.find('(').unwrap()` (guarded by prefix check, fragile under refactor)
+   - `crates/algebra-engine/src/executor.rs:1148, 2750`: `.expect("checked non-empty")` and `powers.last().unwrap()`
+2. **Explicit `panic!` / `.expect()` / Unchecked `assert!` Vectors in Libraries**:
+   - `crates/auto-promoters/src/uint/{division.rs:14,71,87, power.rs:7, roots.rs:16, shift.rs:37,45,65,72, subtraction.rs:23}`
+   - `crates/algebra-engine/src/api.rs:64, 101, 1344, 1350, 1356` (`ConstRational` zero-denom asserts & `SymMat` `unwrap_or_else(|e| panic!(...))`)
+   - `crates/algebra-engine/src/{cft.rs:62,69-71, padic_hodge.rs:34-36, exceptional_lie.rs:38,340, qft.rs:246, heuristic.rs:433, iga.rs:114, interconnect.rs:56, macros.rs:147}`
+   - `crates/algebra-core/src/vm.rs:676`, `crates/algebra-advanced/src/padic.rs:142`
+   - `crates/cat-numbers/src/{differential_forms.rs:42,55,56,70,71,86,134,181, metric.rs:70,82,125, tensor.rs:71,74,95,119,120,124}`
+
+See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md) for the prioritized conversion plan to `AlgebraResult` / poisoned-lock recovery.

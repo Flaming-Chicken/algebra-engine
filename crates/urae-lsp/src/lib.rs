@@ -277,6 +277,42 @@ impl UraeLanguageServer {
         items
     }
 
+    /// Completions at a cursor position: the operator and function catalogue, plus the names
+    /// defined (as `name = ...`) on lines above the cursor line, most recent definition first.
+    pub fn completions_at(document: &str, position: Position, prefix: &str) -> Vec<CompletionItem> {
+        let p_lower = prefix.to_lowercase();
+        let mut defined: Vec<CompletionItem> = Vec::new();
+        let above: Vec<&str> = document.lines().take(position.line).collect();
+        for (index, line) in above.into_iter().enumerate().rev() {
+            let trimmed = line.trim();
+            let Some((lhs, rhs)) = trimmed.split_once('=') else {
+                continue;
+            };
+            // A plain assignment: not `==`, `<=`, `>=`, `!=`.
+            if rhs.starts_with('=') || lhs.ends_with(['<', '>', '!']) {
+                continue;
+            }
+            let name = lhs.trim();
+            let is_identifier = !name.is_empty()
+                && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && !name.chars().next().is_some_and(|c| c.is_ascii_digit());
+            if !is_identifier
+                || !name.to_lowercase().starts_with(&p_lower)
+                || defined.iter().any(|item| item.label == name)
+            {
+                continue;
+            }
+            defined.push(CompletionItem {
+                label: name.to_string(),
+                detail: format!("defined on line {}", index + 1),
+                insert_text: name.to_string(),
+                documentation: format!("{name} = {}", rhs.trim()),
+            });
+        }
+        defined.extend(Self::completions(prefix));
+        defined
+    }
+
     /// Provide formatted hover information for token under cursor.
     pub fn hover(document: &str, position: Position) -> Option<Hover> {
         let line = document.lines().nth(position.line)?;
@@ -285,7 +321,15 @@ impl UraeLanguageServer {
             return None;
         }
 
+        // Evaluate in document order so definitions on earlier lines are in scope.
         let mut session = UraeSession::new();
+        for earlier in document.lines().take(position.line) {
+            let earlier = earlier.trim();
+            if earlier.is_empty() || earlier.starts_with('#') || earlier.starts_with("//") {
+                continue;
+            }
+            session.execute_line(earlier);
+        }
         let res = session.execute_line(trimmed);
 
         if !res.is_error {

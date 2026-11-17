@@ -131,8 +131,8 @@ graph TD
 | **Polynomials & Ideals** | Sparse univariate/multivariate polynomials, Gröbner bases, resultants, Sturm chains | Yun square-free decomposition, subresultant GCD, Buchberger + Gebauer-Möller criteria |
 | **Linear Algebra** | `SymbolicMatrix` (`det`, `inv`, `rref`, `rank`, `nullspace`, `charpoly`, `eigenvalues`), Lie Cartan matrices | Bareiss elimination, Faddeev-LeVerrier / cofactor expansion, exact RREF |
 | **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines, FDM/FEM | Adaptive embedded RK5(4), stiff implicit Runge-Kutta, symplectic Hamiltonian integration |
-| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proofs | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
-| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 export |
+| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proof export (skeleton only, see `docs/PLANNING.md` A9) | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
+| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 notebook export (unformatted stubs, `docs/PLANNING.md` A11) |
 
 ---
 
@@ -221,6 +221,8 @@ The **URAE Notebook** (`urae-notebook`) is an interactive desktop and browser GU
     30. *1D Viscous Burgers PDE & Shock Dissipation*
     31. *Lorenz Strange Attractor & Meta-Integrator Regimes*
     32. *Hexagonal Grids (Hecs) & URScript SE(3) Robotics*
+
+    *These are notebook titles. Several describe an illustration, not a general solver: there is no Navier–Stokes solver, and the FEA solver is a small dense one. See [`ROADMAP.md`](ROADMAP.md) section 2.1 for what exists.*
 - **Fuzzy Command Palette (`Ctrl+K` / `Cmd+K`)**: Search and execute commands, templates, and example notebooks instantaneously.
 
 ---

@@ -3,8 +3,10 @@
 //! Analytical calculus (differentiation, Taylor series, Gruntz limits, Risch integration)
 //! and Discrete calculus (finite differences, Gosper summation).
 
+use crate::simplify::Simplifier;
 use algebra_core::{
-    AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, MathStep, StepByStepResult, SymbolId,
+    AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, MathStep, Number, StepByStepResult,
+    SymbolId,
 };
 
 /// Analytical calculus extension trait for symbolic expressions.
@@ -836,7 +838,6 @@ impl SymbolicCalculus for ExprGraph {
         lower: ExprId,
         upper: ExprId,
     ) -> AlgebraResult<ExprId> {
-        let node = self.get(expr);
         let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
         let k = self.symbol(&wrt_name);
 
@@ -858,21 +859,168 @@ impl SymbolicCalculus for ExprGraph {
                 let lower_sum = self.div(lower_num, two);
                 Ok(self.sub(result, lower_sum))
             }
-        } else if match &node.kind {
-            ExprKind::Symbol(s) => *s != wrt,
-            _ => true,
-        } {
+        } else if !self.has_symbol(expr, wrt) {
             // sum_{k=a}^b C = C * (b - a + 1)
             let one = self.integer(1);
             let diff = self.sub(upper, lower);
             let count = self.add([diff, one]);
             Ok(self.mul([expr, count]))
+        } else if let Some(coeffs) = polynomial_coefficients(self, expr, wrt) {
+            sum_polynomial(self, &coeffs, lower, upper)
         } else {
             Err(AlgebraError::EvaluationError(
-                "Gosper hypergeometric summation heuristic fallback".into(),
+                "summation: only polynomial summands in the summation variable are supported"
+                    .into(),
             ))
         }
     }
+}
+
+/// Largest power of the summation variable summed in closed form (Faulhaber coefficients stay in `i64`).
+const MAX_FAULHABER_DEGREE: usize = 12;
+
+/// Coefficients `[c_0, c_1, ...]` of `expr` as a polynomial in `var` whose coefficients are free of
+/// `var`, or `None` if `expr` is not such a polynomial (a negative or symbolic power, a function of
+/// `var`, a division by something containing `var`).
+fn polynomial_coefficients(graph: &ExprGraph, expr: ExprId, var: SymbolId) -> Option<Vec<ExprId>> {
+    fn add(graph: &ExprGraph, a: &[ExprId], b: &[ExprId]) -> Vec<ExprId> {
+        (0..a.len().max(b.len()))
+            .map(|i| match (a.get(i), b.get(i)) {
+                (Some(&x), Some(&y)) => graph.add([x, y]),
+                (Some(&x), None) | (None, Some(&x)) => x,
+                (None, None) => graph.integer(0),
+            })
+            .collect()
+    }
+    fn mul(graph: &ExprGraph, a: &[ExprId], b: &[ExprId]) -> Vec<ExprId> {
+        let mut out = vec![graph.integer(0); a.len() + b.len() - 1];
+        for (i, &x) in a.iter().enumerate() {
+            for (j, &y) in b.iter().enumerate() {
+                out[i + j] = graph.add([out[i + j], graph.mul([x, y])]);
+            }
+        }
+        out
+    }
+    if !graph.has_symbol(expr, var) {
+        return Some(vec![expr]);
+    }
+    let node = graph.get(expr);
+    match &node.kind {
+        ExprKind::Symbol(_) => Some(vec![graph.integer(0), graph.integer(1)]),
+        ExprKind::Neg(inner) => {
+            let c = polynomial_coefficients(graph, *inner, var)?;
+            Some(c.into_iter().map(|x| graph.neg(x)).collect())
+        }
+        ExprKind::Add(terms) => {
+            let mut acc = vec![graph.integer(0)];
+            for &term in terms.iter() {
+                acc = add(graph, &acc, &polynomial_coefficients(graph, term, var)?);
+            }
+            Some(acc)
+        }
+        ExprKind::Sub(l, r) => {
+            let a = polynomial_coefficients(graph, *l, var)?;
+            let b: Vec<ExprId> = polynomial_coefficients(graph, *r, var)?
+                .into_iter()
+                .map(|x| graph.neg(x))
+                .collect();
+            Some(add(graph, &a, &b))
+        }
+        ExprKind::Mul(factors) => {
+            let mut acc = vec![graph.integer(1)];
+            for &factor in factors.iter() {
+                acc = mul(graph, &acc, &polynomial_coefficients(graph, factor, var)?);
+            }
+            Some(acc)
+        }
+        ExprKind::Div(num, den) if !graph.has_symbol(*den, var) => {
+            let c = polynomial_coefficients(graph, *num, var)?;
+            Some(c.into_iter().map(|x| graph.div(x, *den)).collect())
+        }
+        ExprKind::Pow(base, exponent) => {
+            let ExprKind::Number(Number::Integer(m)) = graph.get(*exponent).kind else {
+                return None;
+            };
+            let m = usize::try_from(m)
+                .ok()
+                .filter(|&m| m <= MAX_FAULHABER_DEGREE)?;
+            let base = polynomial_coefficients(graph, *base, var)?;
+            let mut acc = vec![graph.integer(1)];
+            for _ in 0..m {
+                acc = mul(graph, &acc, &base);
+            }
+            Some(acc)
+        }
+        _ => None,
+    }
+}
+
+/// Faulhaber: `sum_{k=1}^{n} k^m` as an expression in `n`, for `m <= MAX_FAULHABER_DEGREE`.
+fn power_sum(graph: &ExprGraph, m: usize, n: ExprId) -> AlgebraResult<ExprId> {
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    use num_traits::{One, ToPrimitive, Zero};
+    if m > MAX_FAULHABER_DEGREE {
+        return Err(AlgebraError::EvaluationError(format!(
+            "summation: powers above {MAX_FAULHABER_DEGREE} are not supported"
+        )));
+    }
+    let binomial = |n: usize, r: usize| -> BigInt {
+        let mut acc = BigInt::one();
+        for i in 0..r {
+            acc = acc * BigInt::from(n - i) / BigInt::from(i + 1);
+        }
+        acc
+    };
+    // Bernoulli numbers from sum_{i=0}^{j} C(j+1, i) B_i = 0 (B_1 = -1/2), then B_1 is flipped to
+    // +1/2 for the convention in S_m(n) below.
+    let mut bernoulli: Vec<BigRational> = Vec::with_capacity(m + 1);
+    for j in 0..=m {
+        if j == 0 {
+            bernoulli.push(BigRational::one());
+            continue;
+        }
+        let mut acc = BigRational::zero();
+        for (i, b) in bernoulli.iter().enumerate() {
+            acc += b * BigRational::from(binomial(j + 1, i));
+        }
+        bernoulli.push(-acc / BigRational::from(BigInt::from(j + 1)));
+    }
+    if m >= 1 {
+        bernoulli[1] = BigRational::new(BigInt::one(), BigInt::from(2));
+    }
+    // S_m(n) = 1/(m+1) * sum_{j=0}^{m} C(m+1, j) B_j n^(m+1-j)
+    let overflow = || AlgebraError::EvaluationError("summation: coefficient overflow".into());
+    let mut terms = Vec::new();
+    for (j, b) in bernoulli.iter().enumerate() {
+        let coefficient =
+            b * BigRational::from(binomial(m + 1, j)) / BigRational::from(BigInt::from(m + 1));
+        if coefficient.is_zero() {
+            continue;
+        }
+        let num = coefficient.numer().to_i64().ok_or_else(overflow)?;
+        let den = coefficient.denom().to_i64().ok_or_else(overflow)?;
+        let power = graph.pow(n, graph.integer((m + 1 - j) as i64));
+        terms.push(graph.mul([graph.rational(num, den), power]));
+    }
+    Ok(graph.add(terms))
+}
+
+/// `sum_{k=lower}^{upper} P(k)` for a polynomial with the given coefficients.
+fn sum_polynomial(
+    graph: &ExprGraph,
+    coeffs: &[ExprId],
+    lower: ExprId,
+    upper: ExprId,
+) -> AlgebraResult<ExprId> {
+    let below = graph.sub(lower, graph.integer(1));
+    let mut total = Vec::new();
+    for (m, &c) in coeffs.iter().enumerate() {
+        let span = graph.sub(power_sum(graph, m, upper)?, power_sum(graph, m, below)?);
+        total.push(graph.mul([c, span]));
+    }
+    let sum = graph.add(total);
+    Ok(Simplifier::simplify(graph, sum).unwrap_or(sum))
 }
 
 /// Fractional Calculus for non-integer order derivatives $D^\alpha f(x)$.
@@ -901,7 +1049,9 @@ impl FractionalCalculus {
 
         let sub_d = graph.substitute(d_expr, var, tau_sym);
         let t_minus_tau = graph.sub(var_sym, tau_sym);
-        let exp = graph.float((alpha - (n as f64)).abs());
+        // Caputo kernel: (t - tau)^(n - alpha - 1) in the numerator, i.e. a denominator power
+        // of alpha + 1 - n.
+        let exp = graph.float(alpha + 1.0 - (n as f64));
         let pow_term = graph.pow(t_minus_tau, exp);
 
         let integrand = graph.div(sub_d, pow_term);
@@ -970,7 +1120,151 @@ fn collect_denominators(graph: &ExprGraph, expr: ExprId, wrt: SymbolId, out: &mu
     }
 }
 
-fn taylor_coeffs_vec(
+/// Exact rational value of a numeric literal expression, if it is one.
+pub(crate) fn exact_rational(graph: &ExprGraph, e: ExprId) -> Option<num_rational::BigRational> {
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    match &graph.get(e).kind {
+        ExprKind::Number(Number::Integer(i)) => Some(BigRational::from(BigInt::from(*i))),
+        ExprKind::Number(Number::BigInteger(b)) => Some(BigRational::from(b.clone())),
+        ExprKind::Number(Number::Rational(n, d)) => {
+            Some(BigRational::new(BigInt::from(*n), BigInt::from(*d)))
+        }
+        ExprKind::Number(Number::BigRational(r)) => Some((**r).clone()),
+        ExprKind::Neg(inner) => exact_rational(graph, *inner).map(|r| -r),
+        _ => None,
+    }
+}
+
+pub(crate) fn rational_expr(
+    graph: &ExprGraph,
+    r: &num_rational::BigRational,
+) -> AlgebraResult<ExprId> {
+    use num_traits::ToPrimitive;
+    match (r.numer().to_i64(), r.denom().to_i64()) {
+        (Some(n), Some(d)) => Ok(graph.rational(n, d)),
+        _ => Err(AlgebraError::EvaluationError(
+            "pade: coefficient too large".into(),
+        )),
+    }
+}
+
+/// Padé approximant `[l/m]` of `expr` about `point`: the rational function
+/// `P(x - point) / Q(x - point)` with `deg P <= l`, `deg Q <= m`, `Q(0) = 1`, whose Taylor series
+/// agrees with that of `expr` through order `l + m`.
+///
+/// The Taylor coefficients must be exact rationals. Returns an error when they are not, or when
+/// the approximant does not exist (a singular coefficient system).
+pub fn pade_approximant(
+    graph: &ExprGraph,
+    expr: ExprId,
+    var: SymbolId,
+    point: ExprId,
+    l: usize,
+    m: usize,
+) -> AlgebraResult<ExprId> {
+    use num_rational::BigRational;
+    use num_traits::{One, Zero};
+    let fail = |why: &str| AlgebraError::EvaluationError(format!("pade: {why}"));
+    let raw = taylor_coeffs_vec(graph, expr, var, point, l + m);
+    let c: Vec<BigRational> = raw
+        .iter()
+        .map(|&e| exact_rational(graph, e))
+        .collect::<Option<_>>()
+        .ok_or_else(|| fail("the Taylor coefficients are not all exact rationals"))?;
+    let coeff = |i: isize| -> BigRational {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| c.get(i).cloned())
+            .unwrap_or_else(BigRational::zero)
+    };
+
+    // Denominator q_1..q_m from sum_{j=0}^{m} q_j c_{k-j} = 0 for k = l+1..=l+m (q_0 = 1).
+    let mut q = vec![BigRational::one()];
+    if m > 0 {
+        let mut a: Vec<Vec<BigRational>> = (0..m)
+            .map(|row| {
+                let k = (l + 1 + row) as isize;
+                let mut r: Vec<BigRational> = (1..=m as isize).map(|j| coeff(k - j)).collect();
+                r.push(-coeff(k));
+                r
+            })
+            .collect();
+        // Gauss-Jordan elimination. A rank-deficient system still has solutions (the approximant
+        // is then not unique but its value is): free unknowns are set to zero.
+        let mut pivot_row = 0;
+        let mut pivot_cols = Vec::new();
+        for col in 0..m {
+            let Some(found) = (pivot_row..m).find(|&r| !a[r][col].is_zero()) else {
+                continue;
+            };
+            a.swap(pivot_row, found);
+            let lead = a[pivot_row][col].clone();
+            for v in a[pivot_row].iter_mut() {
+                *v = v.clone() / lead.clone();
+            }
+            for r in 0..m {
+                if r != pivot_row && !a[r][col].is_zero() {
+                    let factor = a[r][col].clone();
+                    let reference = a[pivot_row].clone();
+                    for (v, pv) in a[r].iter_mut().zip(reference) {
+                        *v = v.clone() - factor.clone() * pv;
+                    }
+                }
+            }
+            pivot_cols.push(col);
+            pivot_row += 1;
+        }
+        if a[pivot_row..].iter().any(|row| !row[m].is_zero()) {
+            return Err(fail("the approximant does not exist (inconsistent system)"));
+        }
+        let mut unknowns = vec![BigRational::zero(); m];
+        for (row, &col) in pivot_cols.iter().enumerate() {
+            unknowns[col] = a[row][m].clone();
+        }
+        q.extend(unknowns);
+    }
+    // Numerator p_i = sum_{j=0}^{min(i, m)} q_j c_{i-j}.
+    let p: Vec<BigRational> = (0..=l)
+        .map(|i| {
+            (0..=i.min(m))
+                .map(|j| q[j].clone() * coeff((i - j) as isize))
+                .fold(BigRational::zero(), |acc, v| acc + v)
+        })
+        .collect();
+
+    let wrt_name = graph.symbols.resolve(var).unwrap_or_default();
+    let shifted = if point == graph.integer(0) {
+        graph.symbol(&wrt_name)
+    } else {
+        graph.sub(graph.symbol(&wrt_name), point)
+    };
+    let polynomial = |coeffs: &[BigRational]| -> AlgebraResult<ExprId> {
+        let mut terms = Vec::new();
+        for (i, r) in coeffs.iter().enumerate() {
+            if r.is_zero() {
+                continue;
+            }
+            let value = rational_expr(graph, r)?;
+            terms.push(if i == 0 {
+                value
+            } else {
+                graph.mul([value, graph.pow(shifted, graph.integer(i as i64))])
+            });
+        }
+        Ok(if terms.is_empty() {
+            graph.integer(0)
+        } else {
+            graph.add(terms)
+        })
+    };
+    let numerator = polynomial(&p)?;
+    let denominator = polynomial(&q)?;
+    let result = graph.div(numerator, denominator);
+    Ok(Simplifier::simplify(graph, result).unwrap_or(result))
+}
+
+pub(crate) fn taylor_coeffs_vec(
     graph: &ExprGraph,
     expr: ExprId,
     wrt: SymbolId,

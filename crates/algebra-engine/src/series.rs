@@ -5,7 +5,7 @@
 //! **Holonomic D-finite Functions**, and **Linear Recurrence Solvers**.
 
 use crate::calculus::SymbolicCalculus;
-use algebra_core::{AlgebraResult, ExprGraph, ExprId, SymbolId};
+use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, SymbolId};
 
 /// Series expansion and reversion algorithms extension trait.
 pub trait SymbolicSeries {
@@ -50,38 +50,74 @@ impl SymbolicSeries for ExprGraph {
         out_var: SymbolId,
         order: u32,
     ) -> AlgebraResult<ExprId> {
-        let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
+        use num_rational::BigRational;
+        use num_traits::{One, Zero};
+        let fail = |why: &str| AlgebraError::EvaluationError(format!("lagrange inversion: {why}"));
+        let order = order as usize;
         let out_name = self.symbols.resolve(out_var).unwrap_or_default();
-        let w = self.symbol(&wrt_name);
         let y = self.symbol(&out_name);
-
-        let zero = self.integer(0);
-        let w_over_f = self.div(w, expr);
-
-        let mut terms = Vec::new();
-        let mut factorial = 1i64;
-
-        for n in 1..=order {
-            if n > 1 {
-                factorial *= n as i64;
-            }
-
-            let n_expr = self.integer(n as i64);
-            let pow_ratio = self.pow(w_over_f, n_expr);
-
-            let mut deriv = pow_ratio;
-            for _ in 0..(n - 1) {
-                deriv = self.diff(deriv, wrt);
-            }
-
-            let eval_at_zero = self.substitute(deriv, wrt, zero);
-            let coeff = self.div(eval_at_zero, self.integer(factorial));
-            let y_pow = self.pow(y, n_expr);
-            let term = self.mul([coeff, y_pow]);
-            terms.push(term);
+        if order == 0 {
+            return Ok(self.integer(0));
         }
 
-        Ok(self.add(terms))
+        // Taylor coefficients of f(w) about 0, which must be exact rationals with f(0) = 0.
+        let coeffs: Vec<BigRational> =
+            crate::calculus::taylor_coeffs_vec(self, expr, wrt, self.integer(0), order)
+                .iter()
+                .map(|&c| crate::calculus::exact_rational(self, c))
+                .collect::<Option<_>>()
+                .ok_or_else(|| fail("the Taylor coefficients of f are not all exact rationals"))?;
+        if !coeffs[0].is_zero() {
+            return Err(fail("f(0) must be 0"));
+        }
+        if coeffs.get(1).is_none_or(|c| c.is_zero()) {
+            return Err(fail("f'(0) must be non-zero for f to be invertible near 0"));
+        }
+
+        // f(w) = w g(w), so g_j = f_{j+1}; w = sum_n y^n/n [w^(n-1)] g(w)^(-n).
+        let len = order; // g is needed through degree order - 1
+        let g: Vec<BigRational> = (0..len).map(|j| coeffs[j + 1].clone()).collect();
+        let mul = |a: &[BigRational], b: &[BigRational]| -> Vec<BigRational> {
+            let mut out = vec![BigRational::zero(); len];
+            for (i, x) in a.iter().enumerate() {
+                for (j, z) in b.iter().enumerate() {
+                    if i + j < len {
+                        out[i + j] += x * z;
+                    }
+                }
+            }
+            out
+        };
+        // Power-series inverse of g (g_0 != 0).
+        let mut inverse = vec![BigRational::zero(); len];
+        inverse[0] = BigRational::one() / g[0].clone();
+        for k in 1..len {
+            let mut acc = BigRational::zero();
+            for j in 1..=k {
+                acc += &g[j] * &inverse[k - j];
+            }
+            inverse[k] = -acc / g[0].clone();
+        }
+
+        let mut terms = Vec::new();
+        let mut power = inverse.clone(); // g^(-1)
+        for n in 1..=order {
+            if n > 1 {
+                power = mul(&power, &inverse);
+            }
+            let coefficient = power[n - 1].clone() / BigRational::from_integer((n as i64).into());
+            if coefficient.is_zero() {
+                continue;
+            }
+            let c = crate::calculus::rational_expr(self, &coefficient)?;
+            terms.push(self.mul([c, self.pow(y, self.integer(n as i64))]));
+        }
+        Ok(if terms.is_empty() {
+            self.integer(0)
+        } else {
+            let sum = self.add(terms);
+            crate::simplify::Simplifier::simplify(self, sum).unwrap_or(sum)
+        })
     }
 
     fn laurent_series(
@@ -116,28 +152,22 @@ impl SymbolicSeries for ExprGraph {
 
     fn puiseux_series(
         &self,
-        _expr: ExprId,
+        expr: ExprId,
         wrt: SymbolId,
         point: ExprId,
         denom_q: u32,
         order: u32,
     ) -> AlgebraResult<ExprId> {
-        let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
-        let x = self.symbol(&wrt_name);
-        let x_minus_a = self.sub(x, point);
-
-        let mut terms = Vec::new();
-        for p in 0..=order {
-            let frac = self.rational(p as i64, denom_q as i64);
-            let pow_term = self.pow(x_minus_a, frac);
-            let coeff = self.symbol(&format!("a_{p}_{denom_q}"));
-            terms.push(self.mul([coeff, pow_term]));
+        match denom_q {
+            // Integer exponents only: a Puiseux series is then the Taylor series.
+            1 => Ok(self.taylor_series(expr, wrt, point, order)),
+            0 => Err(AlgebraError::EvaluationError(
+                "puiseux: the exponent denominator must be at least 1".into(),
+            )),
+            q => Err(AlgebraError::EvaluationError(format!(
+                "puiseux: fractional exponents (denominator {q}) are not implemented; only denominator 1 (the Taylor series) is"
+            ))),
         }
-
-        let big_o_term = self.big_o(wrt, point, order + 1);
-        terms.push(big_o_term);
-
-        Ok(self.add(terms))
     }
 
     fn big_o(&self, wrt: SymbolId, point: ExprId, order: u32) -> ExprId {
@@ -196,18 +226,71 @@ impl RecurrenceSolver {
             .unwrap_or_else(|| "n".to_string());
         let n = graph.symbol(&n_name);
 
-        if coeffs.len() == 1 {
-            // First-order recurrence a_n = c1 * a_{n-1} -> a_n = a_0 * c1^n
-            let c1 = graph.float(coeffs[0]);
-            let a0 = graph.float(*initial_conditions.first().unwrap_or(&1.0));
-            let c1_pow_n = graph.pow(c1, n);
-            Ok(graph.mul([a0, c1_pow_n]))
-        } else {
-            // General order linear recurrence representation: a_0 * r_1^n + a_1 * r_2^n
-            let r1 = graph.float(coeffs[0]);
-            let a0 = graph.float(*initial_conditions.first().unwrap_or(&1.0));
-            let r1_pow_n = graph.pow(r1, n);
-            Ok(graph.mul([a0, r1_pow_n]))
+        let constant = |v: f64| {
+            if v.fract() == 0.0 && v.abs() < 1e15 {
+                graph.integer(v as i64)
+            } else {
+                graph.float(v)
+            }
+        };
+        let simplify = |e: ExprId| crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e);
+        let unsupported = |why: &str| AlgebraError::EvaluationError(format!("recurrence: {why}"));
+
+        match coeffs.len() {
+            0 => Err(unsupported("no coefficients given")),
+            1 => {
+                // a_n = c1 a_{n-1}  =>  a_n = a_0 c1^n
+                let a0 = constant(*initial_conditions.first().unwrap_or(&1.0));
+                Ok(graph.mul([a0, graph.pow(constant(coeffs[0]), n)]))
+            }
+            2 => {
+                // a_n = c1 a_{n-1} + c2 a_{n-2}: characteristic polynomial r^2 = c1 r + c2.
+                let (c1, c2) = (coeffs[0], coeffs[1]);
+                if initial_conditions.len() < 2 {
+                    return Err(unsupported(
+                        "a second-order recurrence needs two initial values",
+                    ));
+                }
+                if c2 == 0.0 {
+                    return Err(unsupported("degenerate recurrence (c2 = 0)"));
+                }
+                let (a0, a1) = (initial_conditions[0], initial_conditions[1]);
+                let discriminant = c1 * c1 + 4.0 * c2;
+                if discriminant == 0.0 {
+                    // Repeated root r = c1/2: a_n = (a_0 + (a_1/r - a_0) n) r^n.
+                    let r = c1 / 2.0;
+                    let slope = constant(a1 / r - a0);
+                    let linear = graph.add([constant(a0), graph.mul([slope, n])]);
+                    return Ok(simplify(graph.mul([linear, graph.pow(constant(r), n)])));
+                }
+                if discriminant < 0.0 {
+                    return Err(unsupported(
+                        "complex characteristic roots are not supported",
+                    ));
+                }
+                // Distinct real roots r1, r2 = (c1 +- sqrt(D)) / 2.
+                let root = discriminant.sqrt();
+                let sqrt_d = if (root.round() * root.round() - discriminant).abs() < 1e-9 {
+                    constant(root.round())
+                } else {
+                    graph.function("sqrt", [constant(discriminant)])
+                };
+                let two = graph.integer(2);
+                let r1 = graph.div(graph.add([constant(c1), sqrt_d]), two);
+                let r2 = graph.div(graph.sub(constant(c1), sqrt_d), two);
+                let gap = graph.sub(r1, r2);
+                // a_n = A r1^n + B r2^n with A + B = a_0 and A r1 + B r2 = a_1.
+                let big_a = graph.div(graph.sub(constant(a1), graph.mul([constant(a0), r2])), gap);
+                let big_b = graph.div(graph.sub(graph.mul([constant(a0), r1]), constant(a1)), gap);
+                let sum = graph.add([
+                    graph.mul([big_a, graph.pow(r1, n)]),
+                    graph.mul([big_b, graph.pow(r2, n)]),
+                ]);
+                Ok(simplify(sum))
+            }
+            order => Err(unsupported(&format!(
+                "order {order} is not supported (orders 1 and 2 are)"
+            ))),
         }
     }
 }

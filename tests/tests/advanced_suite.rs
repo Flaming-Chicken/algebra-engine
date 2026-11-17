@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `algebra-advanced`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "advanced/adele_tests.rs"]
 mod adele_tests;
 

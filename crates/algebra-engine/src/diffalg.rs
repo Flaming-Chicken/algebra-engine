@@ -124,7 +124,134 @@ impl DiffPolynomial {
                 new_terms.push(DiffTerm::new(t.coeff * (*deg as f64), term_factors));
             }
         }
-        Self::new(new_terms)
+        Self::new(new_terms).normalise()
+    }
+
+    /// Canonical form: factors of each term sorted with equal indeterminates merged (their
+    /// exponents added), like terms combined, and zero terms removed.
+    pub fn normalise(&self) -> Self {
+        let mut combined: Vec<DiffTerm> = Vec::new();
+        for term in &self.terms {
+            let mut factors: Vec<(DiffIndeterminate, usize)> = Vec::new();
+            for &(indeterminate, power) in &term.factors {
+                if power == 0 {
+                    continue;
+                }
+                match factors.iter_mut().find(|(i, _)| *i == indeterminate) {
+                    Some((_, existing)) => *existing += power,
+                    None => factors.push((indeterminate, power)),
+                }
+            }
+            factors.sort_by_key(|(i, _)| *i);
+            match combined.iter_mut().find(|c| c.factors == factors) {
+                Some(existing) => existing.coeff += term.coeff,
+                None => combined.push(DiffTerm::new(term.coeff, factors)),
+            }
+        }
+        combined.retain(|t| t.coeff.abs() > 1e-12);
+        combined.sort_by(|a, b| {
+            a.factors
+                .partial_cmp(&b.factors)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Self { terms: combined }
+    }
+
+    /// Whether the polynomial is zero (after normalisation).
+    pub fn is_zero(&self) -> bool {
+        self.normalise().terms.is_empty()
+    }
+
+    /// Sum of two differential polynomials.
+    pub fn add(&self, other: &Self) -> Self {
+        let mut terms = self.terms.clone();
+        terms.extend(other.terms.iter().cloned());
+        Self { terms }.normalise()
+    }
+
+    /// Difference of two differential polynomials.
+    pub fn sub(&self, other: &Self) -> Self {
+        self.add(&other.scale(-1.0))
+    }
+
+    /// Scalar multiple.
+    pub fn scale(&self, factor: f64) -> Self {
+        Self {
+            terms: self
+                .terms
+                .iter()
+                .map(|t| DiffTerm::new(t.coeff * factor, t.factors.clone()))
+                .collect(),
+        }
+        .normalise()
+    }
+
+    /// Product of two differential polynomials.
+    pub fn mul(&self, other: &Self) -> Self {
+        let mut terms = Vec::with_capacity(self.terms.len() * other.terms.len());
+        for a in &self.terms {
+            for b in &other.terms {
+                let mut factors = a.factors.clone();
+                factors.extend(b.factors.iter().copied());
+                terms.push(DiffTerm::new(a.coeff * b.coeff, factors));
+            }
+        }
+        Self { terms }.normalise()
+    }
+
+    /// Degree in one indeterminate.
+    pub fn degree_in(&self, indeterminate: DiffIndeterminate) -> usize {
+        self.terms
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .filter(|(i, _)| *i == indeterminate)
+            .map(|(_, power)| *power)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Coefficient of `indeterminate^power` when the polynomial is viewed as a polynomial in
+    /// that indeterminate with coefficients in the others.
+    pub fn coefficient_of(&self, indeterminate: DiffIndeterminate, power: usize) -> Self {
+        let mut terms = Vec::new();
+        for t in &self.terms {
+            let exponent = t
+                .factors
+                .iter()
+                .find(|(i, _)| *i == indeterminate)
+                .map_or(0, |(_, p)| *p);
+            if exponent == power {
+                let factors = t
+                    .factors
+                    .iter()
+                    .filter(|(i, _)| *i != indeterminate)
+                    .copied()
+                    .collect();
+                terms.push(DiffTerm::new(t.coeff, factors));
+            }
+        }
+        Self { terms }.normalise()
+    }
+
+    /// Initial: the coefficient of the leader raised to the leader degree.
+    pub fn initial(&self) -> Self {
+        match self.leader() {
+            Some(leader) => self.coefficient_of(leader, self.leader_degree()),
+            None => self.clone(),
+        }
+    }
+
+    /// The `k`-th total derivative.
+    pub fn differentiate_times(&self, k: usize) -> Self {
+        (0..k).fold(self.normalise(), |poly, _| poly.differentiate())
+    }
+
+    /// The polynomial `indeterminate^power` with coefficient one.
+    pub fn power_of(indeterminate: DiffIndeterminate, power: usize) -> Self {
+        Self {
+            terms: vec![DiffTerm::new(1.0, vec![(indeterminate, power)])],
+        }
+        .normalise()
     }
 
     /// Separand of $f$: partial derivative with respect to its leader $\operatorname{sep}(f) = \frac{\partial f}{\partial \operatorname{ld}(f)}$.
@@ -166,27 +293,143 @@ impl RittWuReducer {
         true
     }
 
-    /// Compute the Ritt-Wu characteristic set of a differential polynomial system.
-    pub fn characteristic_set(
-        mut system: Vec<DiffPolynomial>,
-    ) -> AlgebraResult<Vec<DiffPolynomial>> {
-        if system.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Sort by leader rank and leader degree
-        system.sort_by(|a, b| {
-            let ld_a = a.leader();
-            let ld_b = b.leader();
-            match (ld_a, ld_b) {
-                (Some(la), Some(lb)) => la.cmp(&lb).then(a.leader_degree().cmp(&b.leader_degree())),
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (None, None) => std::cmp::Ordering::Equal,
+    /// Algebraic pseudo-remainder of `f` by `g` in the indeterminate `x`
+    /// (`deg_x g >= 1`): repeatedly replaces `f` by `init(g) f - lc_x(f) x^(d_f - d_g) g` until
+    /// `deg_x f < deg_x g`. The result satisfies `init(g)^e f = q g + r`.
+    fn pseudo_remainder_in(
+        f: &DiffPolynomial,
+        g: &DiffPolynomial,
+        x: DiffIndeterminate,
+    ) -> DiffPolynomial {
+        let d_g = g.degree_in(x);
+        let initial = g.coefficient_of(x, d_g);
+        let mut remainder = f.normalise();
+        loop {
+            let d_r = remainder.degree_in(x);
+            if d_r < d_g || remainder.is_zero() {
+                return remainder;
             }
-        });
+            let lead = remainder.coefficient_of(x, d_r);
+            let shift = DiffPolynomial::power_of(x, d_r - d_g);
+            let correction = lead.mul(&shift).mul(g);
+            remainder = initial.mul(&remainder).sub(&correction);
+        }
+    }
 
-        Ok(system)
+    /// Differential pseudo-remainder of `f` with respect to `g` (Ritt's reduction): first every
+    /// proper derivative of the leader of `g` is eliminated from `f` using the matching
+    /// derivative of `g` (which is linear in it), highest order first, then `f` is
+    /// pseudo-divided by `g` in the leader itself. The remainder `r` is reduced with respect to
+    /// `g` and `init(g)^a sep(g)^b f - r` lies in the differential ideal generated by `g`.
+    pub fn reduce(f: &DiffPolynomial, g: &DiffPolynomial) -> DiffPolynomial {
+        let Some(leader) = g.leader() else {
+            return f.normalise();
+        };
+        let mut remainder = f.normalise();
+        let highest = remainder
+            .terms
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .filter(|(i, _)| i.var_index == leader.var_index)
+            .map(|(i, _)| i.order)
+            .max()
+            .unwrap_or(0);
+        for order in (leader.order..=highest).rev() {
+            let target = DiffIndeterminate::new(leader.var_index, order);
+            if remainder.degree_in(target) == 0 {
+                continue;
+            }
+            let derived = g.differentiate_times(order - leader.order);
+            if derived.degree_in(target) == 0 {
+                continue;
+            }
+            remainder = Self::pseudo_remainder_in(&remainder, &derived, target);
+        }
+        remainder
+    }
+
+    /// Whether `f` is reduced with respect to `g`: no proper derivative of `ld(g)` occurs in
+    /// `f` and `deg_{ld(g)} f < deg_{ld(g)} g`.
+    pub fn is_reduced_wrt(f: &DiffPolynomial, g: &DiffPolynomial) -> bool {
+        let Some(leader) = g.leader() else {
+            return true;
+        };
+        let no_derivative = f
+            .terms
+            .iter()
+            .flat_map(|t| t.factors.iter())
+            .all(|(i, _)| i.var_index != leader.var_index || i.order <= leader.order);
+        no_derivative && f.degree_in(leader) < g.leader_degree()
+    }
+
+    fn rank_order(a: &DiffPolynomial, b: &DiffPolynomial) -> std::cmp::Ordering {
+        match (a.leader(), b.leader()) {
+            (Some(la), Some(lb)) => la.cmp(&lb).then(a.leader_degree().cmp(&b.leader_degree())),
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    }
+
+    /// Ritt's characteristic-set procedure for a system of differential polynomials: take a
+    /// lowest-ranking autoreduced subset `A`, reduce every other polynomial by `A`, add the
+    /// non-zero remainders to the system and repeat until all remainders vanish. The result is
+    /// an autoreduced set (no member is reduced-away by another) whose ideal-theoretic closure
+    /// contains the system's polynomials up to the initials and separands of its members. A
+    /// non-zero constant in the system makes it inconsistent and is returned alone.
+    pub fn characteristic_set(system: Vec<DiffPolynomial>) -> AlgebraResult<Vec<DiffPolynomial>> {
+        const MAX_ROUNDS: usize = 64;
+        let mut system: Vec<DiffPolynomial> = system
+            .into_iter()
+            .map(|p| p.normalise())
+            .filter(|p| !p.terms.is_empty())
+            .collect();
+        for _ in 0..MAX_ROUNDS {
+            if let Some(constant) = system.iter().find(|p| p.leader().is_none()) {
+                return Ok(vec![constant.clone()]);
+            }
+            system.sort_by(Self::rank_order);
+
+            // Greedy autoreduced subset by increasing rank.
+            let mut basic: Vec<DiffPolynomial> = Vec::new();
+            let mut rest: Vec<DiffPolynomial> = Vec::new();
+            for p in &system {
+                let fits = basic
+                    .iter()
+                    .all(|a| Self::is_reduced_wrt(p, a) && Self::is_reduced_wrt(a, p));
+                if fits {
+                    basic.push(p.clone());
+                } else {
+                    rest.push(p.clone());
+                }
+            }
+
+            let mut remainders = Vec::new();
+            for q in &rest {
+                let mut r = q.clone();
+                // Reduce by the set until stable, highest rank first.
+                for _ in 0..MAX_ROUNDS {
+                    let before = r.clone();
+                    for a in basic.iter().rev() {
+                        r = Self::reduce(&r, a);
+                    }
+                    if r == before {
+                        break;
+                    }
+                }
+                if !r.is_zero() {
+                    remainders.push(r);
+                }
+            }
+            if remainders.is_empty() {
+                return Ok(basic);
+            }
+            system = basic;
+            system.extend(remainders);
+        }
+        Err(algebra_core::error::AlgebraError::EvaluationError(
+            "characteristic set: no fixed point within the round limit".into(),
+        ))
     }
 }
 

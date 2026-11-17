@@ -519,12 +519,16 @@ impl ThemePalette {
             let mut i = 0;
             while i < line.len() {
                 let remaining = &line[i..];
-                let c = remaining.chars().next().unwrap();
+                let Some(c) = remaining.chars().next() else {
+                    break;
+                };
 
                 if c.is_whitespace() {
                     let start = i;
                     while i < line.len() {
-                        let ch = line[i..].chars().next().unwrap();
+                        let Some(ch) = line[i..].chars().next() else {
+                            break;
+                        };
                         if ch.is_whitespace() {
                             i += ch.len_utf8();
                         } else {
@@ -549,7 +553,9 @@ impl ThemePalette {
                 {
                     let start = i;
                     while i < line.len() {
-                        let ch = line[i..].chars().next().unwrap();
+                        let Some(ch) = line[i..].chars().next() else {
+                            break;
+                        };
                         if ch.is_ascii_digit() || ch == '.' {
                             i += ch.len_utf8();
                         } else {
@@ -568,7 +574,9 @@ impl ThemePalette {
                 } else if c.is_alphabetic() || c == '_' {
                     let start = i;
                     while i < line.len() {
-                        let ch = line[i..].chars().next().unwrap();
+                        let Some(ch) = line[i..].chars().next() else {
+                            break;
+                        };
                         if ch.is_alphanumeric() || ch == '_' {
                             i += ch.len_utf8();
                         } else {
@@ -605,7 +613,9 @@ impl ThemePalette {
                     let start = i;
                     i += 1;
                     while i < line.len() {
-                        let ch = line[i..].chars().next().unwrap();
+                        let Some(ch) = line[i..].chars().next() else {
+                            break;
+                        };
                         if ch.is_ascii_digit() {
                             i += ch.len_utf8();
                         } else {

@@ -136,12 +136,12 @@ impl StateSpaceSystem {
                 }
             }
         } else {
-            // General matrix trace heuristic
-            let tr: f64 = (0..n).map(|i| self.a[i][i]).sum();
-            if self.is_continuous() {
-                tr < 0.0
-            } else {
-                tr.abs() < (n as f64)
+            // Orders above two: Routh-Hurwitz (continuous) or Schur-Cohn (discrete) on the
+            // characteristic polynomial, not a trace heuristic.
+            let poly = Self::characteristic_polynomial(&self.a);
+            match self.time_domain {
+                TimeDomain::Continuous => Self::is_hurwitz(&poly),
+                TimeDomain::Discrete { .. } => Self::is_schur(&poly),
             }
         }
     }
@@ -310,56 +310,16 @@ impl StateSpaceSystem {
     }
 
     /// Frequency response evaluation at angular frequency omega (rad/s).
-    /// For a 2x2 SISO system: returns (magnitude_db, phase_deg).
+    /// For a SISO system of any order: returns (magnitude_db, phase_deg); a MIMO system returns (0, 0), use [`StateSpaceSystem::frequency_response`].
     pub fn eval_frequency_response_siso(&self, omega: f64) -> (f64, f64) {
-        if !self.is_siso() || self.num_states() != 2 {
+        if !self.is_siso() {
             return (0.0, 0.0);
         }
-
-        // H(s) = C (s I - A)^(-1) B + D, evaluated at s = i*omega
-        // For 2x2: det(i*w*I - A) = (i*w - a00)(i*w - a11) - a01*a10
-        //                         = -w^2 - i*w*(a00 + a11) + det(A)
-        let tr = self.a[0][0] + self.a[1][1];
-        let det_a = self.a[0][0] * self.a[1][1] - self.a[0][1] * self.a[1][0];
-
-        let den_re = det_a - omega * omega;
-        let den_im = -omega * tr;
-        let den_mag_sq = den_re * den_re + den_im * den_im;
-
-        if den_mag_sq < 1e-18 {
-            return (100.0, 0.0);
+        match self.frequency_response(omega) {
+            Ok(response) => response[0][0],
+            // On a pole the response is unbounded.
+            Err(_) => (100.0, 0.0),
         }
-
-        // (sI - A)^(-1) numerator elements
-        // adj(sI - A) = [i*w - a11,  a01;  a10,  i*w - a00]
-        let b0 = self.b[0][0];
-        let b1 = self.b[1][0];
-        let c0 = self.c[0][0];
-        let c1 = self.c[0][1];
-        let d = self.d[0][0];
-
-        let adj_b_0_re = -self.a[1][1] * b0 + self.a[0][1] * b1;
-        let adj_b_0_im = omega * b0;
-
-        let adj_b_1_re = self.a[1][0] * b0 - self.a[0][0] * b1;
-        let adj_b_1_im = omega * b1;
-
-        let num_re = c0 * adj_b_0_re + c1 * adj_b_1_re;
-        let num_im = c0 * adj_b_0_im + c1 * adj_b_1_im;
-
-        // (num_re + i*num_im) / (den_re + i*den_im)
-        let h_re = (num_re * den_re + num_im * den_im) / den_mag_sq + d;
-        let h_im = (num_im * den_re - num_re * den_im) / den_mag_sq;
-
-        let mag = (h_re * h_re + h_im * h_im).sqrt();
-        let mag_db = if mag > 1e-12 {
-            20.0 * mag.log10()
-        } else {
-            -240.0
-        };
-        let phase_deg = h_im.atan2(h_re).to_degrees();
-
-        (mag_db, phase_deg)
     }
 
     /// State-feedback pole placement via Ackermann formula for desired closed-loop poles.
@@ -378,29 +338,240 @@ impl StateSpaceSystem {
             ));
         }
         if n == 2 {
-            self.pole_placement_2x2_siso(desired_poles[0], desired_poles[1])
-                .ok_or_else(|| "System is uncontrollable or singular.".to_string())
-        } else {
-            if !self.is_controllable() {
-                return Err("System is not completely controllable.".to_string());
-            }
-            Err(
-                "Ackermann pole placement currently implemented for 2x2 state-space systems."
-                    .to_string(),
-            )
+            return self
+                .pole_placement_2x2_siso(desired_poles[0], desired_poles[1])
+                .ok_or_else(|| "System is uncontrollable or singular.".to_string());
         }
+        if !self.is_controllable() {
+            return Err("System is not completely controllable.".to_string());
+        }
+
+        // K = [0 ... 0 1] C^{-1} phi(A), with phi(s) = prod (s - p_i) and C the controllability
+        // matrix. Row vector y solves C^T y = e_n, then K = y^T phi(A).
+        let c_mat = self.controllability_matrix();
+        let c_transpose: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| c_mat[j][i]).collect())
+            .collect();
+        let mut last = vec![0.0; n];
+        last[n - 1] = 1.0;
+        let y = Self::solve_real(&c_transpose, &last)
+            .ok_or_else(|| "System is uncontrollable or singular.".to_string())?;
+
+        // phi(A) built by repeated multiplication of (A - p_i I).
+        let identity: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+            .collect();
+        let mut phi = identity.clone();
+        for &p in desired_poles {
+            let shifted: Vec<Vec<f64>> = (0..n)
+                .map(|i| (0..n).map(|j| self.a[i][j] - p * identity[i][j]).collect())
+                .collect();
+            phi = Self::matmul(&phi, &shifted);
+        }
+        Ok((0..n)
+            .map(|j| (0..n).map(|i| y[i] * phi[i][j]).sum())
+            .collect())
     }
 
-    /// Multi-channel frequency response evaluation at angular frequency omega (rad/s).
-    pub fn frequency_response(&self, omega: f64) -> Result<Vec<Vec<(f64, f64)>>, String> {
-        let p = self.num_outputs();
-        let m = self.num_inputs();
-        if self.is_siso() && self.num_states() == 2 {
-            let siso_res = self.eval_frequency_response_siso(omega);
-            Ok(vec![vec![siso_res]])
-        } else {
-            Ok(vec![vec![(0.0, 0.0); m]; p])
+    /// Coefficients `[a_n, ..., a_1, a_0]` (highest power first, `a_n = 1`) of `det(sI - A)`,
+    /// by the Faddeev-LeVerrier recurrence.
+    pub fn characteristic_polynomial(a: &[Vec<f64>]) -> Vec<f64> {
+        let n = a.len();
+        let mut coefficients = vec![1.0];
+        let mut m: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+            .collect();
+        for k in 1..=n {
+            let am = Self::matmul(a, &m);
+            let trace: f64 = (0..n).map(|i| am[i][i]).sum();
+            let c = -trace / k as f64;
+            coefficients.push(c);
+            m = am;
+            for (i, row) in m.iter_mut().enumerate() {
+                row[i] += c;
+            }
         }
+        coefficients
+    }
+
+    /// Routh-Hurwitz: every root of the polynomial (highest power first) has negative real part.
+    /// A zero or negative entry in the first column, including a zero coefficient, fails.
+    pub fn is_hurwitz(poly: &[f64]) -> bool {
+        let n = poly.len().saturating_sub(1);
+        if n == 0 {
+            return true;
+        }
+        if poly[0] <= 0.0 || poly.iter().any(|&c| c <= 0.0) {
+            return false;
+        }
+        let mut upper: Vec<f64> = poly.iter().step_by(2).copied().collect();
+        let mut lower: Vec<f64> = poly.iter().skip(1).step_by(2).copied().collect();
+        for _ in 1..n {
+            if lower.is_empty() || lower[0] <= 1e-14 {
+                return false;
+            }
+            let ratio = upper[0] / lower[0];
+            let width = upper.len().max(lower.len());
+            let mut next = Vec::with_capacity(width);
+            for k in 1..width {
+                let u = upper.get(k).copied().unwrap_or(0.0);
+                let l = lower.get(k).copied().unwrap_or(0.0);
+                next.push(u - ratio * l);
+            }
+            if next.is_empty() {
+                next.push(0.0);
+            }
+            upper = lower;
+            lower = next;
+        }
+        lower.first().is_none_or(|&last| last > 1e-14) && upper[0] > 0.0
+    }
+
+    /// Schur-Cohn: every root of the polynomial (highest power first) lies strictly inside the
+    /// unit circle.
+    pub fn is_schur(poly: &[f64]) -> bool {
+        // Ascending coefficient order for the reduction.
+        let mut a: Vec<f64> = poly.iter().rev().copied().collect();
+        while a.len() > 1 {
+            let n = a.len() - 1;
+            let (a0, an) = (a[0], a[n]);
+            if an == 0.0 || a0.abs() >= an.abs() {
+                return false;
+            }
+            a = (0..n).map(|k| an * a[k + 1] - a0 * a[n - 1 - k]).collect();
+        }
+        true
+    }
+
+    /// Solve `M x = b` by Gaussian elimination with partial pivoting; `None` if singular.
+    fn solve_real(m: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
+        let n = b.len();
+        let mut aug: Vec<Vec<f64>> = (0..n)
+            .map(|i| {
+                let mut row = m[i].clone();
+                row.push(b[i]);
+                row
+            })
+            .collect();
+        for col in 0..n {
+            let pivot =
+                (col..n).max_by(|&i, &j| aug[i][col].abs().total_cmp(&aug[j][col].abs()))?;
+            if aug[pivot][col].abs() < 1e-12 {
+                return None;
+            }
+            aug.swap(col, pivot);
+            for row in 0..n {
+                if row != col {
+                    let factor = aug[row][col] / aug[col][col];
+                    for k in col..=n {
+                        let delta = factor * aug[col][k];
+                        aug[row][k] -= delta;
+                    }
+                }
+            }
+        }
+        Some((0..n).map(|i| aug[i][n] / aug[i][i]).collect())
+    }
+
+    /// Solve `(s I - A) X = B` for complex `s = (re, im)`; `X` is `n x m` of `(re, im)` pairs.
+    fn solve_resolvent(&self, s: (f64, f64)) -> Option<Vec<Vec<(f64, f64)>>> {
+        type Z = (f64, f64);
+        let mul = |a: Z, b: Z| (a.0 * b.0 - a.1 * b.1, a.0 * b.1 + a.1 * b.0);
+        let div = |a: Z, b: Z| {
+            let d = b.0 * b.0 + b.1 * b.1;
+            ((a.0 * b.0 + a.1 * b.1) / d, (a.1 * b.0 - a.0 * b.1) / d)
+        };
+        let n = self.num_states();
+        let m = self.num_inputs();
+        let mut aug: Vec<Vec<Z>> = (0..n)
+            .map(|i| {
+                let mut row: Vec<Z> = (0..n)
+                    .map(|j| {
+                        let diag = if i == j { s } else { (0.0, 0.0) };
+                        (diag.0 - self.a[i][j], diag.1)
+                    })
+                    .collect();
+                row.extend((0..m).map(|k| (self.b[i][k], 0.0)));
+                row
+            })
+            .collect();
+        for col in 0..n {
+            let pivot = (col..n).max_by(|&i, &j| {
+                let (p, q) = (aug[i][col], aug[j][col]);
+                (p.0 * p.0 + p.1 * p.1).total_cmp(&(q.0 * q.0 + q.1 * q.1))
+            })?;
+            let p = aug[pivot][col];
+            if p.0 * p.0 + p.1 * p.1 < 1e-24 {
+                return None;
+            }
+            aug.swap(col, pivot);
+            for row in 0..n {
+                if row != col {
+                    let factor = div(aug[row][col], aug[col][col]);
+                    for k in col..n + m {
+                        let delta = mul(factor, aug[col][k]);
+                        aug[row][k] = (aug[row][k].0 - delta.0, aug[row][k].1 - delta.1);
+                    }
+                }
+            }
+        }
+        Some(
+            (0..n)
+                .map(|i| (0..m).map(|k| div(aug[i][n + k], aug[i][i])).collect())
+                .collect(),
+        )
+    }
+
+    /// Transfer matrix `H = C (sI - A)^-1 B + D` at angular frequency `omega` as complex
+    /// entries `(re, im)`: `s = j omega` for continuous systems and `z = e^{j omega T}` for
+    /// discrete ones. At a pole the resolvent is singular and an error is returned.
+    pub fn transfer_matrix(&self, omega: f64) -> Result<Vec<Vec<(f64, f64)>>, String> {
+        let s = match self.time_domain {
+            TimeDomain::Continuous => (0.0, omega),
+            TimeDomain::Discrete { sample_time } => {
+                ((omega * sample_time).cos(), (omega * sample_time).sin())
+            }
+        };
+        let x = self
+            .solve_resolvent(s)
+            .ok_or_else(|| "frequency lies on a pole of the system".to_string())?;
+        let (n, m, p) = (self.num_states(), self.num_inputs(), self.num_outputs());
+        Ok((0..p)
+            .map(|i| {
+                (0..m)
+                    .map(|k| {
+                        let mut acc = (self.d[i][k], 0.0);
+                        for j in 0..n {
+                            acc.0 += self.c[i][j] * x[j][k].0;
+                            acc.1 += self.c[i][j] * x[j][k].1;
+                        }
+                        acc
+                    })
+                    .collect()
+            })
+            .collect())
+    }
+
+    /// Multi-channel frequency response at angular frequency `omega` (rad/s): for each output
+    /// and input, `(magnitude in dB, phase in degrees)` of `C (sI - A)^-1 B + D`.
+    pub fn frequency_response(&self, omega: f64) -> Result<Vec<Vec<(f64, f64)>>, String> {
+        Ok(self
+            .transfer_matrix(omega)?
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|(re, im)| {
+                        let magnitude = re.hypot(im);
+                        let db = if magnitude > 1e-12 {
+                            20.0 * magnitude.log10()
+                        } else {
+                            -240.0
+                        };
+                        (db, im.atan2(re).to_degrees())
+                    })
+                    .collect()
+            })
+            .collect())
     }
 
     /// Matrix multiplication C = A * B.

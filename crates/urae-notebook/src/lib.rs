@@ -48,6 +48,7 @@
 
 pub mod app;
 pub mod examples;
+pub mod export;
 pub mod notebook;
 pub mod ui;
 
@@ -279,5 +280,5 @@ fn android_main(app: winit::platform::android::activity::AndroidApp) {
         options,
         Box::new(|cc| Ok(Box::new(app::UraeNotebookApp::new(cc)))),
     )
-    .unwrap();
+    .unwrap_or_else(|e| eprintln!("urae-notebook failed to start: {e}"));
 }

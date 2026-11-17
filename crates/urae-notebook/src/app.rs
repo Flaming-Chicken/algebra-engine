@@ -1325,19 +1325,19 @@ impl eframe::App for UraeNotebookApp {
                     }
                     ui.menu_button("📤 Export", |ui| {
                         if ui.button("LaTeX (.tex)").clicked() {
-                            let tex = format!("\\documentclass{{article}}\n\\begin{{document}}\n{}\n\\end{{document}}", self.state.session.raw_document_text);
+                            let tex = crate::export::to_latex(&self.state.session.raw_document_text);
                             self.trigger_file_download("notebook_export.tex", tex.as_bytes(), "text/x-tex");
                             self.export_notice = Some("Exported to 'notebook_export.tex'".to_string());
                             ui.close();
                         }
                         if ui.button("Python SymPy (.py)").clicked() {
-                            let py = format!("# URAE Exported Python Script\nimport sympy as sp\nx = sp.Symbol('x')\n# Document Text:\n\"\"\"{}\"\"\"", self.state.session.raw_document_text);
+                            let py = crate::export::to_sympy(&self.state.session.raw_document_text);
                             self.trigger_file_download("notebook_export.py", py.as_bytes(), "text/x-python");
                             self.export_notice = Some("Exported to 'notebook_export.py'".to_string());
                             ui.close();
                         }
                         if ui.button("Lean 4 Proof (.lean)").clicked() {
-                            let lean = "-- URAE Exported Lean 4 Formal Script\nimport Mathlib\n";
+                            let lean = crate::export::to_lean(&self.state.session.raw_document_text);
                             self.trigger_file_download("notebook_export.lean", lean.as_bytes(), "text/plain");
                             self.export_notice = Some("Exported to 'notebook_export.lean'".to_string());
                             ui.close();
@@ -6550,7 +6550,7 @@ pub fn is_variable_or_param_assignment(raw_text: &str) -> bool {
             && !lhs.contains('}')
             && !lhs.contains(' ')
             && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
-            && !lhs.chars().next().unwrap().is_ascii_digit()
+            && !lhs.chars().next().is_some_and(|c| c.is_ascii_digit())
     } else {
         false
     }
@@ -6693,7 +6693,7 @@ pub fn compute_line_upstream_dependencies(
         // 3. Check for identifier references defined on earlier lines
         let tokens: Vec<&str> = text
             .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .filter(|t| !t.is_empty() && !t.chars().next().unwrap().is_ascii_digit())
+            .filter(|t| !t.is_empty() && !t.chars().next().is_some_and(|c| c.is_ascii_digit()))
             .collect();
 
         for &tok in &tokens {

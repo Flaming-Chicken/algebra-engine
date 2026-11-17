@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Liam <spodeian@proton.me>"]
 edition = "2024"
 license = "PolyForm-Noncommercial-1.0.0"
@@ -38,6 +38,9 @@ unsafe_code = "deny"
 all = { level = "warn", priority = -1 }
 collapsible_if = "allow"
 needless_range_loop = "allow"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
 too_many_arguments = "allow"
 needless_borrow = "allow"
 nonminimal_bool = "allow"

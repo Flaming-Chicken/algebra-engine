@@ -132,8 +132,12 @@ impl RischIntegrator {
         _x_var: SymbolId,
         _y_var: SymbolId,
     ) -> AlgebraResult<(crate::weyl_dmodules::WeylOperator, String)> {
-        // Fallback to Almkvist-Zeilberger creative telescoping
-        Ok(crate::weyl_dmodules::AlmkvistZeilberger::gaussian_integral_ode())
+        // Creative telescoping for a general integrand is not implemented. The fixed Gaussian
+        // case is available as `AlmkvistZeilberger::gaussian_integral_ode`.
+        Err(algebra_core::AlgebraError::EvaluationError(
+            "creative telescoping is not implemented for general integrands;              see AlmkvistZeilberger::gaussian_integral_ode for the Gaussian case"
+                .into(),
+        ))
     }
 
     /// Perform full Risch transcendental integration on `expr` with respect to variable `wrt`.

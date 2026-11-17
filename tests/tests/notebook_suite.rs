@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `urae-notebook`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "notebook/notebook_tests.rs"]
 mod notebook_tests;
 
@@ -26,3 +28,6 @@ mod gux_gui_modernization_tests;
 
 #[path = "notebook/smart_stream_tests.rs"]
 mod smart_stream_tests;
+
+#[path = "notebook/export_tests.rs"]
+mod export_tests;

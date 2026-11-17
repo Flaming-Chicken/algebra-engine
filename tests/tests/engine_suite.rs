@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `algebra-engine`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
 
@@ -200,3 +202,24 @@ mod unification_robustness_tests;
 
 #[path = "engine/api_stream_workbench_tests.rs"]
 mod api_stream_workbench_tests;
+
+#[path = "engine/known_defect_tests.rs"]
+mod known_defect_tests;
+
+#[path = "engine/control_general_order_tests.rs"]
+mod control_general_order_tests;
+
+#[path = "engine/exact_groebner_tests.rs"]
+mod exact_groebner_tests;
+
+#[path = "engine/differential_reduction_tests.rs"]
+mod differential_reduction_tests;
+
+#[path = "engine/adjoint_gradient_tests.rs"]
+mod adjoint_gradient_tests;
+
+#[path = "engine/iga_stiffness_tests.rs"]
+mod iga_stiffness_tests;
+
+#[path = "engine/cad_constraint_solver_tests.rs"]
+mod cad_constraint_solver_tests;

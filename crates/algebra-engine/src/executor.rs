@@ -1147,8 +1147,8 @@ impl OperationExecutor {
                         collect_expr_symbols(graph, p2, &mut syms);
                         let var_sym = if syms.is_empty() {
                             graph.symbols.get_or_intern("x")
-                        } else if syms.len() == 1 {
-                            *syms.iter().next().expect("checked non-empty")
+                        } else if let (1, Some(&only)) = (syms.len(), syms.iter().next()) {
+                            only
                         } else {
                             return OperationResult::error(
                                 "Univariate poly_gcd supports only a single variable across both polynomials"
@@ -1813,150 +1813,104 @@ impl OperationExecutor {
 
             MathOperation::Cartan(kind) => {
                 let coords: [String; 4] = ["x".into(), "y".into(), "z".into(), "t".into()];
+                let parse = |text: &str, dim: usize| -> Result<DifferentialForm, String> {
+                    if dim == 0 || dim > coords.len() {
+                        return Err(format!("dimension must be between 1 and {}", coords.len()));
+                    }
+                    DifferentialForm::parse(text, dim, &coords[..dim]).map_err(|e| e.to_string())
+                };
+                let report = |label: String, form: DifferentialForm, latex: String| {
+                    let out = format!("{label} = {} (degree {})", form.to_text(), form.degree);
+                    OperationResult::success(out.clone(), latex, out)
+                };
                 match kind {
                     CartanOpKind::Wedge {
                         form1_str,
                         form2_str,
                         dim,
-                    } => {
-                        let f1 = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let f2 =
-                            DifferentialForm::dx(1.min(*dim - 1), *dim, coords[..*dim].to_vec())
-                                .unwrap_or_else(|_| {
-                                    DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                                });
-                        let res = f1.wedge(&f2);
-                        match res {
-                            Ok(w) => {
-                                let out = format!(
-                                    "Wedge Product ({} ∧ {}): degree = {}",
-                                    form1_str, form2_str, w.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\omega_1 \\wedge \\omega_2 \\in \\Omega^{{{}}}(M)",
-                                        w.degree
-                                    ),
-                                    out,
-                                )
-                            }
+                    } => match (parse(form1_str, *dim), parse(form2_str, *dim)) {
+                        (Ok(f1), Ok(f2)) => match f1.wedge(&f2) {
+                            Ok(w) => report(
+                                format!("Wedge Product ({form1_str}) ∧ ({form2_str})"),
+                                w,
+                                "\\omega_1 \\wedge \\omega_2".to_string(),
+                            ),
                             Err(e) => OperationResult::error(e.to_string()),
-                        }
-                    }
+                        },
+                        (Err(e), _) | (_, Err(e)) => OperationResult::error(e),
+                    },
                     CartanOpKind::ExteriorDerivative { form_str, dim } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let res = f.exterior_derivative();
-                        match res {
-                            Ok(df) => {
-                                let out = format!(
-                                    "Exterior Derivative d({}): degree = {}",
-                                    form_str, df.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\mathrm{{d}}\\omega \\in \\Omega^{{{}}}(M)",
-                                        df.degree
-                                    ),
-                                    out,
-                                )
-                            }
-                            Err(e) => OperationResult::error(e.to_string()),
+                        match parse(form_str, *dim) {
+                            Ok(f) => match f.exterior_derivative() {
+                                Ok(df) => report(
+                                    format!("Exterior Derivative d({form_str})"),
+                                    df,
+                                    "\\mathrm{d}\\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
+                            },
+                            Err(e) => OperationResult::error(e),
                         }
                     }
                     CartanOpKind::InteriorProduct {
                         form_str,
                         vector_field,
                         dim,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let vf = VectorField {
-                            dim: *dim,
-                            coord_names: coords[..*dim].to_vec(),
-                            components: vector_field.clone(),
-                        };
-                        let res = f.interior_product(&vf);
-                        match res {
-                            Ok(c) => {
-                                let out = format!(
-                                    "Interior Product i_X({}): degree = {}",
-                                    form_str, c.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\iota_X \\omega \\in \\Omega^{{{}}}(M)", c.degree),
-                                    out,
-                                )
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => {
+                            let vf = VectorField {
+                                dim: *dim,
+                                coord_names: coords[..*dim].to_vec(),
+                                components: vector_field.clone(),
+                            };
+                            match f.interior_product(&vf) {
+                                Ok(c) => report(
+                                    format!("Interior Product i_X({form_str})"),
+                                    c,
+                                    "\\iota_X \\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
                             }
-                            Err(e) => OperationResult::error(e.to_string()),
                         }
-                    }
+                        Err(e) => OperationResult::error(e),
+                    },
                     CartanOpKind::LieDerivative {
                         form_str,
                         vector_field,
                         dim,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let vf = VectorField {
-                            dim: *dim,
-                            coord_names: coords[..*dim].to_vec(),
-                            components: vector_field.clone(),
-                        };
-                        let res = f.lie_derivative(&vf);
-                        match res {
-                            Ok(l) => {
-                                let out = format!(
-                                    "Lie Derivative L_X({}): degree = {}",
-                                    form_str, l.degree
-                                );
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!(
-                                        "\\mathcal{{L}}_X \\omega \\in \\Omega^{{{}}}(M)",
-                                        l.degree
-                                    ),
-                                    out,
-                                )
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => {
+                            let vf = VectorField {
+                                dim: *dim,
+                                coord_names: coords[..*dim].to_vec(),
+                                components: vector_field.clone(),
+                            };
+                            match f.lie_derivative(&vf) {
+                                Ok(l) => report(
+                                    format!("Lie Derivative L_X({form_str})"),
+                                    l,
+                                    "\\mathcal{L}_X \\omega".to_string(),
+                                ),
+                                Err(e) => OperationResult::error(e.to_string()),
                             }
-                            Err(e) => OperationResult::error(e.to_string()),
                         }
-                    }
+                        Err(e) => OperationResult::error(e),
+                    },
                     CartanOpKind::HodgeStar {
                         form_str,
                         dim,
                         is_minkowski,
-                    } => {
-                        let f = DifferentialForm::dx(0, *dim, coords[..*dim].to_vec())
-                            .unwrap_or_else(|_| {
-                                DifferentialForm::zero(*dim, 1, coords[..*dim].to_vec())
-                            });
-                        let res = f.hodge_star(*is_minkowski);
-                        match res {
-                            Ok(star) => {
-                                let out =
-                                    format!("Hodge Star ⋆({}): degree = {}", form_str, star.degree);
-                                OperationResult::success(
-                                    out.clone(),
-                                    format!("\\star\\omega \\in \\Omega^{{{}}}(M)", star.degree),
-                                    out,
-                                )
-                            }
+                    } => match parse(form_str, *dim) {
+                        Ok(f) => match f.hodge_star(*is_minkowski) {
+                            Ok(star) => report(
+                                format!("Hodge Star ⋆({form_str})"),
+                                star,
+                                "\\star\\omega".to_string(),
+                            ),
                             Err(e) => OperationResult::error(e.to_string()),
-                        }
-                    }
+                        },
+                        Err(e) => OperationResult::error(e),
+                    },
                 }
             }
 
@@ -1965,18 +1919,46 @@ impl OperationExecutor {
                     sig_p,
                     sig_q,
                     sig_r,
-                    a_coords: _,
-                    b_coords: _,
+                    a_coords,
+                    b_coords,
                 } => {
+                    let n = sig_p + sig_q + sig_r;
+                    if a_coords.len() != n || b_coords.len() != n {
+                        return OperationResult::error(format!(
+                            "Cl({sig_p},{sig_q},{sig_r}) vectors need {n} coordinates; got {} and {}",
+                            a_coords.len(),
+                            b_coords.len()
+                        ));
+                    }
+                    // Product of two vectors: a b = a . b + a ^ b, with the metric diagonal
+                    // (+1 for the first p axes, -1 for the next q, 0 for the last r).
+                    let metric = |i: usize| {
+                        if i < *sig_p {
+                            1.0
+                        } else if i < sig_p + sig_q {
+                            -1.0
+                        } else {
+                            0.0
+                        }
+                    };
+                    let scalar: f64 = (0..n).map(|i| metric(i) * a_coords[i] * b_coords[i]).sum();
+                    let mut parts = vec![format!("{scalar}")];
+                    for i in 0..n {
+                        for j in (i + 1)..n {
+                            let c = a_coords[i] * b_coords[j] - a_coords[j] * b_coords[i];
+                            if c != 0.0 {
+                                parts.push(format!("{c} e{}e{}", i + 1, j + 1));
+                            }
+                        }
+                    }
                     let out = format!(
-                        "Clifford Geometric Product Cl({},{},{}): a · b + a ∧ b",
-                        sig_p, sig_q, sig_r
+                        "Cl({sig_p},{sig_q},{sig_r}) geometric product a b = {}",
+                        parts.join(" + ")
                     );
                     OperationResult::success(
                         out.clone(),
                         format!(
-                            "a b \\in \\operatorname{{Cl}}({},{},{})",
-                            sig_p, sig_q, sig_r
+                            "a b = a \\cdot b + a \\wedge b \\in \\operatorname{{Cl}}({sig_p},{sig_q},{sig_r})"
                         ),
                         out,
                     )
@@ -1985,19 +1967,42 @@ impl OperationExecutor {
                     sig_p,
                     sig_q,
                     sig_r,
-                    vector: _,
+                    vector,
                     angle_rad,
                     bivector_plane,
                 } => {
+                    let n = sig_p + sig_q + sig_r;
+                    let (i, j) = *bivector_plane;
+                    if *sig_q != 0 || *sig_r != 0 {
+                        return OperationResult::error(
+                            "rotor rotation is implemented for Euclidean signature Cl(p,0,0) only"
+                                .to_string(),
+                        );
+                    }
+                    if vector.len() != n || i >= n || j >= n || i == j {
+                        return OperationResult::error(format!(
+                            "need a {n}-component vector and two distinct plane axes below {n}"
+                        ));
+                    }
+                    // R = cos(t/2) - sin(t/2) e_i e_j, so R v R~ turns e_i toward e_j by t.
+                    let (c, sn) = (angle_rad.cos(), angle_rad.sin());
+                    let mut rotated = vector.clone();
+                    rotated[i] = c * vector[i] - sn * vector[j];
+                    rotated[j] = sn * vector[i] + c * vector[j];
+                    let list = rotated
+                        .iter()
+                        .map(|v| format!("{v:.6}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let out = format!(
-                        "Clifford Rotor Rotation Cl({},{},{}): angle = {:.4} rad in plane ({}, {})",
-                        sig_p, sig_q, sig_r, angle_rad, bivector_plane.0, bivector_plane.1
+                        "Clifford Rotor Rotation Cl({sig_p},{sig_q},{sig_r}): angle = {angle_rad:.4} rad in plane (e{}, e{}): v' = ({list})",
+                        i + 1,
+                        j + 1
                     );
                     OperationResult::success(
                         out.clone(),
                         format!(
-                            "v' = R v R^\\dagger \\in \\operatorname{{Cl}}({},{},{})",
-                            sig_p, sig_q, sig_r
+                            "v' = R v R^\\dagger \\in \\operatorname{{Cl}}({sig_p},{sig_q},{sig_r})"
                         ),
                         out,
                     )
@@ -2727,25 +2732,40 @@ impl OperationExecutor {
                     let out = format!("Active Mathematical Context:\n  • {}", math_ctx.summary());
                     OperationResult::success(out.clone(), out.clone(), out)
                 }
-                SystemCommandKind::Log { level } => {
-                    let out = format!("Logging verbosity set to '{}'", level);
-                    OperationResult::success(out.clone(), out.clone(), out)
-                }
-                SystemCommandKind::Preset { name } => {
-                    let out = format!("Preset '{}' loaded.", name);
-                    OperationResult::success(out.clone(), out.clone(), out)
-                }
+                SystemCommandKind::Log { .. } => OperationResult::error(
+                    "`log` is handled by the CLI front end; the executor has no logging filter",
+                ),
+                SystemCommandKind::Preset { .. } => OperationResult::error(
+                    "`preset` is handled by the CLI front end; the executor has no preset store",
+                ),
                 SystemCommandKind::Export { format, expr } => {
-                    let out = format!("Exporting '{}' as {}", expr, format);
-                    OperationResult::success(out.clone(), out.clone(), out)
+                    // Render the expression in the requested notation.
+                    let id = match parser.parse(expr.trim()) {
+                        Ok(id) => id,
+                        Err(e) => return OperationResult::error(format!("export: {e:?}")),
+                    };
+                    let rendered = match format.to_ascii_lowercase().as_str() {
+                        "latex" | "tex" => LatexFormatter.format(graph, id),
+                        "unicode" | "text" | "txt" => UnicodeFormatter.format(graph, id),
+                        "mathml" => algebra_core::format::MathMLFormatter.format(graph, id),
+                        other => {
+                            return OperationResult::error(format!(
+                                "export: unknown format `{other}` (use latex, unicode or mathml)"
+                            ));
+                        }
+                    };
+                    match rendered {
+                        Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                        Err(e) => OperationResult::error(format!("export: {e:?}")),
+                    }
                 }
+                // Clearing the workspace is session state; `Session` intercepts it before dispatch.
                 SystemCommandKind::Clear => OperationResult::success("Workspace cleared.", "", ""),
             },
 
-            MathOperation::AiQuery { prompt } => {
-                let out = format!("AI Co-Reasoning Query: {}", prompt);
-                OperationResult::success(out.clone(), out.clone(), out)
-            }
+            MathOperation::AiQuery { .. } => OperationResult::error(
+                "AI queries need the agent layer (`algebra-advanced` with the `agent` feature)",
+            ),
         }
     }
 }
@@ -2806,8 +2826,10 @@ fn execute_symbolic_sum(
                 }
                 let mut sp = BigRational::zero();
                 let mut powers = vec![BigRational::from_integer(BigInt::from(1))];
+                let mut power = BigRational::from_integer(BigInt::from(1));
                 for _ in 0..=(p + 1) {
-                    powers.push(powers.last().unwrap() * m_rat);
+                    power = &power * m_rat;
+                    powers.push(power.clone());
                 }
                 for j in 0..=p {
                     let bin = BigRational::from_integer(binomial_bigint(p + 1, j));

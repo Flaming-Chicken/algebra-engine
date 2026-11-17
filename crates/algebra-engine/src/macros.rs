@@ -105,21 +105,14 @@ macro_rules! puiseux {
     };
 }
 
-/// Padé Approximant $[L/M]$ construction from Taylor series coefficients.
+/// Padé Approximant $[L/M]$ of `expr` about `point`, from its exact Taylor coefficients.
+///
+/// Evaluates to `AlgebraResult<ExprId>`; see [`crate::calculus::pade_approximant`].
 #[macro_export]
 macro_rules! pade {
-    ($graph:expr, $expr:expr, $var:expr, $point:expr, $l:expr, $m:expr) => {{
-        let _series = $crate::calculus::SymbolicCalculus::taylor_series(
-            $graph,
-            $expr,
-            $var,
-            $point,
-            ($l + $m + 1),
-        );
-        let num_poly = $graph.symbol("P_num");
-        let den_poly = $graph.symbol("Q_den");
-        $graph.div(num_poly, den_poly)
-    }};
+    ($graph:expr, $expr:expr, $var:expr, $point:expr, $l:expr, $m:expr) => {
+        $crate::calculus::pade_approximant($graph, $expr, $var, $point, $l, $m)
+    };
 }
 
 // ============================================================================

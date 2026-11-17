@@ -11,4 +11,4 @@ pub use scheduler::{
     AnytimeBudget, AnytimeHandle, FidelityStream, MultiFidelityOp, tier0_ball_result,
 };
 pub use se3_rotor::Se3Rotor;
-pub use wavefront::{WavefrontLevel, WavefrontSchedule};
+pub use wavefront::{WavefrontError, WavefrontLevel, WavefrontSchedule};

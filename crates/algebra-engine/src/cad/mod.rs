@@ -578,7 +578,9 @@ impl GeometricConstraintSolver {
             }
         }
 
-        // 2. Solve constraints iteratively / via distance & angle equations
+        // 2. Initial placement: a distance or coincidence with one known end puts the other end
+        //    along the x-axis / on top of it. This keeps simple chains exact and gives the
+        //    refinement below a start that satisfies them.
         for constraint in &self.constraints {
             match constraint {
                 GeometricConstraint::Distance(p1_name, p2_name, target_dist) => {
@@ -586,15 +588,12 @@ impl GeometricConstraintSolver {
                         solved_coords.get(p1_name).cloned(),
                         solved_coords.get(p2_name),
                     ) {
-                        // Place p2 along x-axis offset by distance if free
-                        let p2 = vec![p1[0] + target_dist, p1[1]];
-                        solved_coords.insert(p2_name.clone(), p2);
+                        solved_coords.insert(p2_name.clone(), vec![p1[0] + target_dist, p1[1]]);
                     } else if let (None, Some(p2)) = (
                         solved_coords.get(p1_name),
                         solved_coords.get(p2_name).cloned(),
                     ) {
-                        let p1 = vec![p2[0] - target_dist, p2[1]];
-                        solved_coords.insert(p1_name.clone(), p1);
+                        solved_coords.insert(p1_name.clone(), vec![p2[0] - target_dist, p2[1]]);
                     }
                 }
                 GeometricConstraint::Coincident(e1_name, e2_name) => {
@@ -608,8 +607,294 @@ impl GeometricConstraintSolver {
             }
         }
 
+        // 3. Refine with damped Gauss-Newton (Levenberg-Marquardt) on all constraints at once.
+        self.refine_2d(&mut solved_coords)?;
         Ok(solved_coords)
     }
+
+    /// Residual of one constraint on the current 2D point positions (zero when satisfied).
+    fn residuals_2d(
+        &self,
+        constraint: &GeometricConstraint,
+        points: &HashMap<String, [f64; 2]>,
+    ) -> AlgebraResult<Vec<f64>> {
+        let fail = |why: String| AlgebraError::EvaluationError(format!("constraint solver: {why}"));
+        let point = |name: &str| -> AlgebraResult<[f64; 2]> {
+            points
+                .get(name)
+                .copied()
+                .ok_or_else(|| fail(format!("`{name}` is not a 2D point of this solver")))
+        };
+        // A line entity gives the direction p2 - p1; a point name is not a line.
+        let line = |name: &str| -> AlgebraResult<([f64; 2], [f64; 2])> {
+            match self.entities.get(name) {
+                Some(GeometricEntity::Line2D { p1, p2, .. }) => Ok((point(p1)?, point(p2)?)),
+                _ => Err(fail(format!("`{name}` is not a Line2D"))),
+            }
+        };
+        let direction = |l: ([f64; 2], [f64; 2])| [l.1[0] - l.0[0], l.1[1] - l.0[1]];
+        let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
+        let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
+        match constraint {
+            GeometricConstraint::Coincident(a, b) => {
+                let (pa, pb) = (point(a)?, point(b)?);
+                Ok(vec![pa[0] - pb[0], pa[1] - pb[1]])
+            }
+            GeometricConstraint::Distance(a, b, d) => {
+                let (pa, pb) = (point(a)?, point(b)?);
+                Ok(vec![(pa[0] - pb[0]).hypot(pa[1] - pb[1]) - d])
+            }
+            GeometricConstraint::Parallel(a, b) => {
+                Ok(vec![cross(direction(line(a)?), direction(line(b)?))])
+            }
+            GeometricConstraint::Perpendicular(a, b) => {
+                Ok(vec![dot(direction(line(a)?), direction(line(b)?))])
+            }
+            GeometricConstraint::Angle(a, b, theta) => {
+                // The angle from line a to line b is theta: cross cos(theta) - dot sin(theta) = 0,
+                // and the unit-direction normalisation keeps the scale comparable to lengths.
+                let (da, db) = (direction(line(a)?), direction(line(b)?));
+                let (la, lb) = (da[0].hypot(da[1]).max(1e-12), db[0].hypot(db[1]).max(1e-12));
+                Ok(vec![
+                    (cross(da, db) * theta.cos() - dot(da, db) * theta.sin()) / (la * lb),
+                ])
+            }
+            GeometricConstraint::Tangent(line_name, circle_name) => {
+                let (p, q) = line(line_name)?;
+                let (center_name, radius) = match self.entities.get(circle_name) {
+                    Some(GeometricEntity::Circle2D {
+                        center,
+                        radius: Some(r),
+                        ..
+                    }) => (center.clone(), *r),
+                    _ => {
+                        return Err(fail(format!(
+                            "`{circle_name}` is not a Circle2D with a known radius"
+                        )));
+                    }
+                };
+                let c = point(&center_name)?;
+                let d = direction((p, q));
+                let length = d[0].hypot(d[1]).max(1e-12);
+                // Signed distance from the centre to the line, compared in magnitude.
+                Ok(vec![
+                    cross(d, [c[0] - p[0], c[1] - p[1]]).abs() / length - radius,
+                ])
+            }
+            GeometricConstraint::FixedArea(names, area) => {
+                let polygon: Vec<[f64; 2]> = names
+                    .iter()
+                    .map(|n| point(n))
+                    .collect::<AlgebraResult<_>>()?;
+                let n = polygon.len();
+                let twice: f64 = (0..n)
+                    .map(|i| cross(polygon[i], polygon[(i + 1) % n]))
+                    .sum();
+                Ok(vec![twice.abs() / 2.0 - area])
+            }
+        }
+    }
+
+    /// Adjust the unknown 2D point coordinates so that every constraint holds.
+    ///
+    /// Unknowns are the missing coordinates of `Point2D` entities. The solver runs
+    /// Levenberg-Marquardt on the stacked residuals with a central-difference Jacobian. A start
+    /// that already satisfies every constraint is returned untouched; otherwise a result with a
+    /// residual above `1e-9` (an over-constrained or inconsistent set, or a failure to converge)
+    /// is an error. Under-constrained sets return the solution nearest the starting placement.
+    fn refine_2d(&self, solved: &mut HashMap<String, Vec<f64>>) -> AlgebraResult<()> {
+        // Free coordinates: (entity name, axis).
+        let mut free: Vec<(String, usize)> = Vec::new();
+        let mut names: Vec<&String> = self.entities.keys().collect();
+        names.sort();
+        let mut points: HashMap<String, [f64; 2]> = HashMap::new();
+        for name in names {
+            if let Some(GeometricEntity::Point2D { x, y, .. }) = self.entities.get(name) {
+                let start = solved.get(name).cloned();
+                let value = |known: &Option<f64>, axis: usize, free: &mut Vec<(String, usize)>| {
+                    match known {
+                        Some(v) => *v,
+                        None => {
+                            free.push((name.clone(), axis));
+                            // Keep a placement from step 2; otherwise a small distinct offset
+                            // so the Jacobian is not degenerate at the origin.
+                            start
+                                .as_ref()
+                                .map_or(0.1 * (free.len() as f64), |s| s[axis])
+                        }
+                    }
+                };
+                let px = value(x, 0, &mut free);
+                let py = value(y, 1, &mut free);
+                points.insert(name.clone(), [px, py]);
+            }
+        }
+
+        let evaluate = |points: &HashMap<String, [f64; 2]>| -> AlgebraResult<Vec<f64>> {
+            let mut all = Vec::new();
+            for constraint in &self.constraints {
+                all.extend(self.residuals_2d(constraint, points)?);
+            }
+            Ok(all)
+        };
+        let norm = |r: &[f64]| r.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+        let set = |points: &mut HashMap<String, [f64; 2]>, k: usize, value: f64| {
+            let (name, axis) = &free[k];
+            if let Some(p) = points.get_mut(name) {
+                p[*axis] = value;
+            }
+        };
+        let get = |points: &HashMap<String, [f64; 2]>, k: usize| -> f64 {
+            let (name, axis) = &free[k];
+            points.get(name).map_or(0.0, |p| p[*axis])
+        };
+
+        const TOLERANCE: f64 = 1e-10;
+        let start = points.clone();
+        // Distance constraints have zero gradient across a collinear placement (the usual start
+        // after step 2), so a stalled run is retried from deterministically perturbed starts.
+        let extent = start
+            .values()
+            .flat_map(|p| p.iter().copied())
+            .fold(1.0_f64, |m, v| m.max(v.abs()));
+        let mut best: Option<SolveAttempt> = None;
+        for attempt in 0..10 {
+            let mut points = start.clone();
+            if attempt > 0 {
+                for k in 0..free.len() {
+                    let offset =
+                        0.4 * extent * ((attempt as f64) * 1.7 + (k as f64) * 2.3 + 0.5).sin();
+                    let current = get(&points, k);
+                    set(&mut points, k, current + offset);
+                }
+            }
+            let mut residual = evaluate(&points)?;
+            if !residual.is_empty() && !free.is_empty() && norm(&residual) > TOLERANCE {
+                let n = free.len();
+                let mut lambda = 1e-3;
+                for _ in 0..300 {
+                    if norm(&residual) <= TOLERANCE {
+                        break;
+                    }
+                    // Central-difference Jacobian, m x n.
+                    let m = residual.len();
+                    let mut jacobian = vec![vec![0.0; n]; m];
+                    for k in 0..n {
+                        let x0 = get(&points, k);
+                        let h = 1e-7 * x0.abs().max(1.0);
+                        set(&mut points, k, x0 + h);
+                        let plus = evaluate(&points)?;
+                        set(&mut points, k, x0 - h);
+                        let minus = evaluate(&points)?;
+                        set(&mut points, k, x0);
+                        for i in 0..m {
+                            jacobian[i][k] = (plus[i] - minus[i]) / (2.0 * h);
+                        }
+                    }
+                    // Normal equations (J^T J + lambda I) d = -J^T r.
+                    let mut jtj = vec![vec![0.0; n]; n];
+                    let mut jtr = vec![0.0; n];
+                    for i in 0..m {
+                        for a in 0..n {
+                            jtr[a] -= jacobian[i][a] * residual[i];
+                            for b in 0..n {
+                                jtj[a][b] += jacobian[i][a] * jacobian[i][b];
+                            }
+                        }
+                    }
+                    let mut improved = false;
+                    for _ in 0..12 {
+                        let mut system = jtj.clone();
+                        for (a, row) in system.iter_mut().enumerate() {
+                            row[a] += lambda * (1.0 + jtj[a][a]);
+                        }
+                        let Some(step) = solve_dense(&system, &jtr) else {
+                            lambda *= 10.0;
+                            continue;
+                        };
+                        let backup: Vec<f64> = (0..n).map(|k| get(&points, k)).collect();
+                        for k in 0..n {
+                            set(&mut points, k, backup[k] + step[k]);
+                        }
+                        let trial = evaluate(&points)?;
+                        let sum_sq = |r: &[f64]| r.iter().map(|v| v * v).sum::<f64>();
+                        if sum_sq(&trial) < sum_sq(&residual) {
+                            residual = trial;
+                            lambda = (lambda * 0.3).max(1e-12);
+                            improved = true;
+                            break;
+                        }
+                        for k in 0..n {
+                            set(&mut points, k, backup[k]);
+                        }
+                        lambda *= 10.0;
+                    }
+                    if !improved {
+                        break;
+                    }
+                }
+            }
+
+            let better = best
+                .as_ref()
+                .is_none_or(|(_, previous)| norm(&residual) < norm(previous));
+            let done = norm(&residual) <= 1e-9;
+            if better {
+                best = Some((points, residual));
+            }
+            if done
+                || free.is_empty()
+                || attempt == 0 && best.as_ref().is_some_and(|(_, r)| r.is_empty())
+            {
+                break;
+            }
+        }
+        let (points, residual) = best.unwrap_or((start, Vec::new()));
+
+        if norm(&residual) > 1e-9 {
+            return Err(AlgebraError::EvaluationError(format!(
+                "constraint solver: the constraints are inconsistent or did not converge \
+                 (largest residual {:.3e})",
+                norm(&residual)
+            )));
+        }
+        for (name, p) in points {
+            solved.insert(name, vec![p[0], p[1]]);
+        }
+        Ok(())
+    }
+}
+
+/// Point positions and the constraint residuals they leave.
+type SolveAttempt = (HashMap<String, [f64; 2]>, Vec<f64>);
+
+/// Solve the dense system `A x = b` by Gaussian elimination with partial pivoting.
+fn solve_dense(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
+    let n = b.len();
+    let mut aug: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            let mut row = a[i].clone();
+            row.push(b[i]);
+            row
+        })
+        .collect();
+    for col in 0..n {
+        let pivot = (col..n).max_by(|&i, &j| aug[i][col].abs().total_cmp(&aug[j][col].abs()))?;
+        if aug[pivot][col].abs() < 1e-300 {
+            return None;
+        }
+        aug.swap(col, pivot);
+        for row in 0..n {
+            if row != col {
+                let factor = aug[row][col] / aug[col][col];
+                for k in col..=n {
+                    let delta = factor * aug[col][k];
+                    aug[row][k] -= delta;
+                }
+            }
+        }
+    }
+    Some((0..n).map(|i| aug[i][n] / aug[i][i]).collect())
 }
 
 // ============================================================================
@@ -725,6 +1010,29 @@ impl Mesh3D {
         total_area
     }
 
+    /// Number of directed edges that are not matched by an opposite edge in another triangle, plus
+    /// edges used more than once in the same direction. Zero for a closed, consistently oriented
+    /// surface; a positive count means open boundaries, holes or inconsistent winding. A mesh
+    /// that is not closed has no well-defined enclosed volume.
+    pub fn boundary_edge_count(&self) -> usize {
+        let mut directed: HashMap<(usize, usize), usize> = HashMap::new();
+        for t in &self.triangles {
+            for k in 0..3 {
+                *directed.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
+            }
+        }
+        directed
+            .iter()
+            .filter(|&(&(a, b), &count)| count != 1 || directed.get(&(b, a)) != Some(&1))
+            .count()
+    }
+
+    /// Whether every edge is shared by exactly two triangles with opposite directions (a closed,
+    /// consistently oriented surface), so that [`Mesh3D::compute_volume`] is meaningful.
+    pub fn is_closed(&self) -> bool {
+        !self.triangles.is_empty() && self.boundary_edge_count() == 0
+    }
+
     /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
     pub fn compute_volume(&self) -> f64 {
         let mut signed_vol = 0.0;
@@ -835,40 +1143,94 @@ impl Mesh3D {
         mesh
     }
 
-    /// Create an extruded 3D solid from an arbitrary 2D closed polygon cross-section.
+    /// Create an extruded 3D solid from a simple (non-self-intersecting) 2D polygon.
+    ///
+    /// The outline may be convex or not and may run either way round; the result is a closed,
+    /// outward-oriented mesh. The end caps are triangulated by ear clipping, so the volume is
+    /// exactly the polygon's area times `height`. A polygon with fewer than three vertices, a
+    /// zero area, or a self-intersection that defeats ear clipping gives an empty mesh.
     pub fn extrude_profile(profile: &[[f64; 2]], height: f64) -> Self {
         let mut mesh = Self::new("Extrusion");
         let n = profile.len();
         if n < 3 {
             return mesh;
         }
+        let signed_area: f64 = (0..n)
+            .map(|i| {
+                let (p, q) = (profile[i], profile[(i + 1) % n]);
+                p[0] * q[1] - q[0] * p[1]
+            })
+            .sum::<f64>()
+            / 2.0;
+        if signed_area.abs() < 1e-14 {
+            return mesh;
+        }
+        // Work counter-clockwise: reverse a clockwise outline so the outward normals are right.
+        let order: Vec<usize> = if signed_area > 0.0 {
+            (0..n).collect()
+        } else {
+            (0..n).rev().collect()
+        };
+        let ccw: Vec<[f64; 2]> = order.iter().map(|&i| profile[i]).collect();
 
-        // Bottom vertices
-        for p in profile {
+        // Ear clipping of the counter-clockwise polygon.
+        let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+            (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        };
+        let inside = |p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+            cross(a, b, p) >= -1e-12 && cross(b, c, p) >= -1e-12 && cross(c, a, p) >= -1e-12
+        };
+        let mut remaining: Vec<usize> = (0..n).collect();
+        let mut cap: Vec<[usize; 3]> = Vec::with_capacity(n - 2);
+        let mut guard = 0;
+        while remaining.len() > 3 && guard < 4 * n * n {
+            guard += 1;
+            let m = remaining.len();
+            let mut clipped = false;
+            for k in 0..m {
+                let (i0, i1, i2) = (
+                    remaining[(k + m - 1) % m],
+                    remaining[k],
+                    remaining[(k + 1) % m],
+                );
+                let (a, b, c) = (ccw[i0], ccw[i1], ccw[i2]);
+                if cross(a, b, c) <= 1e-14 {
+                    continue; // reflex or degenerate corner
+                }
+                let blocked = remaining
+                    .iter()
+                    .any(|&j| j != i0 && j != i1 && j != i2 && inside(ccw[j], a, b, c));
+                if !blocked {
+                    cap.push([i0, i1, i2]);
+                    remaining.remove(k);
+                    clipped = true;
+                    break;
+                }
+            }
+            if !clipped {
+                return Self::new("Extrusion"); // self-intersecting or otherwise not simple
+            }
+        }
+        if remaining.len() == 3 {
+            cap.push([remaining[0], remaining[1], remaining[2]]);
+        }
+
+        for p in &ccw {
             mesh.add_vertex([p[0], p[1], 0.0]);
         }
-        // Top vertices
-        for p in profile {
+        for p in &ccw {
             mesh.add_vertex([p[0], p[1], height]);
         }
-
-        // Side quads (as triangles)
+        // Side walls (outward for a counter-clockwise outline), then the two caps.
         for i in 0..n {
             let next = (i + 1) % n;
-            let b0 = i;
-            let b1 = next;
-            let t0 = i + n;
-            let t1 = next + n;
-            mesh.add_triangle(b0, b1, t1);
-            mesh.add_triangle(b0, t1, t0);
+            mesh.add_triangle(i, next, next + n);
+            mesh.add_triangle(i, next + n, i + n);
         }
-
-        // Simple bottom & top cap fan triangulation
-        for i in 1..n - 1 {
-            mesh.add_triangle(0, i + 1, i);
-            mesh.add_triangle(n, n + i, n + i + 1);
+        for [a, b, c] in cap {
+            mesh.add_triangle(a, c, b); // bottom faces down
+            mesh.add_triangle(n + a, n + b, n + c); // top faces up
         }
-
         mesh
     }
 }
@@ -911,14 +1273,55 @@ pub enum CustomShape {
 }
 
 impl CustomShape {
-    /// Convert shape to a concrete `Mesh3D` for visualization and simulation.
-    pub fn to_tri_mesh(&self) -> Mesh3D {
+    /// Convert the shape to a concrete `Mesh3D` for visualization and simulation.
+    ///
+    /// Triangle meshes, extrusions and 3-dimensional polytopes whose simplices are triangles
+    /// convert. Implicit surfaces and Boolean combinations are not meshed by this library and
+    /// return an error: they used to be replaced silently by a unit cube.
+    pub fn to_tri_mesh(&self) -> AlgebraResult<Mesh3D> {
+        let unsupported = |what: &str| {
+            Err(AlgebraError::EvaluationError(format!(
+                "{what} cannot be converted to a triangle mesh yet"
+            )))
+        };
         match self {
-            CustomShape::TriMesh(m) => m.clone(),
+            CustomShape::TriMesh(m) => Ok(m.clone()),
             CustomShape::Extrusion { profile_2d, height } => {
-                Mesh3D::extrude_profile(profile_2d, *height)
+                let mesh = Mesh3D::extrude_profile(profile_2d, *height);
+                if mesh.triangles.is_empty() {
+                    return Err(AlgebraError::EvaluationError(
+                        "the extrusion profile is not a simple polygon of non-zero area".into(),
+                    ));
+                }
+                Ok(mesh)
             }
-            _ => Mesh3D::cube(1.0, 1.0, 1.0),
+            CustomShape::PolytopeND {
+                dim,
+                vertices,
+                simplices,
+            } => {
+                if *dim != 3 || simplices.iter().any(|s| s.len() != 3) {
+                    return unsupported("a polytope that is not a 3-D triangle surface");
+                }
+                let mut mesh = Mesh3D::new("Polytope");
+                for v in vertices {
+                    if v.len() != 3 {
+                        return unsupported("a polytope vertex that is not three-dimensional");
+                    }
+                    mesh.add_vertex([v[0], v[1], v[2]]);
+                }
+                for s in simplices {
+                    if s.iter().any(|&i| i >= vertices.len()) {
+                        return Err(AlgebraError::EvaluationError(
+                            "a polytope simplex refers to a missing vertex".into(),
+                        ));
+                    }
+                    mesh.add_triangle(s[0], s[1], s[2]);
+                }
+                Ok(mesh)
+            }
+            CustomShape::ParametricImplicit { .. } => unsupported("an implicit surface"),
+            CustomShape::BooleanCSG { .. } => unsupported("a Boolean CSG combination"),
         }
     }
 }

@@ -8,6 +8,12 @@
 //!   with Gebauer-Möller useless pair elimination criteria.
 //! - **Reduced Gröbner Bases**: Guarantees uniqueness, monic leading terms, and complete reduction of tail monomials.
 //!
+//! ## Numeric versus exact
+//!
+//! This module works on [`MultiPoly`] with `f64` coefficients and a `1e-12` cutoff, so it is a
+//! numerical tool: rounding can change a leading term. For exact ideal membership and a reduced
+//! basis over the rationals use [`super::exact::ExactGrobner`].
+//!
 //! ## References
 //! - Buchberger, B. (1965). *Ein Algorithmus zum Auffinden der Basiselemente des Restklassenringes nach einem nulldimensionalen Polynomideal*. PhD thesis, Univ. Innsbruck.
 //! - Gebauer, R., & Möller, H. M. (1988). On an installation of Buchberger's algorithm. *J. Symbolic Comput.*, 6(2–3), 275–286.

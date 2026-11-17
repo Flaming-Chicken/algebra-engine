@@ -328,7 +328,7 @@ impl FeaEngine {
         let total_dof = mesh.nodes.len() * dof_per_node;
 
         // Global stiffness matrix K and load vector F
-        let mut k_global = vec![vec![0.0; total_dof]; total_dof];
+        let mut k_global = SparseAssembly::new(total_dof);
         let mut f_global = vec![0.0; total_dof];
 
         // 1. Element Assembly
@@ -344,10 +344,10 @@ impl FeaEngine {
                     let k_elem = (e_mod * area) / len;
 
                     // Line2 1D element stiffness
-                    k_global[i0][i0] += k_elem;
-                    k_global[i0][i1] -= k_elem;
-                    k_global[i1][i0] -= k_elem;
-                    k_global[i1][i1] += k_elem;
+                    k_global.add(i0, i0, k_elem);
+                    k_global.add(i0, i1, -(k_elem));
+                    k_global.add(i1, i0, -(k_elem));
+                    k_global.add(i1, i1, k_elem);
 
                     // Body force
                     if let Some(&bf) = body_force.first() {
@@ -415,7 +415,7 @@ impl FeaEngine {
                                 let dof_r = node_r * 2 + (r % 2);
                                 let node_c = n[c / 2];
                                 let dof_c = node_c * 2 + (c % 2);
-                                k_global[dof_r][dof_c] += val * area;
+                                k_global.add(dof_r, dof_c, val * area);
                             }
                         }
                     }
@@ -444,7 +444,7 @@ impl FeaEngine {
                         let k_diag = (e_mod * area) / 3.0;
                         for &ni in &n {
                             for d in 0..3 {
-                                k_global[ni * 3 + d][ni * 3 + d] += k_diag;
+                                k_global.add(ni * 3 + d, ni * 3 + d, k_diag);
                             }
                         }
                         for i in 0..3 {
@@ -454,7 +454,7 @@ impl FeaEngine {
                                     let nj = n[j];
                                     let k_off = -k_diag / 2.0;
                                     for d in 0..3 {
-                                        k_global[ni * 3 + d][nj * 3 + d] += k_off;
+                                        k_global.add(ni * 3 + d, nj * 3 + d, k_off);
                                     }
                                 }
                             }
@@ -565,7 +565,7 @@ impl FeaEngine {
         bcs: &[FeaBoundaryCondition],
     ) -> AlgebraResult<FeaSolution> {
         let n_nodes = mesh.nodes.len();
-        let mut k_global = vec![vec![0.0; n_nodes]; n_nodes];
+        let mut k_global = SparseAssembly::new(n_nodes);
         let mut f_global = vec![0.0; n_nodes];
 
         // 1. Element Assembly
@@ -576,10 +576,10 @@ impl FeaEngine {
                 let len = (mesh.nodes[i1][0] - mesh.nodes[i0][0]).abs().max(1e-12);
                 let k_elem = conductivity / len;
 
-                k_global[i0][i0] += k_elem;
-                k_global[i0][i1] -= k_elem;
-                k_global[i1][i0] -= k_elem;
-                k_global[i1][i1] += k_elem;
+                k_global.add(i0, i0, k_elem);
+                k_global.add(i0, i1, -(k_elem));
+                k_global.add(i1, i0, -(k_elem));
+                k_global.add(i1, i1, k_elem);
 
                 f_global[i0] += heat_source * len / 2.0;
                 f_global[i1] += heat_source * len / 2.0;
@@ -606,7 +606,7 @@ impl FeaEngine {
                         for col in 0..3 {
                             let k_elem =
                                 (conductivity / (4.0 * area)) * (b[r] * b[col] + c[r] * c[col]);
-                            k_global[n[r]][n[col]] += k_elem;
+                            k_global.add(n[r], n[col], k_elem);
                         }
                         f_global[n[r]] += heat_source * area / 3.0;
                     }
@@ -632,12 +632,12 @@ impl FeaEngine {
                 if area > 1e-14 {
                     let k_elem = (conductivity * area) / 3.0;
                     for &ni in &n {
-                        k_global[ni][ni] += k_elem;
+                        k_global.add(ni, ni, k_elem);
                     }
                     for i in 0..3 {
                         for j in 0..3 {
                             if i != j {
-                                k_global[n[i]][n[j]] -= k_elem / 2.0;
+                                k_global.add(n[i], n[j], -(k_elem / 2.0));
                             }
                         }
                     }
@@ -669,7 +669,7 @@ impl FeaEngine {
                 } => {
                     if let Some(nodes) = mesh.boundary_groups.get(group_name) {
                         for &node_idx in nodes {
-                            k_global[node_idx][node_idx] += heat_transfer_coeff;
+                            k_global.add(node_idx, node_idx, *heat_transfer_coeff);
                             f_global[node_idx] += heat_transfer_coeff * ambient_temperature;
                         }
                     }
@@ -699,24 +699,50 @@ impl FeaEngine {
     /// constrained problem and keeps the matrix well conditioned (a penalty of 1e12 loses
     /// about twelve digits). Returns the full solution and the reaction at every unknown
     /// (`K u - f`: zero at free unknowns, the force the support supplies at fixed ones).
+    ///
+    /// The reduced matrix is built from the sparse assembly directly; above
+    /// [`FeaEngine::SPARSE_THRESHOLD`] unknowns it is solved as CSR by conjugate gradients and
+    /// no dense matrix is ever formed.
     fn solve_with_fixed(
-        k: &[Vec<f64>],
+        k: &SparseAssembly,
         f: &[f64],
         fixed: &std::collections::BTreeMap<usize, f64>,
     ) -> AlgebraResult<(Vec<f64>, Vec<f64>)> {
         let n = f.len();
-        let free: Vec<usize> = (0..n).filter(|i| !fixed.contains_key(i)).collect();
-        let mut a: Vec<Vec<f64>> = free
-            .iter()
-            .map(|&i| free.iter().map(|&j| k[i][j]).collect())
-            .collect();
-        let mut b: Vec<f64> = free
-            .iter()
-            .map(|&i| f[i] - fixed.iter().map(|(&c, &v)| k[i][c] * v).sum::<f64>())
-            .collect();
-        let solved = if free.is_empty() {
+        let mut free_index = vec![usize::MAX; n];
+        let mut free: Vec<usize> = Vec::new();
+        for i in 0..n {
+            if !fixed.contains_key(&i) {
+                free_index[i] = free.len();
+                free.push(i);
+            }
+        }
+        let m = free.len();
+        let mut rows: Vec<Vec<(usize, f64)>> = Vec::with_capacity(m);
+        let mut b: Vec<f64> = Vec::with_capacity(m);
+        for &i in &free {
+            let mut row = Vec::new();
+            let mut rhs = f[i];
+            for (&j, &v) in &k.rows[i] {
+                match fixed.get(&j) {
+                    Some(value) => rhs -= v * value,
+                    None => row.push((free_index[j], v)),
+                }
+            }
+            rows.push(row);
+            b.push(rhs);
+        }
+        let solved = if m == 0 {
             Vec::new()
+        } else if m > Self::SPARSE_THRESHOLD {
+            CsrMatrix::from_rows(&rows).conjugate_gradient(&b, 1e-9, 50 * m + 1000)?
         } else {
+            let mut a = vec![vec![0.0; m]; m];
+            for (r, row) in rows.iter().enumerate() {
+                for &(c, v) in row {
+                    a[r][c] += v;
+                }
+            }
             Self::solve_linear_system(&mut a, &mut b)?
         };
         let mut u = vec![0.0; n];
@@ -731,7 +757,7 @@ impl FeaEngine {
         let reactions = (0..n)
             .map(|i| {
                 if fixed.contains_key(&i) {
-                    k[i].iter().zip(&u).map(|(a, b)| a * b).sum::<f64>() - f[i]
+                    k.rows[i].iter().map(|(&j, &v)| v * u[j]).sum::<f64>() - f[i]
                 } else {
                     0.0
                 }
@@ -740,8 +766,8 @@ impl FeaEngine {
         Ok((u, reactions))
     }
 
-    /// Systems with more unknowns than this are solved by sparse conjugate gradients instead of
-    /// dense elimination (whose cost grows as n^3).
+    /// Systems with more free unknowns than this are solved by sparse conjugate gradients instead
+    /// of dense elimination (whose cost grows as n^3).
     pub const SPARSE_THRESHOLD: usize = 400;
 
     /// Gaussian elimination with partial pivoting for the dense system `A x = b`.
@@ -754,11 +780,6 @@ impl FeaEngine {
     #[allow(clippy::needless_range_loop)]
     fn solve_linear_system(a: &mut [Vec<f64>], b: &mut [f64]) -> AlgebraResult<Vec<f64>> {
         let n = b.len();
-        if n > Self::SPARSE_THRESHOLD {
-            // Large systems: keep only the non-zeros and iterate (the matrices are symmetric
-            // positive definite once constrained).
-            return CsrMatrix::from_dense(a).conjugate_gradient(b, 1e-9, 50 * n + 1000);
-        }
         let original_a: Vec<Vec<f64>> = a.to_vec();
         let original_b: Vec<f64> = b.to_vec();
         // Each row is judged against its own magnitude, so a stiff row does not make healthy
@@ -830,6 +851,37 @@ impl FeaEngine {
     }
 }
 
+/// Row-wise sparse accumulator for assembling a global stiffness matrix: `add` sums repeated
+/// contributions to one entry, and only the touched entries use memory.
+#[derive(Debug, Clone)]
+pub struct SparseAssembly {
+    rows: Vec<std::collections::BTreeMap<usize, f64>>,
+}
+
+impl SparseAssembly {
+    /// An `n` by `n` zero matrix.
+    pub fn new(n: usize) -> Self {
+        Self {
+            rows: vec![std::collections::BTreeMap::new(); n],
+        }
+    }
+
+    /// Add `value` to entry `(i, j)`.
+    pub fn add(&mut self, i: usize, j: usize, value: f64) {
+        *self.rows[i].entry(j).or_insert(0.0) += value;
+    }
+
+    /// Entry `(i, j)` (zero when never touched).
+    pub fn get(&self, i: usize, j: usize) -> f64 {
+        self.rows[i].get(&j).copied().unwrap_or(0.0)
+    }
+
+    /// Number of stored entries.
+    pub fn nnz(&self) -> usize {
+        self.rows.iter().map(|r| r.len()).sum()
+    }
+}
+
 /// Compressed sparse row storage for a square matrix.
 #[derive(Debug, Clone)]
 pub struct CsrMatrix {
@@ -857,6 +909,32 @@ impl CsrMatrix {
         }
         Self {
             n,
+            row_start,
+            columns,
+            values,
+        }
+    }
+
+    /// Build from per-row `(column, value)` lists; repeated columns in a row are summed.
+    pub fn from_rows(rows: &[Vec<(usize, f64)>]) -> Self {
+        let mut row_start = vec![0];
+        let (mut columns, mut values) = (Vec::new(), Vec::new());
+        for row in rows {
+            let mut merged: std::collections::BTreeMap<usize, f64> =
+                std::collections::BTreeMap::new();
+            for &(c, v) in row {
+                *merged.entry(c).or_insert(0.0) += v;
+            }
+            for (c, v) in merged {
+                if v != 0.0 {
+                    columns.push(c);
+                    values.push(v);
+                }
+            }
+            row_start.push(columns.len());
+        }
+        Self {
+            n: rows.len(),
             row_start,
             columns,
             values,

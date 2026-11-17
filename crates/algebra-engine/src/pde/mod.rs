@@ -13,7 +13,7 @@ pub mod symbolic;
 
 pub use fea::{
     CsrMatrix, ElementType, FeaBoundaryCondition, FeaEngine, FeaMesh, FeaSolution,
-    PhysicsDiscipline,
+    PhysicsDiscipline, SparseAssembly,
 };
 pub use numerical::{BoundaryCondition, NumericalPdeSolver, PdeGridSolution};
 pub use reduction::PdeTravelingWaveReduction;

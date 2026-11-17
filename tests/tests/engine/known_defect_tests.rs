@@ -869,3 +869,134 @@ fn the_closure_diagnostic_distinguishes_closed_open_and_misoriented_meshes() {
             .is_closed()
     );
 }
+
+#[test]
+fn extrusions_of_any_simple_polygon_are_closed_solids_with_exact_volume() {
+    use algebra_engine::cad::Mesh3D;
+    // An L-shape (non-convex): area 3 (a 2x2 square minus a 1x1 corner).
+    let l_shape = [
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+    ];
+    // A star-like concave polygon: a 4-armed arrow (square with notches), area computed below.
+    let arrow = [
+        [0.0, 0.0],
+        [2.0, 1.0],
+        [4.0, 0.0],
+        [3.0, 2.0],
+        [4.0, 4.0],
+        [2.0, 3.0],
+        [0.0, 4.0],
+        [1.0, 2.0],
+    ];
+    for (name, outline) in [("L", l_shape.to_vec()), ("arrow", arrow.to_vec())] {
+        let area = shoelace(&outline).abs();
+        for reversed in [false, true] {
+            let mut points = outline.clone();
+            if reversed {
+                points.reverse();
+            }
+            let mesh = Mesh3D::extrude_profile(&points, 5.0);
+            assert!(
+                mesh.is_closed(),
+                "{name} reversed={reversed}: {} open",
+                mesh.boundary_edge_count()
+            );
+            assert!(
+                (mesh.compute_volume() - area * 5.0).abs() < 1e-9,
+                "{name} reversed={reversed}: {} vs {}",
+                mesh.compute_volume(),
+                area * 5.0
+            );
+        }
+    }
+    assert_eq!(shoelace(&l_shape).abs(), 3.0);
+
+    // Degenerate input gives an empty mesh instead of garbage.
+    assert!(
+        Mesh3D::extrude_profile(&[[0.0, 0.0], [1.0, 0.0]], 1.0)
+            .triangles
+            .is_empty()
+    );
+    assert!(
+        Mesh3D::extrude_profile(&[[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]], 1.0)
+            .triangles
+            .is_empty()
+    );
+    // A bow-tie (self-intersecting) polygon is rejected.
+    assert!(
+        Mesh3D::extrude_profile(&[[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]], 1.0)
+            .triangles
+            .is_empty()
+    );
+}
+
+#[test]
+fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
+    use algebra_engine::cad::{BoundingBox3D, CsgBooleanOp, CustomShape, Mesh3D};
+    let cube = Mesh3D::cube(2.0, 2.0, 2.0);
+    // A mesh converts to itself.
+    let shape = CustomShape::TriMesh(cube.clone());
+    assert_eq!(shape.to_tri_mesh().unwrap().vertices, cube.vertices);
+    // An extrusion converts, with its real volume (area 3 x height 2).
+    let l = CustomShape::Extrusion {
+        profile_2d: vec![
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 1.0],
+            [1.0, 2.0],
+            [0.0, 2.0],
+        ],
+        height: 2.0,
+    };
+    assert!((l.to_tri_mesh().unwrap().compute_volume() - 6.0).abs() < 1e-9);
+    // A bad profile is an error.
+    let bad = CustomShape::Extrusion {
+        profile_2d: vec![[0.0, 0.0], [1.0, 1.0]],
+        height: 1.0,
+    };
+    assert!(bad.to_tri_mesh().is_err());
+    // A 3-D triangle polytope (a tetrahedron) converts.
+    let tetra = CustomShape::PolytopeND {
+        dim: 3,
+        vertices: vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+        ],
+        simplices: vec![vec![0, 2, 1], vec![0, 1, 3], vec![1, 2, 3], vec![0, 3, 2]],
+    };
+    let mesh = tetra.to_tri_mesh().unwrap();
+    assert!(mesh.is_closed());
+    assert!((mesh.compute_volume() - 1.0 / 6.0).abs() < 1e-12);
+    // Higher-dimensional polytopes, implicit surfaces and Booleans are reported, not faked.
+    let four_d = CustomShape::PolytopeND {
+        dim: 4,
+        vertices: vec![],
+        simplices: vec![],
+    };
+    assert!(four_d.to_tri_mesh().is_err());
+    let implicit = CustomShape::ParametricImplicit {
+        expr_str: "x^2 + y^2 + z^2 - 1".into(),
+        bbox: BoundingBox3D::new([-2.0; 3], [2.0; 3]),
+    };
+    assert!(implicit.to_tri_mesh().is_err());
+    let boolean = CustomShape::BooleanCSG {
+        op: CsgBooleanOp::Union,
+        left: Box::new(shape.clone()),
+        right: Box::new(shape),
+    };
+    assert!(
+        boolean
+            .to_tri_mesh()
+            .unwrap_err()
+            .to_string()
+            .contains("Boolean")
+    );
+}

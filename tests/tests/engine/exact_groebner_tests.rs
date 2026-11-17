@@ -154,3 +154,138 @@ fn the_floating_point_polynomials_convert_exactly() {
         ]
     );
 }
+
+mod sparse {
+    use algebra_core::ExprGraph;
+    use algebra_engine::poly::{Polynomial, SparseMonomial, groebner_basis};
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    use std::cmp::Ordering;
+    use std::collections::BTreeMap;
+
+    type Term<'a> = (&'a [(&'a str, u32)], i64, i64);
+
+    fn poly(graph: &ExprGraph, terms: &[Term]) -> Polynomial {
+        let mut map = BTreeMap::new();
+        for (powers, n, d) in terms {
+            let mut mono = SparseMonomial::new();
+            for (name, e) in *powers {
+                mono.exps.insert(graph.symbols.get_or_intern(name), *e);
+            }
+            map.insert(mono, BigRational::new(BigInt::from(*n), BigInt::from(*d)));
+        }
+        Polynomial { terms: map }
+    }
+
+    fn rendered(graph: &ExprGraph, p: &Polynomial) -> Vec<(Vec<(String, u32)>, String)> {
+        let mut out: Vec<_> = p
+            .terms
+            .iter()
+            .map(|(m, c)| {
+                let mut e: Vec<(String, u32)> = m
+                    .exps
+                    .iter()
+                    .map(|(s, e)| (graph.symbols.resolve(*s).unwrap_or_default(), *e))
+                    .collect();
+                e.sort();
+                (e, c.to_string())
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn groebner_basis_returns_the_reduced_basis_not_its_input() {
+        let g = ExprGraph::new();
+        // I = <x^3 - 2xy, x^2 y - 2y^2 + x>: reduced basis { x^2, xy, y^2 - x/2 }.
+        let f1 = poly(&g, &[(&[("x", 3)], 1, 1), (&[("x", 1), ("y", 1)], -2, 1)]);
+        let f2 = poly(
+            &g,
+            &[
+                (&[("x", 2), ("y", 1)], 1, 1),
+                (&[("y", 2)], -2, 1),
+                (&[("x", 1)], 1, 1),
+            ],
+        );
+        let basis = groebner_basis(vec![f1.clone(), f2]);
+        let shapes: Vec<_> = basis.iter().map(|p| rendered(&g, p)).collect();
+        let x2 = vec![(vec![("x".to_string(), 2)], "1".to_string())];
+        let xy = vec![(
+            vec![("x".to_string(), 1), ("y".to_string(), 1)],
+            "1".to_string(),
+        )];
+        let y2 = vec![
+            (vec![("x".to_string(), 1)], "-1/2".to_string()),
+            (vec![("y".to_string(), 2)], "1".to_string()),
+        ];
+        assert_eq!(basis.len(), 3, "{shapes:?}");
+        for expected in [&x2, &xy, &y2] {
+            assert!(
+                shapes.iter().any(|s| s == expected),
+                "missing {expected:?} in {shapes:?}"
+            );
+        }
+        // The input was not already a basis, so returning it unchanged would have been wrong.
+        assert_ne!(rendered(&g, &basis[0]), rendered(&g, &f1));
+    }
+
+    #[test]
+    fn degenerate_ideals_and_idempotence() {
+        let g = ExprGraph::new();
+        assert!(groebner_basis(vec![]).is_empty());
+        assert!(groebner_basis(vec![Polynomial::zero()]).is_empty());
+        // <x, x + 1> is the unit ideal.
+        let x = poly(&g, &[(&[("x", 1)], 1, 1)]);
+        let x_plus_one = poly(&g, &[(&[("x", 1)], 1, 1), (&[], 1, 1)]);
+        let unit = groebner_basis(vec![x, x_plus_one]);
+        assert_eq!(unit.len(), 1);
+        assert_eq!(rendered(&g, &unit[0]), vec![(vec![], "1".to_string())]);
+        // A basis is a fixed point.
+        let f = poly(&g, &[(&[("x", 2)], 1, 1), (&[("y", 1)], 1, 1)]);
+        let h = poly(&g, &[(&[("x", 1), ("y", 1)], 1, 1), (&[("x", 1)], -1, 1)]);
+        let once = groebner_basis(vec![f, h]);
+        let twice = groebner_basis(once.clone());
+        let a: Vec<_> = once.iter().map(|p| rendered(&g, p)).collect();
+        let b: Vec<_> = twice.iter().map(|p| rendered(&g, p)).collect();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_grevlex_comparison_is_a_graded_reverse_lexicographic_order() {
+        let g = ExprGraph::new();
+        let mono = |powers: &[(&str, u32)]| {
+            let mut m = SparseMonomial::new();
+            for (n, e) in powers {
+                m.exps.insert(g.symbols.get_or_intern(n), *e);
+            }
+            m
+        };
+        // Total degree first.
+        assert_eq!(
+            mono(&[("a", 1)]).cmp_grevlex(&mono(&[("a", 2)])),
+            Ordering::Less
+        );
+        // Same degree: x^2 y > x y^2 (the last variable with the smaller exponent wins),
+        // and x y z^... : with x > y > z, x y > z^2 > ... check xz vs y^2: y^2 has no z, so it wins.
+        let (x, y, z) = ("x", "y", "z");
+        let _ = (
+            g.symbols.get_or_intern(x),
+            g.symbols.get_or_intern(y),
+            g.symbols.get_or_intern(z),
+        );
+        assert_eq!(
+            mono(&[(x, 2), (y, 1)]).cmp_grevlex(&mono(&[(x, 1), (y, 2)])),
+            Ordering::Greater
+        );
+        assert_eq!(
+            mono(&[(y, 2)]).cmp_grevlex(&mono(&[(x, 1), (z, 1)])),
+            Ordering::Greater
+        );
+        // Admissible: multiplying both sides by a monomial keeps the order.
+        let (a, b) = (mono(&[(x, 1), (z, 1)]), mono(&[(y, 2)]));
+        let m = mono(&[(x, 1), (y, 1), (z, 2)]);
+        assert_eq!(a.cmp_grevlex(&b), a.mul(&m).cmp_grevlex(&b.mul(&m)));
+        assert_eq!(a.cmp_grevlex(&a), Ordering::Equal);
+    }
+}

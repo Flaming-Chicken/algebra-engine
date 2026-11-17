@@ -3,7 +3,7 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
-## [Unreleased]
+## [0.5.0] - 2026-11-17
 
 ### Added
 - Notebook export (`urae_notebook::export`): LaTeX, SymPy and Lean 4 files are built from the parsed document. The LaTeX export previously wrapped the raw buffer, the Python export put it in a docstring, and the Lean export was a two-line stub.

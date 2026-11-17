@@ -151,7 +151,7 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 
 ### 5.2 Phase 13: Geometric CAD, B-Rep & $N$-Dimensional Parametric Design
 
-> **Status (17 Nov 2026).** Found: `BvhTree`, CSG boolean operations, shape import/export, Cox-de Boor B-splines and NURBS patches, implicit contouring. Not found: B-Rep topology structures and Euler operators, BSP trees, knot insertion, degree elevation, convex hull / Voronoi / Delaunay, Double Description / Fourier-Motzkin.
+> **Status (17 Nov 2026).** Found: `BvhTree`, the `CsgBooleanOp` enum (no Boolean engine: `CustomShape::to_tri_mesh` reports it as unsupported), shape import/export, Cox-de Boor B-splines and NURBS patches, implicit contouring. Not found: B-Rep topology structures and Euler operators, BSP trees, knot insertion, degree elevation, convex hull / Voronoi / Delaunay, Double Description / Fourier-Motzkin.
 - **B-Rep Data Model**: Manifold and non-manifold solid model topologies: `Solid`, `Shell`, `Face`, `Loop`, `Edge`, `Vertex` with Euler operators ($MVFS, MEV, MEF, KEV$).
 - **CSG Boolean Engine**: Exact boolean operations on polyhedral and curved solids using BSP trees and perturbation algorithms.
 - **NURBS & Splines**: $B$-Spline basis function generation, Cox-de Boor recursion, rational B-spline curves/surfaces, knot insertion, degree elevation, curvature analysis.

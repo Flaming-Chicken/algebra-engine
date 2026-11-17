@@ -24,6 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
 ### Changed
+- `CustomShape::to_tri_mesh` returns `Result`; implicit surfaces, N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.
 - `CodeGenerator::compile_fn1`, `compile_fn2` and `compile_fn_n` compile to bytecode once and evaluate on `f64` per call instead of cloning the graph and substituting symbolically on every call.
 - `VmCompiler` reports an unbound symbol as a compilation error; it used to compile it as the variable and return wrong numbers.
 - `AdjointSensitivitySolver::compute_gradient` back-propagates exactly through the RK4 steps of `NeuralOde::forward` (fourth-order accurate gradients). It was a first-order scheme with an error of about 1% at 100 steps, and it ignored its `vector_field` argument.
@@ -42,6 +43,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `Mesh3D::extrude_profile` capped non-convex outlines with a fan from one vertex (overlapping or inverted faces); it now ear-clips the polygon, handles either winding, and rejects degenerate or self-intersecting profiles.
 - `NacaAirfoil::generate_3d_mesh` and `HelicalSpring::generate_3d_mesh` returned open shells without end caps (so `compute_volume` was meaningless); they are now closed solids. The airfoil outline no longer repeats its leading-edge point. `ThreadedScrew` meshes are documented as open surfaces.
 - `GpuComputeKernel::enabled` was ignored; it now selects the parallel or sequential path. The `algebra_advanced::gpu` documentation no longer claims SIMD or GPU offload (the kernels are Rayon-parallel CPU code).
 - `EGraph::extract_min_cost` costed only the chosen node's operator, not its operands, so the cheapest-looking node was not the cheapest expression; it now returns the total cost of the cheapest expression, and handles cyclic classes.

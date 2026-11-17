@@ -1143,40 +1143,94 @@ impl Mesh3D {
         mesh
     }
 
-    /// Create an extruded 3D solid from an arbitrary 2D closed polygon cross-section.
+    /// Create an extruded 3D solid from a simple (non-self-intersecting) 2D polygon.
+    ///
+    /// The outline may be convex or not and may run either way round; the result is a closed,
+    /// outward-oriented mesh. The end caps are triangulated by ear clipping, so the volume is
+    /// exactly the polygon's area times `height`. A polygon with fewer than three vertices, a
+    /// zero area, or a self-intersection that defeats ear clipping gives an empty mesh.
     pub fn extrude_profile(profile: &[[f64; 2]], height: f64) -> Self {
         let mut mesh = Self::new("Extrusion");
         let n = profile.len();
         if n < 3 {
             return mesh;
         }
+        let signed_area: f64 = (0..n)
+            .map(|i| {
+                let (p, q) = (profile[i], profile[(i + 1) % n]);
+                p[0] * q[1] - q[0] * p[1]
+            })
+            .sum::<f64>()
+            / 2.0;
+        if signed_area.abs() < 1e-14 {
+            return mesh;
+        }
+        // Work counter-clockwise: reverse a clockwise outline so the outward normals are right.
+        let order: Vec<usize> = if signed_area > 0.0 {
+            (0..n).collect()
+        } else {
+            (0..n).rev().collect()
+        };
+        let ccw: Vec<[f64; 2]> = order.iter().map(|&i| profile[i]).collect();
 
-        // Bottom vertices
-        for p in profile {
+        // Ear clipping of the counter-clockwise polygon.
+        let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+            (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        };
+        let inside = |p: [f64; 2], a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+            cross(a, b, p) >= -1e-12 && cross(b, c, p) >= -1e-12 && cross(c, a, p) >= -1e-12
+        };
+        let mut remaining: Vec<usize> = (0..n).collect();
+        let mut cap: Vec<[usize; 3]> = Vec::with_capacity(n - 2);
+        let mut guard = 0;
+        while remaining.len() > 3 && guard < 4 * n * n {
+            guard += 1;
+            let m = remaining.len();
+            let mut clipped = false;
+            for k in 0..m {
+                let (i0, i1, i2) = (
+                    remaining[(k + m - 1) % m],
+                    remaining[k],
+                    remaining[(k + 1) % m],
+                );
+                let (a, b, c) = (ccw[i0], ccw[i1], ccw[i2]);
+                if cross(a, b, c) <= 1e-14 {
+                    continue; // reflex or degenerate corner
+                }
+                let blocked = remaining
+                    .iter()
+                    .any(|&j| j != i0 && j != i1 && j != i2 && inside(ccw[j], a, b, c));
+                if !blocked {
+                    cap.push([i0, i1, i2]);
+                    remaining.remove(k);
+                    clipped = true;
+                    break;
+                }
+            }
+            if !clipped {
+                return Self::new("Extrusion"); // self-intersecting or otherwise not simple
+            }
+        }
+        if remaining.len() == 3 {
+            cap.push([remaining[0], remaining[1], remaining[2]]);
+        }
+
+        for p in &ccw {
             mesh.add_vertex([p[0], p[1], 0.0]);
         }
-        // Top vertices
-        for p in profile {
+        for p in &ccw {
             mesh.add_vertex([p[0], p[1], height]);
         }
-
-        // Side quads (as triangles)
+        // Side walls (outward for a counter-clockwise outline), then the two caps.
         for i in 0..n {
             let next = (i + 1) % n;
-            let b0 = i;
-            let b1 = next;
-            let t0 = i + n;
-            let t1 = next + n;
-            mesh.add_triangle(b0, b1, t1);
-            mesh.add_triangle(b0, t1, t0);
+            mesh.add_triangle(i, next, next + n);
+            mesh.add_triangle(i, next + n, i + n);
         }
-
-        // Simple bottom & top cap fan triangulation
-        for i in 1..n - 1 {
-            mesh.add_triangle(0, i + 1, i);
-            mesh.add_triangle(n, n + i, n + i + 1);
+        for [a, b, c] in cap {
+            mesh.add_triangle(a, c, b); // bottom faces down
+            mesh.add_triangle(n + a, n + b, n + c); // top faces up
         }
-
         mesh
     }
 }
@@ -1219,14 +1273,55 @@ pub enum CustomShape {
 }
 
 impl CustomShape {
-    /// Convert shape to a concrete `Mesh3D` for visualization and simulation.
-    pub fn to_tri_mesh(&self) -> Mesh3D {
+    /// Convert the shape to a concrete `Mesh3D` for visualization and simulation.
+    ///
+    /// Triangle meshes, extrusions and 3-dimensional polytopes whose simplices are triangles
+    /// convert. Implicit surfaces and Boolean combinations are not meshed by this library and
+    /// return an error: they used to be replaced silently by a unit cube.
+    pub fn to_tri_mesh(&self) -> AlgebraResult<Mesh3D> {
+        let unsupported = |what: &str| {
+            Err(AlgebraError::EvaluationError(format!(
+                "{what} cannot be converted to a triangle mesh yet"
+            )))
+        };
         match self {
-            CustomShape::TriMesh(m) => m.clone(),
+            CustomShape::TriMesh(m) => Ok(m.clone()),
             CustomShape::Extrusion { profile_2d, height } => {
-                Mesh3D::extrude_profile(profile_2d, *height)
+                let mesh = Mesh3D::extrude_profile(profile_2d, *height);
+                if mesh.triangles.is_empty() {
+                    return Err(AlgebraError::EvaluationError(
+                        "the extrusion profile is not a simple polygon of non-zero area".into(),
+                    ));
+                }
+                Ok(mesh)
             }
-            _ => Mesh3D::cube(1.0, 1.0, 1.0),
+            CustomShape::PolytopeND {
+                dim,
+                vertices,
+                simplices,
+            } => {
+                if *dim != 3 || simplices.iter().any(|s| s.len() != 3) {
+                    return unsupported("a polytope that is not a 3-D triangle surface");
+                }
+                let mut mesh = Mesh3D::new("Polytope");
+                for v in vertices {
+                    if v.len() != 3 {
+                        return unsupported("a polytope vertex that is not three-dimensional");
+                    }
+                    mesh.add_vertex([v[0], v[1], v[2]]);
+                }
+                for s in simplices {
+                    if s.iter().any(|&i| i >= vertices.len()) {
+                        return Err(AlgebraError::EvaluationError(
+                            "a polytope simplex refers to a missing vertex".into(),
+                        ));
+                    }
+                    mesh.add_triangle(s[0], s[1], s[2]);
+                }
+                Ok(mesh)
+            }
+            CustomShape::ParametricImplicit { .. } => unsupported("an implicit surface"),
+            CustomShape::BooleanCSG { .. } => unsupported("a Boolean CSG combination"),
         }
     }
 }

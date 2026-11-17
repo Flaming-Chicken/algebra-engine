@@ -949,7 +949,8 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
                 });
             }
         } else if clean.starts_with("lim_(") || clean.starts_with("_(") {
-            let inner_start = clean.find('(').unwrap() + 1;
+            // The branch condition guarantees a '(' is present.
+            let inner_start = clean.find('(').map_or(0, |i| i + 1);
             if let Some(close_rel) = clean[inner_start..].find(')') {
                 let bound_part = &clean[inner_start..inner_start + close_rel];
                 let expr_part = &clean[inner_start + close_rel + 1..];

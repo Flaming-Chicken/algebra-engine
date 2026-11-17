@@ -1477,22 +1477,35 @@ impl fmt::Display for SymMat<'_> {
     }
 }
 
+/// # Panics
+///
+/// Panics on a dimension mismatch, like the arithmetic operators on slices and arrays; use
+/// [`SymMat::try_add`] to handle the error.
 impl<'g> Add<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
+    #[allow(clippy::panic)]
     fn add(self, rhs: &SymMat<'g>) -> SymMat<'g> {
         self.try_add(rhs)
             .unwrap_or_else(|e| panic!("SymMat add failed: {e}"))
     }
 }
+/// # Panics
+///
+/// Panics on a dimension mismatch; use [`SymMat::try_sub`] to handle the error.
 impl<'g> Sub<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
+    #[allow(clippy::panic)]
     fn sub(self, rhs: &SymMat<'g>) -> SymMat<'g> {
         self.try_sub(rhs)
             .unwrap_or_else(|e| panic!("SymMat sub failed: {e}"))
     }
 }
+/// # Panics
+///
+/// Panics on a dimension mismatch; use [`SymMat::try_mul`] to handle the error.
 impl<'g> Mul<&SymMat<'g>> for &SymMat<'g> {
     type Output = SymMat<'g>;
+    #[allow(clippy::panic)]
     fn mul(self, rhs: &SymMat<'g>) -> SymMat<'g> {
         self.try_mul(rhs)
             .unwrap_or_else(|e| panic!("SymMat mul failed: {e}"))

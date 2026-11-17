@@ -330,7 +330,7 @@ impl BackgroundEvaluator {
 
     /// Retrieve or allocate a thread-safe `CancellationToken` for a specific line index.
     pub fn get_line_token(&self, line_idx: usize) -> Arc<CancellationToken> {
-        let mut tokens = self.line_tokens.write().unwrap();
+        let mut tokens = self.line_tokens.write().unwrap_or_else(|e| e.into_inner());
         tokens
             .entry(line_idx)
             .or_insert_with(|| Arc::new(CancellationToken::new()))
@@ -356,7 +356,7 @@ impl BackgroundEvaluator {
         dep_graph: &DependencyGraph,
         total_lines: usize,
     ) {
-        let mut tokens = self.line_tokens.write().unwrap();
+        let mut tokens = self.line_tokens.write().unwrap_or_else(|e| e.into_inner());
         for line_idx in 0..total_lines {
             if dep_graph.should_cancel_line(line_idx, changed_symbols, changed_lines) {
                 if let Some(tok) = tokens.get(&line_idx) {

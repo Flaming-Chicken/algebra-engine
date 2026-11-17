@@ -6550,7 +6550,7 @@ pub fn is_variable_or_param_assignment(raw_text: &str) -> bool {
             && !lhs.contains('}')
             && !lhs.contains(' ')
             && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
-            && !lhs.chars().next().unwrap().is_ascii_digit()
+            && !lhs.chars().next().is_some_and(|c| c.is_ascii_digit())
     } else {
         false
     }
@@ -6693,7 +6693,7 @@ pub fn compute_line_upstream_dependencies(
         // 3. Check for identifier references defined on earlier lines
         let tokens: Vec<&str> = text
             .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .filter(|t| !t.is_empty() && !t.chars().next().unwrap().is_ascii_digit())
+            .filter(|t| !t.is_empty() && !t.chars().next().is_some_and(|c| c.is_ascii_digit()))
             .collect();
 
         for &tok in &tokens {

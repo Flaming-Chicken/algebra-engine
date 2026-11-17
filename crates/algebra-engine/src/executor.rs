@@ -1147,8 +1147,8 @@ impl OperationExecutor {
                         collect_expr_symbols(graph, p2, &mut syms);
                         let var_sym = if syms.is_empty() {
                             graph.symbols.get_or_intern("x")
-                        } else if syms.len() == 1 {
-                            *syms.iter().next().expect("checked non-empty")
+                        } else if let (1, Some(&only)) = (syms.len(), syms.iter().next()) {
+                            only
                         } else {
                             return OperationResult::error(
                                 "Univariate poly_gcd supports only a single variable across both polynomials"
@@ -2826,8 +2826,10 @@ fn execute_symbolic_sum(
                 }
                 let mut sp = BigRational::zero();
                 let mut powers = vec![BigRational::from_integer(BigInt::from(1))];
+                let mut power = BigRational::from_integer(BigInt::from(1));
                 for _ in 0..=(p + 1) {
-                    powers.push(powers.last().unwrap() * m_rat);
+                    power = &power * m_rat;
+                    powers.push(power.clone());
                 }
                 for j in 0..=p {
                     let bin = BigRational::from_integer(binomial_bigint(p + 1, j));

@@ -1,5 +1,14 @@
 # Comprehensive Panic and Unwrap Audit Report
 
+> **Update, 17 Nov 2026.** A recount of production code (everything outside tests, benches and examples) found 29
+> sites, not 63. All reachable ones were removed: guarded `unwrap`s became `map_or`/`let ... else`, poisoned-lock
+> handling recovers the guard, and the notebook launcher reports a failed start. The remaining intentional panics
+> are the matrix operators in `algebra-engine/src/api.rs` (documented `# Panics`, with `try_add`/`try_sub`/`try_mul`
+> as the fallible forms) and the `Uint` operators in `auto-promoters`, which mirror `std` division and
+> subtraction. The workspace now sets `clippy::unwrap_used`, `expect_used` and `panic` to warn, which the CI
+> `-D warnings` gate turns into errors; test code is exempt through `clippy.toml` and crate-level allows in the
+> test suites.
+
 **Original Date:** 16 November 2026  
 **Re-Audit Note:** Later re-verification found that several `.unwrap()`, `.expect()`, `panic!()`, and raw `assert!` call sites remain or re-entered production `crates/*/src` files (63 lines total across production sources; see Section 6 below).  
 **Target:** `algebra-engine` Multi-Crate Workspace (19 Crates at original audit)  

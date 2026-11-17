@@ -205,3 +205,6 @@ mod api_stream_workbench_tests;
 
 #[path = "engine/known_defect_tests.rs"]
 mod known_defect_tests;
+
+#[path = "engine/control_general_order_tests.rs"]
+mod control_general_order_tests;

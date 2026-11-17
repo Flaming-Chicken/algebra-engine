@@ -6,7 +6,6 @@
 //! Gröbner basis ideal reduction to formally prove equivalence hypotheses $E_1 \equiv E_2$,
 //! and streams theorem trajectories to `spodeian-lake` for offline `spodeian-ml` self-improvement.
 
-use crate::poly::grobner::GrobnerBasis;
 use crate::poly::multivariate::{MonomialOrder, MultiPoly};
 use crate::simplify::AlgebraicTransformations;
 use algebra_core::lemma_miner::{
@@ -26,6 +25,149 @@ impl GrobnerProver {
     /// Create a new Gröbner basis prover with given monomial ordering (default: GrevLex).
     pub fn new(order: MonomialOrder) -> Self {
         Self { order }
+    }
+}
+
+/// A transcendental subterm replaced by a fresh polynomial variable.
+struct Atom {
+    name: String,
+    function: String,
+    argument: ExprId,
+}
+
+impl GrobnerProver {
+    /// Replace every `sin`, `cos`, `sinh`, `cosh` or `exp` application in `id` by a fresh
+    /// variable, recording the substitution in `atoms` (equal subterms share a variable).
+    fn abstract_atoms(graph: &ExprGraph, id: ExprId, atoms: &mut Vec<Atom>) -> ExprId {
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Function { name, args } if args.len() == 1 => {
+                let function = graph.symbols.resolve(*name).unwrap_or_default();
+                if matches!(function.as_str(), "sin" | "cos" | "sinh" | "cosh" | "exp") {
+                    let argument = args[0];
+                    let existing = atoms
+                        .iter()
+                        .find(|a| a.function == function && a.argument == argument);
+                    let name = match existing {
+                        Some(atom) => atom.name.clone(),
+                        None => {
+                            let name = format!("_atom{}", atoms.len());
+                            atoms.push(Atom {
+                                name: name.clone(),
+                                function,
+                                argument,
+                            });
+                            name
+                        }
+                    };
+                    return graph.symbol(&name);
+                }
+                id
+            }
+            ExprKind::Add(items) => {
+                let parts: Vec<ExprId> = items
+                    .iter()
+                    .map(|&i| Self::abstract_atoms(graph, i, atoms))
+                    .collect();
+                graph.add(parts)
+            }
+            ExprKind::Mul(items) => {
+                let parts: Vec<ExprId> = items
+                    .iter()
+                    .map(|&i| Self::abstract_atoms(graph, i, atoms))
+                    .collect();
+                graph.mul(parts)
+            }
+            ExprKind::Sub(l, r) => {
+                let (l, r) = (
+                    Self::abstract_atoms(graph, *l, atoms),
+                    Self::abstract_atoms(graph, *r, atoms),
+                );
+                graph.sub(l, r)
+            }
+            ExprKind::Neg(inner) => {
+                let inner = Self::abstract_atoms(graph, *inner, atoms);
+                graph.neg(inner)
+            }
+            ExprKind::Pow(base, exponent) => {
+                let base = Self::abstract_atoms(graph, *base, atoms);
+                graph.pow(base, *exponent)
+            }
+            _ => id,
+        }
+    }
+
+    /// Whether `a + b` is zero: one is the negation of the other, or their sum simplifies to 0.
+    fn are_negatives(graph: &ExprGraph, a: ExprId, b: ExprId) -> bool {
+        let negates = |outer: ExprId, inner: ExprId| matches!(&graph.get(outer).kind, ExprKind::Neg(x) if *x == inner);
+        if negates(a, b) || negates(b, a) {
+            return true;
+        }
+        let sum = graph.add([a, b]);
+        let simplified = crate::simplify::Simplifier::simplify(graph, sum).unwrap_or(sum);
+        matches!(&graph.get(simplified).kind, ExprKind::Number(n) if n.is_zero())
+    }
+
+    /// Decide `diff = 0` modulo the side relations of the atoms in it (see step 5 above).
+    fn proved_modulo_side_relations(
+        &self,
+        graph: &ExprGraph,
+        diff: ExprId,
+        vars: &[String],
+    ) -> bool {
+        use crate::poly::exact::{ExactGrobner, ExactPoly};
+        let mut atoms = Vec::new();
+        let abstracted = Self::abstract_atoms(graph, diff, &mut atoms);
+        if atoms.is_empty() {
+            return false;
+        }
+
+        // Relations among the atoms that actually occur.
+        let mut relations: Vec<ExprId> = Vec::new();
+        let square = |name: &str| graph.pow(graph.symbol(name), graph.integer(2));
+        for first in &atoms {
+            for second in &atoms {
+                if first.argument == second.argument {
+                    if first.function == "sin" && second.function == "cos" {
+                        relations.push(graph.sub(
+                            graph.add([square(&first.name), square(&second.name)]),
+                            graph.integer(1),
+                        ));
+                    }
+                    if first.function == "cosh" && second.function == "sinh" {
+                        relations.push(graph.sub(
+                            graph.sub(square(&first.name), square(&second.name)),
+                            graph.integer(1),
+                        ));
+                    }
+                }
+                if first.function == "exp" && second.function == "exp" && first.name < second.name {
+                    if Self::are_negatives(graph, first.argument, second.argument) {
+                        relations.push(graph.sub(
+                            graph.mul([graph.symbol(&first.name), graph.symbol(&second.name)]),
+                            graph.integer(1),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let mut variables: Vec<String> = vars.to_vec();
+        variables.extend(atoms.iter().map(|a| a.name.clone()));
+        let expand = |e: ExprId| AlgebraicTransformations::expand(graph, e);
+        let convert = |e: ExprId| -> Option<ExactPoly> {
+            let poly = MultiPoly::from_expr(graph, expand(e), &variables, self.order).ok()?;
+            ExactPoly::from_multi_poly(&poly)
+        };
+        let Some(target) = convert(abstracted) else {
+            return false;
+        };
+        let Some(generators): Option<Vec<ExactPoly>> =
+            relations.iter().map(|&r| convert(r)).collect()
+        else {
+            return false;
+        };
+        ExactGrobner::compute(&generators).contains(&target)
     }
 }
 
@@ -85,14 +227,11 @@ impl FormalEquivalenceProver for GrobnerProver {
             }
         }
 
-        // 5. Check modulo algebraic relations (e.g., standard polynomial ideal reduction)
-        // If difference polynomial reduces to zero in empty ideal
-        if let Ok(basis) = GrobnerBasis::from_exprs(graph, &[], &vars, self.order) {
-            if let Ok(is_member) = basis.contains_expr(graph, diff) {
-                if is_member {
-                    return true;
-                }
-            }
+        // 5. Modulo the side relations of the transcendental atoms that occur: sin^2 + cos^2 = 1,
+        //    cosh^2 - sinh^2 = 1 and exp(a) exp(-a) = 1. Each atom becomes a fresh variable and
+        //    membership of the difference in the exact (rational) Groebner ideal decides the claim.
+        if self.proved_modulo_side_relations(graph, diff, &vars) {
+            return true;
         }
 
         false

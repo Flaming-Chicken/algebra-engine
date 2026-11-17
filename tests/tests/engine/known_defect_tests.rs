@@ -656,3 +656,46 @@ fn frobenius_series_solve_bessel_equations_at_the_origin() {
         SymbolicOdeSolver::frobenius_series_at_zero(&g, p_symbolic, g.integer(0), x, 4).is_err()
     );
 }
+
+#[test]
+fn the_prover_uses_trigonometric_hyperbolic_and_exponential_side_relations() {
+    use algebra_core::lemma_miner::FormalEquivalenceProver;
+    use algebra_engine::lemma_miner::GrobnerProver;
+    use algebra_engine::poly::multivariate::MonomialOrder;
+    let g = ExprGraph::new();
+    let prover = GrobnerProver::new(MonomialOrder::GrevLex);
+    let x = g.symbol("x");
+    let y = g.symbol("y");
+    let f = |name: &str, a| g.function(name, [a]);
+    let sq = |e| g.pow(e, g.integer(2));
+    let one = g.integer(1);
+    let prove = |l, r| prover.prove_equivalence(&g, l, r, &[]);
+
+    // sin^2 + cos^2 = 1, and consequences that need the relation more than once.
+    assert!(prove(g.add([sq(f("sin", x)), sq(f("cos", x))]), one));
+    assert!(prove(
+        g.pow(g.add([sq(f("sin", x)), sq(f("cos", x))]), g.integer(3)),
+        one
+    ));
+    // cos(2x)-style: (cos x - sin x)(cos x + sin x) = 2 cos^2 x - 1.
+    let (c, s) = (f("cos", x), f("sin", x));
+    assert!(prove(
+        g.mul([g.sub(c, s), g.add([c, s])]),
+        g.sub(g.mul([g.integer(2), sq(c)]), one)
+    ));
+    // The relation is per argument: sin^2(x) + cos^2(y) is not 1.
+    assert!(!prove(g.add([sq(f("sin", x)), sq(f("cos", y))]), one));
+
+    // cosh^2 - sinh^2 = 1.
+    assert!(prove(g.sub(sq(f("cosh", x)), sq(f("sinh", x))), one));
+    // exp(x) exp(-x) = 1, but exp(x) exp(x) is not 1.
+    assert!(prove(g.mul([f("exp", x), f("exp", g.neg(x))]), one));
+    assert!(!prove(g.mul([f("exp", x), f("exp", x)]), one));
+
+    // Non-identities stay unproven.
+    assert!(!prove(
+        g.add([sq(f("sin", x)), sq(f("cos", x))]),
+        g.integer(2)
+    ));
+    assert!(!prove(f("sin", x), f("cos", x)));
+}

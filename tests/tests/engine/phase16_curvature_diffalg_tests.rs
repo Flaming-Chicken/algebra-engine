@@ -86,11 +86,10 @@ fn test_ritt_wu_characteristic_set() {
     let system = vec![y2, y0, y1];
     let cs = RittWuReducer::characteristic_set(system).expect("Characteristic set failed");
 
-    // Characteristic set ordered by derivative order
-    assert_eq!(cs.len(), 3);
+    // y = 0 forces y' = 0 and y'' = 0, so the characteristic set is {y}. (The earlier
+    // implementation only sorted its input and returned all three.)
+    assert_eq!(cs.len(), 1);
     assert_eq!(cs[0].leader(), Some(DiffIndeterminate::new(0, 0)));
-    assert_eq!(cs[1].leader(), Some(DiffIndeterminate::new(0, 1)));
-    assert_eq!(cs[2].leader(), Some(DiffIndeterminate::new(0, 2)));
 }
 
 #[test]
@@ -112,6 +111,7 @@ fn test_curvature_macros() {
 
     let y0 = DiffPolynomial::var(0, 0);
     let y1 = DiffPolynomial::var(0, 1);
+    // y' is a consequence of y = 0, so the characteristic set is {y}.
     let cs = char_set!(vec![y1, y0]).unwrap();
-    assert_eq!(cs.len(), 2);
+    assert_eq!(cs.len(), 1);
 }

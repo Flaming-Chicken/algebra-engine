@@ -84,7 +84,7 @@ items below. The phases marked 🟡 above are marked because of these gaps.
 | 13 | B-Rep topology structures and Euler operators, BSP trees, knot insertion, degree elevation, convex hull / Voronoi / Delaunay |
 | 14 | Weak-form generator, Hex20/Hex27, plate theory, hyperelasticity, Navier–Stokes / Taylor–Hood / SUPG, Maxwell / Nédélec elements, h/p refinement and error estimators, CG / GMRES / BiCGSTAB / multigrid (the notebook has example titles only) |
 | 15 | Automatic mesh generation |
-| 16 | Differential pseudo-division, Meijer G and Slater's theorem, Weyl tensor, Killing-vector solver |
+| 16 | Meijer G and Slater's theorem, Weyl tensor, Killing-vector solver (differential pseudo-division now exists) |
 | 18 | PyO3 `#[pymodule]` and ZeroMQ kernel transport (comments only; already marked Wave 2) |
 | 22 | Alpha complexes |
 | 23 | Beltrami–Klein model, hyperbolic Voronoi / Delaunay |
@@ -190,7 +190,7 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 
 ### 5.5 Phase 16: Next-Gen Differential Algebra & Tensor Curvature
 
-> **Status (17 Nov 2026).** Found: `RittWuReducer`, metric, Christoffel, Riemann, Ricci and Einstein tensors. Not found: differential pseudo-division, Meijer G and Slater's theorem, Killing-vector solver, Weyl tensor. The Zeilberger bullet is a fixed set of showcase proofs (ledger A8).
+> **Status (17 Nov 2026).** Found: `RittWuReducer` with differential pseudo-division and Ritt's characteristic-set procedure, metric, Christoffel, Riemann, Ricci and Einstein tensors. Not found: Meijer G and Slater's theorem, Killing-vector solver, Weyl tensor. The Zeilberger bullet is a fixed set of showcase proofs (ledger A8).
 - **Ritt-Wu Differential Algebra**: Characteristic sets of differential polynomial ideals, pseudodivision with respect to derivative leaders, checking differential algebraic variety inclusion.
 - **Meijer $G$-Function Definite Integration**: Unified definite integration engine using Slater's theorem and contour Mellin transforms for special function integration.
 - **Einstein Summation & General Relativity**:

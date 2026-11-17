@@ -5,9 +5,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ## [Unreleased]
 
-### Changed
-- Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
-
 ### Added
 - `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
 - Closed forms for second-order linear recurrences with distinct or repeated real roots.
@@ -15,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Summation of any polynomial summand by Faulhaber's formula (degree up to 12).
 
 ### Changed
+- Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
 - `pade!` returns `AlgebraResult<ExprId>` and computes a real approximant (it returned a placeholder quotient).
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 

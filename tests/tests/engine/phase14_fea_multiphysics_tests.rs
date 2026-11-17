@@ -481,7 +481,7 @@ fn body_force_and_unsupported_elements_are_handled_honestly() {
     assert!((total - 8.0).abs() < 1e-8, "reaction {total} vs weight 8");
 
     // An element type the elasticity solver does not implement is an error, not silence.
-    let mut quad = FeaMesh::new(2, algebra_engine::pde::ElementType::Hex8);
+    let mut quad = FeaMesh::new(2, algebra_engine::pde::ElementType::Tri6);
     for p in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
         quad.add_node(p.to_vec());
     }
@@ -630,8 +630,92 @@ fn heat_conduction_on_quadrilaterals_and_tetrahedra() {
     );
 
     // An element type with no heat formulation is an error, not silently ignored.
-    let mut hex = FeaMesh::new(3, algebra_engine::pde::ElementType::Hex8);
+    let mut hex = FeaMesh::new(3, algebra_engine::pde::ElementType::Tri6);
     hex.add_node(vec![0.0, 0.0, 0.0]);
     hex.add_element(vec![0; 8]);
     assert!(FeaEngine::solve(&hex, &heat(0.0), &[]).is_err());
+}
+
+#[test]
+fn hexahedral_elements_pass_the_patch_tests_on_a_distorted_mesh() {
+    let (lx, ly, lz, d, e, nu) = (3.0_f64, 2.0, 2.0, 0.015, 180.0, 0.28);
+    let mut mesh = FeaMesh::box_3d_hex(lx, ly, lz, 3, 2, 2);
+    assert_eq!(mesh.elements.len(), 12);
+    // Move the interior nodes off the grid (a node is interior when on no boundary group).
+    let on_boundary: std::collections::HashSet<usize> =
+        mesh.boundary_groups.values().flatten().copied().collect();
+    for n in 0..mesh.nodes.len() {
+        if !on_boundary.contains(&n) {
+            mesh.nodes[n][0] += 0.11;
+            mesh.nodes[n][1] -= 0.09;
+            mesh.nodes[n][2] += 0.07;
+        }
+    }
+    let physics = PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: e,
+        poissons_ratio: nu,
+        density: 1.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    };
+    let fix = |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+        group_name: group.into(),
+        dof_index,
+        value,
+    };
+    let bcs = vec![
+        fix("left", 0, 0.0),
+        fix("right", 0, d),
+        fix("bottom", 1, 0.0),
+        fix("front", 2, 0.0),
+    ];
+    let sol = FeaEngine::solve(&mesh, &physics, &bcs).unwrap();
+    let eps = d / lx;
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = [eps * p[0], -nu * eps * p[1], -nu * eps * p[2]];
+        for c in 0..3 {
+            let got = sol.nodal_values[i * 3 + c];
+            assert!(
+                (got - want[c]).abs() < 1e-10,
+                "node {i} comp {c}: {got} vs {want:?}"
+            );
+        }
+    }
+    for (k, v) in sol.von_mises_stresses.iter().enumerate() {
+        assert!((v - e * eps).abs() < 1e-9 * e * eps, "element {k}: {v}");
+    }
+
+    // Heat: linear profile between a hot and a cold face, exact on the distorted mesh.
+    let heat = PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: 3.0,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: 0.0,
+    };
+    let temperature = |group: &str, t: f64| FeaBoundaryCondition::PrescribedTemperature {
+        group_name: group.into(),
+        temperature: t,
+    };
+    let sol = FeaEngine::solve(
+        &mesh,
+        &heat,
+        &[temperature("left", 90.0), temperature("right", 30.0)],
+    )
+    .unwrap();
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = 90.0 - 60.0 * p[0] / lx;
+        assert!(
+            (sol.nodal_values[i] - want).abs() < 1e-9,
+            "node {i}: {}",
+            sol.nodal_values[i]
+        );
+    }
+
+    // An inverted hexahedron is an error.
+    let mut flipped = FeaMesh::box_3d_hex(1.0, 1.0, 1.0, 1, 1, 1);
+    flipped.elements[0].swap(0, 4);
+    flipped.elements[0].swap(1, 5);
+    flipped.elements[0].swap(2, 6);
+    flipped.elements[0].swap(3, 7);
+    assert!(FeaEngine::solve(&flipped, &physics, &[]).is_err());
 }

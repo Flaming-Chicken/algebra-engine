@@ -171,6 +171,63 @@ impl FeaMesh {
         mesh
     }
 
+    /// A rectangular block of trilinear hexahedra (Hex8): `nx * ny * nz` cells with the same
+    /// boundary groups as [`FeaMesh::box_3d`].
+    pub fn box_3d_hex(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> Self {
+        let mut mesh = Self::new(3, ElementType::Hex8);
+        for k in 0..=nz {
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    mesh.add_node(vec![
+                        lx * i as f64 / nx as f64,
+                        ly * j as f64 / ny as f64,
+                        lz * k as f64 / nz as f64,
+                    ]);
+                }
+            }
+        }
+        let id = |i: usize, j: usize, k: usize| (k * (ny + 1) + j) * (nx + 1) + i;
+        for k in 0..nz {
+            for j in 0..ny {
+                for i in 0..nx {
+                    mesh.add_element(vec![
+                        id(i, j, k),
+                        id(i + 1, j, k),
+                        id(i + 1, j + 1, k),
+                        id(i, j + 1, k),
+                        id(i, j, k + 1),
+                        id(i + 1, j, k + 1),
+                        id(i + 1, j + 1, k + 1),
+                        id(i, j + 1, k + 1),
+                    ]);
+                }
+            }
+        }
+        let mut groups: [Vec<usize>; 6] = Default::default();
+        for k in 0..=nz {
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    let n = id(i, j, k);
+                    for (slot, hit) in [i == 0, i == nx, j == 0, j == ny, k == 0, k == nz]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if hit {
+                            groups[slot].push(n);
+                        }
+                    }
+                }
+            }
+        }
+        for (name, nodes) in ["left", "right", "bottom", "top", "front", "back"]
+            .into_iter()
+            .zip(groups)
+        {
+            mesh.add_boundary_group(name, nodes);
+        }
+        mesh
+    }
+
     /// A rectangular block `[0, lx] x [0, ly] x [0, lz]` of linear tetrahedra (Tet4): each of the
     /// `nx * ny * nz` cells is cut into six tetrahedra around its main diagonal, which makes
     /// neighbouring cells agree on shared faces. Boundary groups: `left`/`right` (x = 0 / lx),
@@ -599,6 +656,53 @@ impl FeaEngine {
                     }
                 }
 
+                ElementType::Hex8 if mesh.dim == 3 => {
+                    if elem.len() != 8 {
+                        return Err(AlgebraError::EvaluationError(
+                            "a Hex8 element needs eight nodes".into(),
+                        ));
+                    }
+                    let d = Self::solid_constitutive(e_mod, nu);
+                    let g = 1.0 / 3.0_f64.sqrt();
+                    let mut volume = 0.0;
+                    for &sz in &[-g, g] {
+                        for &sy in &[-g, g] {
+                            for &sx in &[-g, g] {
+                                let Some((grads, det)) =
+                                    Self::hex8_gradients(mesh, elem, sx, sy, sz)
+                                else {
+                                    return Err(AlgebraError::EvaluationError(
+                                        "a Hex8 element is degenerate or inverted (non-positive Jacobian)"
+                                            .into(),
+                                    ));
+                                };
+                                volume += det;
+                                let b = Self::solid_b_matrix::<24>(&grads);
+                                for r in 0..24 {
+                                    for c in 0..24 {
+                                        let mut val = 0.0;
+                                        for i in 0..6 {
+                                            for j in 0..6 {
+                                                val += b[i][r] * d[i][j] * b[j][c];
+                                            }
+                                        }
+                                        k_global.add(
+                                            elem[r / 3] * 3 + r % 3,
+                                            elem[c / 3] * 3 + c % 3,
+                                            val * det,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for &ni in elem.iter() {
+                        for (dof, &bf) in body_force.iter().enumerate().take(3) {
+                            f_global[ni * 3 + dof] += bf * volume / 8.0;
+                        }
+                    }
+                }
+
                 ElementType::Tet4 if mesh.dim == 3 => {
                     if elem.len() != 4 {
                         return Err(AlgebraError::EvaluationError(
@@ -685,7 +789,32 @@ impl FeaEngine {
         let mut von_mises = Vec::new();
         let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
         for elem in &mesh.elements {
-            if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 && elem.len() == 4 {
+            if mesh.element_type == ElementType::Hex8 && mesh.dim == 3 && elem.len() == 8 {
+                // Stress at the element centre.
+                let Some((grads, _)) = Self::hex8_gradients(mesh, elem, 0.0, 0.0, 0.0) else {
+                    von_mises.push(0.0);
+                    continue;
+                };
+                let b = Self::solid_b_matrix::<24>(&grads);
+                let d = Self::solid_constitutive(e_mod, nu);
+                let mut strain = [0.0; 6];
+                for (i, row) in b.iter().enumerate() {
+                    for (col, value) in row.iter().enumerate() {
+                        strain[i] += value * displacement[elem[col / 3] * 3 + col % 3];
+                    }
+                }
+                let mut s = [0.0; 6];
+                for i in 0..6 {
+                    for j in 0..6 {
+                        s[i] += d[i][j] * strain[j];
+                    }
+                }
+                von_mises.push(
+                    (0.5 * ((s[0] - s[1]).powi(2) + (s[1] - s[2]).powi(2) + (s[2] - s[0]).powi(2))
+                        + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]))
+                        .sqrt(),
+                );
+            } else if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 && elem.len() == 4 {
                 // Stress at the element centre (the superconvergent point for a bilinear element).
                 let Some((b, _)) = Self::quad4_b_matrix(mesh, elem, 0.0, 0.0) else {
                     von_mises.push(0.0);
@@ -911,6 +1040,37 @@ impl FeaEngine {
                         f_global[elem[r]] += heat_source * n_i * det;
                     }
                 }
+            } else if mesh.element_type == ElementType::Hex8 && mesh.dim == 3 {
+                if elem.len() != 8 {
+                    return Err(AlgebraError::EvaluationError(
+                        "a Hex8 element needs eight nodes".into(),
+                    ));
+                }
+                let g = 1.0 / 3.0_f64.sqrt();
+                for &sz in &[-g, g] {
+                    for &sy in &[-g, g] {
+                        for &sx in &[-g, g] {
+                            let Some((grads, det)) = Self::hex8_gradients(mesh, elem, sx, sy, sz)
+                            else {
+                                return Err(AlgebraError::EvaluationError(
+                                    "a Hex8 element is degenerate or inverted (non-positive Jacobian)"
+                                        .into(),
+                                ));
+                            };
+                            for r in 0..8 {
+                                for c in 0..8 {
+                                    let dot: f64 = (0..3).map(|a| grads[r][a] * grads[c][a]).sum();
+                                    k_global.add(elem[r], elem[c], conductivity * dot * det);
+                                }
+                                let sgn = Self::HEX8_SIGN[r];
+                                let n_i =
+                                    (1.0 + sgn[0] * sx) * (1.0 + sgn[1] * sy) * (1.0 + sgn[2] * sz)
+                                        / 8.0;
+                                f_global[elem[r]] += heat_source * n_i * det;
+                            }
+                        }
+                    }
+                }
             } else if mesh.element_type == ElementType::Tet4 && mesh.dim == 3 {
                 if elem.len() != 4 {
                     return Err(AlgebraError::EvaluationError(
@@ -1027,6 +1187,96 @@ impl FeaEngine {
             b[2][2 * i + 1] = dx;
         }
         Some((b, det))
+    }
+
+    /// Natural-coordinate signs of the eight Hex8 nodes (bottom face counter-clockwise, then top).
+    const HEX8_SIGN: [[f64; 3]; 8] = [
+        [-1.0, -1.0, -1.0],
+        [1.0, -1.0, -1.0],
+        [1.0, 1.0, -1.0],
+        [-1.0, 1.0, -1.0],
+        [-1.0, -1.0, 1.0],
+        [1.0, -1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [-1.0, 1.0, 1.0],
+    ];
+
+    /// Physical shape-function gradients of a trilinear hexahedron at the natural point
+    /// `(xi, eta, zeta)` and the Jacobian determinant, or `None` when it is not positive.
+    fn hex8_gradients(
+        mesh: &FeaMesh,
+        elem: &[usize],
+        xi: f64,
+        eta: f64,
+        zeta: f64,
+    ) -> Option<([[f64; 3]; 8], f64)> {
+        let mut dn = [[0.0; 3]; 8];
+        for (i, s) in Self::HEX8_SIGN.iter().enumerate() {
+            dn[i] = [
+                s[0] * (1.0 + s[1] * eta) * (1.0 + s[2] * zeta) / 8.0,
+                s[1] * (1.0 + s[0] * xi) * (1.0 + s[2] * zeta) / 8.0,
+                s[2] * (1.0 + s[0] * xi) * (1.0 + s[1] * eta) / 8.0,
+            ];
+        }
+        let mut j = [[0.0; 3]; 3];
+        for (i, &node) in elem.iter().enumerate() {
+            let p = &mesh.nodes[node];
+            for a in 0..3 {
+                for b in 0..3 {
+                    j[a][b] += dn[i][a] * p[b];
+                }
+            }
+        }
+        let det = j[0][0] * (j[1][1] * j[2][2] - j[1][2] * j[2][1])
+            - j[0][1] * (j[1][0] * j[2][2] - j[1][2] * j[2][0])
+            + j[0][2] * (j[1][0] * j[2][1] - j[1][1] * j[2][0]);
+        if det <= 1e-14 {
+            return None;
+        }
+        // Inverse by cofactors.
+        let inv = [
+            [
+                (j[1][1] * j[2][2] - j[1][2] * j[2][1]) / det,
+                (j[0][2] * j[2][1] - j[0][1] * j[2][2]) / det,
+                (j[0][1] * j[1][2] - j[0][2] * j[1][1]) / det,
+            ],
+            [
+                (j[1][2] * j[2][0] - j[1][0] * j[2][2]) / det,
+                (j[0][0] * j[2][2] - j[0][2] * j[2][0]) / det,
+                (j[0][2] * j[1][0] - j[0][0] * j[1][2]) / det,
+            ],
+            [
+                (j[1][0] * j[2][1] - j[1][1] * j[2][0]) / det,
+                (j[0][1] * j[2][0] - j[0][0] * j[2][1]) / det,
+                (j[0][0] * j[1][1] - j[0][1] * j[1][0]) / det,
+            ],
+        ];
+        let mut grads = [[0.0; 3]; 8];
+        for i in 0..8 {
+            for a in 0..3 {
+                grads[i][a] = inv[a][0] * dn[i][0] + inv[a][1] * dn[i][1] + inv[a][2] * dn[i][2];
+            }
+        }
+        Some((grads, det))
+    }
+
+    /// The 6 x `3 n` strain-displacement matrix for `n` nodes with physical gradients `grads`
+    /// (strain `[exx, eyy, ezz, gxy, gyz, gzx]`); `N` must equal `3 * grads.len()`.
+    fn solid_b_matrix<const N: usize>(grads: &[[f64; 3]]) -> [[f64; N]; 6] {
+        let mut b = [[0.0; N]; 6];
+        for (i, g) in grads.iter().enumerate() {
+            let col = i * 3;
+            b[0][col] = g[0];
+            b[1][col + 1] = g[1];
+            b[2][col + 2] = g[2];
+            b[3][col] = g[1];
+            b[3][col + 1] = g[0];
+            b[4][col + 1] = g[2];
+            b[4][col + 2] = g[1];
+            b[5][col] = g[2];
+            b[5][col + 2] = g[0];
+        }
+        b
     }
 
     /// Shape-function gradients `(b, c, d)` per node of a linear tetrahedron (`N_i = a + b x +

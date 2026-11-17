@@ -26,6 +26,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `StateSpaceSystem::is_stable` judged systems with three or more states by the sign of the trace; it now applies Routh-Hurwitz (continuous) or Schur-Cohn (discrete) to the characteristic polynomial.
+- `frequency_response` returned zeros for every system that was not a two-state SISO one, and ignored the sample time of discrete systems; it now evaluates `C(sI - A)^-1 B + D` in general.
+- `pole_placement_ackermann` supports any controllable single-input system (it stopped at two states).
 - `UnificationEngine::unify` only handled a top-level symbol or number and failed on everything else. It is now a structural first-order unifier with an occurs check; `SubstitutionMap::apply` applies the result.
 - The CLI proof export gated its step on unifying an expression with its own simplification, which almost never succeeded and is not an equivalence test; it now uses the equivalence check.
 - `lagrange_inversion` divided `w / f` before differentiating, which is `0/0` at the expansion point for every `f` except the identity. It now computes the exact series of the inverse function and rejects non-invertible input.

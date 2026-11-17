@@ -6,8 +6,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [Unreleased]
 
 ### Added
+- `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
 - `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
 - `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
+
+### Fixed
+- LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.
 
 ## [0.5.0] - 2026-11-17
 

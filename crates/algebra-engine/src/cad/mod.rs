@@ -1247,21 +1247,38 @@ impl Mesh3D {
                         let (cp, cn) = (mean(&positive), mean(&negative));
                         let towards = [cp[0] - cn[0], cp[1] - cn[1], cp[2] - cn[2]];
 
-                        let mut triangles: Vec<[usize; 3]> = Vec::new();
+                        // Orientation is decided from the midpoints of the crossed edges, which stay
+                        // well separated even when a surface point lands on a grid vertex and the
+                        // interpolated points coincide.
+                        let mid = |pv: usize, nv: usize| -> [f64; 3] {
+                            let (a, b) = (verts[pv].1, verts[nv].1);
+                            [
+                                (a[0] + b[0]) / 2.0,
+                                (a[1] + b[1]) / 2.0,
+                                (a[2] + b[2]) / 2.0,
+                            ]
+                        };
+                        let mut triangles: Vec<([usize; 3], [[f64; 3]; 3])> = Vec::new();
                         match (positive.len(), negative.len()) {
                             (1, 3) => {
                                 let p = positive[0];
-                                let a = cross(p, negative[0], &mut mesh);
-                                let b = cross(p, negative[1], &mut mesh);
-                                let c = cross(p, negative[2], &mut mesh);
-                                triangles.push([a, b, c]);
+                                let e: Vec<usize> = negative[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&q| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(p, e[0]), mid(p, e[1]), mid(p, e[2])],
+                                ));
                             }
                             (3, 1) => {
-                                let n0 = negative[0];
-                                let a = cross(positive[0], n0, &mut mesh);
-                                let b = cross(positive[1], n0, &mut mesh);
-                                let c = cross(positive[2], n0, &mut mesh);
-                                triangles.push([a, b, c]);
+                                let q = negative[0];
+                                let e: Vec<usize> = positive[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&p| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(e[0], q), mid(e[1], q), mid(e[2], q)],
+                                ));
                             }
                             _ => {
                                 // Two against two: a quad through the four mixed edges.
@@ -1271,13 +1288,13 @@ impl Mesh3D {
                                 let b = cross(p0, n1, &mut mesh);
                                 let c = cross(p1, n1, &mut mesh);
                                 let d = cross(p1, n0, &mut mesh);
-                                triangles.push([a, b, c]);
-                                triangles.push([a, c, d]);
+                                let (ma, mb, mc, md) =
+                                    (mid(p0, n0), mid(p0, n1), mid(p1, n1), mid(p1, n0));
+                                triangles.push(([a, b, c], [ma, mb, mc]));
+                                triangles.push(([a, c, d], [ma, mc, md]));
                             }
                         }
-                        for [a, b, c] in triangles {
-                            let (va, vb, vc) =
-                                (mesh.vertices[a], mesh.vertices[b], mesh.vertices[c]);
+                        for ([a, b, c], [va, vb, vc]) in triangles {
                             let u = [vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]];
                             let w = [vc[0] - va[0], vc[1] - va[1], vc[2] - va[2]];
                             let normal = [

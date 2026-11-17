@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [Unreleased]
 
 ### Added
+- `ProofTrace::export_lean4_with` and `export_coq_with`: each step is a theorem about the real expressions it rewrote (closed by `ring`; unsupported steps are listed as comments). The CLI and agent export use them.
 - `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
 - Closed forms for second-order linear recurrences with distinct or repeated real roots.
 - Cartan operations (wedge, `d`, interior product, Lie derivative, Hodge star) read the form that was typed (`dx`, `2 dx + dz`, `dx^dy`).
@@ -15,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ### Changed
 - Planning consolidated: `docs/PLANNING.md` indexes the planning documents and tracks every known stub and defect against the code; `ROADMAP.md` marks phases 12-16, 22, 23 and 27 as Partial and lists the scope that has no implementation.
 - `pade!` returns `AlgebraResult<ExprId>` and computes a real approximant (it returned a placeholder quotient).
+- `creative_telescoping_integral`, `EmpiricalDistributionMut::{pdf, cdf}` and an unreachable AI provider return errors instead of a fixed Gaussian ODE, constants and a canned `f(x)` explanation.
 - `puiseux_series` with a fractional exponent, `log`, `preset` and AI queries in the executor return errors instead of placeholder output.
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 

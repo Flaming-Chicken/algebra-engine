@@ -52,13 +52,21 @@ impl EmpiricalDistributionMut {
     }
 }
 
+/// The empirical distribution keeps only a running count, mean and variance (Welford), not the
+/// observations, so it has no density or distribution function to return.
+fn no_density() -> algebra_core::AlgebraError {
+    algebra_core::AlgebraError::EvaluationError(
+        "EmpiricalDistributionMut keeps only running moments; it has no PDF or CDF".into(),
+    )
+}
+
 impl GeneralizedDistribution for EmpiricalDistributionMut {
-    fn pdf(&self, graph: &ExprGraph, _x: ExprId) -> AlgebraResult<ExprId> {
-        Ok(graph.float(1.0 / (self.count as f64).max(1.0)))
+    fn pdf(&self, _graph: &ExprGraph, _x: ExprId) -> AlgebraResult<ExprId> {
+        Err(no_density())
     }
 
-    fn cdf(&self, graph: &ExprGraph, _x: ExprId) -> AlgebraResult<ExprId> {
-        Ok(graph.float(0.5))
+    fn cdf(&self, _graph: &ExprGraph, _x: ExprId) -> AlgebraResult<ExprId> {
+        Err(no_density())
     }
 
     fn mean(&self) -> f64 {

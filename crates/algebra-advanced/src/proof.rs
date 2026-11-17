@@ -90,6 +90,88 @@ pub struct ProofTrace {
     pub steps: Vec<ProofStep>,
 }
 
+/// Target proof assistant for statement rendering.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Prover {
+    Lean,
+    Coq,
+}
+
+/// Render `id` as a real-valued term for `prover`, or `None` when it uses something the exporter
+/// does not translate (an unknown function, a non-rational constant, an integral, ...).
+fn render_term(
+    graph: &ExprGraph,
+    id: ExprId,
+    prover: Prover,
+    vars: &mut Vec<String>,
+) -> Option<String> {
+    use algebra_core::{ExprKind, Number};
+    let node = graph.get(id);
+    match &node.kind {
+        ExprKind::Number(Number::Integer(i)) => Some(if *i < 0 {
+            format!("({i})")
+        } else {
+            i.to_string()
+        }),
+        ExprKind::Number(Number::Rational(n, d)) => Some(format!("(({n}:R) / ({d}:R))")).map(|s| {
+            if prover == Prover::Lean {
+                format!("(({n}:ℝ) / ({d}:ℝ))")
+            } else {
+                s
+            }
+        }),
+        ExprKind::Symbol(sym) => {
+            let name = graph.symbols.resolve(*sym)?;
+            if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return None;
+            }
+            if !vars.contains(&name) {
+                vars.push(name.clone());
+            }
+            Some(name)
+        }
+        ExprKind::Add(terms) => {
+            let parts: Option<Vec<String>> = terms
+                .iter()
+                .map(|&t| render_term(graph, t, prover, vars))
+                .collect();
+            Some(format!("({})", parts?.join(" + ")))
+        }
+        ExprKind::Mul(factors) => {
+            let parts: Option<Vec<String>> = factors
+                .iter()
+                .map(|&f| render_term(graph, f, prover, vars))
+                .collect();
+            Some(format!("({})", parts?.join(" * ")))
+        }
+        ExprKind::Sub(l, r) => Some(format!(
+            "({} - {})",
+            render_term(graph, *l, prover, vars)?,
+            render_term(graph, *r, prover, vars)?
+        )),
+        ExprKind::Div(l, r) => Some(format!(
+            "({} / {})",
+            render_term(graph, *l, prover, vars)?,
+            render_term(graph, *r, prover, vars)?
+        )),
+        ExprKind::Neg(inner) => Some(format!("(-{})", render_term(graph, *inner, prover, vars)?)),
+        ExprKind::Pow(base, exponent) => {
+            // Only natural-number exponents are translated; they are valid for `ring`.
+            let ExprKind::Number(Number::Integer(e)) = graph.get(*exponent).kind else {
+                return None;
+            };
+            if e < 0 {
+                return None;
+            }
+            Some(format!(
+                "({} ^ {e})",
+                render_term(graph, *base, prover, vars)?
+            ))
+        }
+        _ => None,
+    }
+}
+
 impl ProofTrace {
     pub fn new() -> Self {
         Self { steps: Vec::new() }
@@ -103,7 +185,75 @@ impl ProofTrace {
         });
     }
 
-    /// Export proof trace to Lean 4 code string.
+    fn export_with(&self, graph: &ExprGraph, prover: Prover) -> String {
+        let mut out = match prover {
+            Prover::Lean => String::from(
+                "-- URAE proof trace for Lean 4 (Mathlib). Not machine-checked by URAE.\n-- A step is closed with `ring` when both sides are polynomial; other steps are left\n-- as `sorry` and must be proved by hand.\nimport Mathlib\n\n",
+            ),
+            Prover::Coq => String::from(
+                "(* URAE proof trace for Coq. Not machine-checked by URAE.\n   A step is closed with `ring` when both sides are polynomial; other steps are left\n   as `Admitted` and must be proved by hand. *)\nRequire Import Reals.\nRequire Import Lra.\nRequire Import Ring.\nOpen Scope R_scope.\n\n",
+            ),
+        };
+        for (index, step) in self.steps.iter().enumerate() {
+            let number = index + 1;
+            let mut vars = Vec::new();
+            let before = render_term(graph, step.before, prover, &mut vars);
+            let after = render_term(graph, step.after, prover, &mut vars);
+            let (Some(before), Some(after)) = (before, after) else {
+                out.push_str(&match prover {
+                    Prover::Lean => format!(
+                        "-- step {number} ({}): not translated (unsupported expression)\n\n",
+                        step.rule_name
+                    ),
+                    Prover::Coq => format!(
+                        "(* step {number} ({}): not translated (unsupported expression) *)\n\n",
+                        step.rule_name
+                    ),
+                });
+                continue;
+            };
+            match prover {
+                Prover::Lean => {
+                    let binders = if vars.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({} : ℝ)", vars.join(" "))
+                    };
+                    out.push_str(&format!(
+                        "-- rule: {}\ntheorem step_{number}{binders} : ({before} : ℝ) = {after} := by\n  ring\n\n",
+                        step.rule_name
+                    ));
+                }
+                Prover::Coq => {
+                    let binders = vars
+                        .iter()
+                        .map(|v| format!("forall {v} : R, "))
+                        .collect::<String>();
+                    out.push_str(&format!(
+                        "(* rule: {} *)\nLemma step_{number} : {binders}{before} = {after}.\nProof. intros; ring. Qed.\n\n",
+                        step.rule_name
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    /// Export the trace to Lean 4 with each step as a theorem about the real expressions it
+    /// rewrote. Both sides are translated only for polynomial arithmetic (`+ - * /`, natural
+    /// powers, rational literals); a step outside that fragment is listed as a comment. The
+    /// proofs are `ring` and are not checked by URAE; a step that is not a ring identity
+    /// (for example one that divides by an expression) will fail in Lean.
+    pub fn export_lean4_with(&self, graph: &ExprGraph) -> String {
+        self.export_with(graph, Prover::Lean)
+    }
+
+    /// Export the trace to Coq; see [`ProofTrace::export_lean4_with`].
+    pub fn export_coq_with(&self, graph: &ExprGraph) -> String {
+        self.export_with(graph, Prover::Coq)
+    }
+
+    /// Skeleton export: rule names with `sorry`, no expressions. Prefer [`ProofTrace::export_lean4_with`].
     pub fn export_lean4(&self) -> String {
         let mut out = String::from("-- Generated Lean 4 Proof Trace\nimport Mathlib\n\n");
         out.push_str("theorem algebraic_simplification : True := by\n");
@@ -114,7 +264,7 @@ impl ProofTrace {
         out
     }
 
-    /// Export proof trace to Coq code string.
+    /// Skeleton export: rule names only, no expressions. Prefer [`ProofTrace::export_coq_with`].
     pub fn export_coq(&self) -> String {
         let mut out = String::from(
             "(* Generated Coq Proof Trace *)\nRequire Import Utf8.\nRequire Import Arith.\n\n",

@@ -230,11 +230,7 @@ impl FormalEquivalenceProver for GrobnerProver {
         // 5. Modulo the side relations of the transcendental atoms that occur: sin^2 + cos^2 = 1,
         //    cosh^2 - sinh^2 = 1 and exp(a) exp(-a) = 1. Each atom becomes a fresh variable and
         //    membership of the difference in the exact (rational) Groebner ideal decides the claim.
-        if self.proved_modulo_side_relations(graph, diff, &vars) {
-            return true;
-        }
-
-        false
+        self.proved_modulo_side_relations(graph, diff, &vars)
     }
 }
 

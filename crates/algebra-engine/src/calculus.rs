@@ -1121,7 +1121,7 @@ fn collect_denominators(graph: &ExprGraph, expr: ExprId, wrt: SymbolId, out: &mu
 }
 
 /// Exact rational value of a numeric literal expression, if it is one.
-fn exact_rational(graph: &ExprGraph, e: ExprId) -> Option<num_rational::BigRational> {
+pub(crate) fn exact_rational(graph: &ExprGraph, e: ExprId) -> Option<num_rational::BigRational> {
     use num_bigint::BigInt;
     use num_rational::BigRational;
     match &graph.get(e).kind {
@@ -1136,7 +1136,10 @@ fn exact_rational(graph: &ExprGraph, e: ExprId) -> Option<num_rational::BigRatio
     }
 }
 
-fn rational_expr(graph: &ExprGraph, r: &num_rational::BigRational) -> AlgebraResult<ExprId> {
+pub(crate) fn rational_expr(
+    graph: &ExprGraph,
+    r: &num_rational::BigRational,
+) -> AlgebraResult<ExprId> {
     use num_traits::ToPrimitive;
     match (r.numer().to_i64(), r.denom().to_i64()) {
         (Some(n), Some(d)) => Ok(graph.rational(n, d)),
@@ -1261,7 +1264,7 @@ pub fn pade_approximant(
     Ok(Simplifier::simplify(graph, result).unwrap_or(result))
 }
 
-fn taylor_coeffs_vec(
+pub(crate) fn taylor_coeffs_vec(
     graph: &ExprGraph,
     expr: ExprId,
     wrt: SymbolId,

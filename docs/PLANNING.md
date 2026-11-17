@@ -51,7 +51,7 @@ code. No item remains unchecked. Fixed defects have a regression test in
 | B2 | `caputo_derivative` wrong for α ≠ 0.5 | **Fixed** | kernel exponent is `α + 1 − n` |
 | B3 | `solve_pde_heat_1d` | **Fixed** | modes are `cos(k_x x)` and `exp(-α² k_x² t)`, using the symbols passed in |
 | B4 | `solve_ode_linear` with `p = 0` | **Fixed** | `y' = 1` gives `x`; each stage is simplified before it is integrated again |
-| B5 | `laurent_series` / `lagrange_inversion` | **Partly fixed** | Laurent now handles pole order 0 and simplifies; Lagrange inversion unchanged |
+| B5 | `laurent_series` / `lagrange_inversion` | **Fixed** | Laurent handles pole order 0 and simplifies; `lagrange_inversion` is exact: it expands `f` to rational coefficients, takes `y^n/n · [w^(n-1)] (w/f)^n` by power-series arithmetic (so `sin w` and `e^w − 1` work), and returns errors for non-invertible `f` or non-rational coefficients. Checked against `arcsin`, `ln(1+y)` and the Catalan inverse of `w + w²` |
 | B6 | `RecurrenceSolver::solve_linear_constant` order ≥ 2 | **Fixed** | orders 1 and 2 (distinct real roots, repeated root); complex roots and order ≥ 3 return an error |
 | B7 | `differential.rs` forcing term drops the Duhamel integral | **Fixed** | forced 2×2 systems add `∫₀ᵗ Φ(t−τ) g(τ) dτ` (an unevaluated integral when no antiderivative is found) instead of the diagonal-entry product; checked against `y1 = 1 − e^{-t}` |
 | B8 | `cat_eval.rs` stamps an order-3 enclosure on a linear tangent | **Fixed** | the tangent-line tier is labelled `taylor_order_1` with remainder order 2; with no expansion variable the result is exact |
@@ -77,7 +77,7 @@ changed:
 
 ## 3. Fixed since the first audit
 
-17 Nov 2026, after the ledger was verified: B7–B12, A1 (`pade!`), A2 (Clifford), A3 (Cartan input), A4 (`export`), A5, A6 (honest errors), A7, A9 (Lean/Coq export), A10,, B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
+17 Nov 2026, after the ledger was verified: B5, B7–B12, A1 (`pade!`), A2 (Clifford), A3 (Cartan input), A4 (`export`), A5, A6 (honest errors), A7, A9 (Lean/Coq export), A10,, B1 (summation), B2 (Caputo kernel), B3 (heat PDE), B4 (linear ODE), B6 (second-order recurrences). The 0.4.0 fixes follow.
 
 Released in 0.3.2 and 0.4.0 (see `CHANGELOG.md`): limits through radicals and variable exponents, two-sided limits
 through `abs`/`sign`, formatter precedence and exponent rendering, base and radical merging in the simplifier, Itô
@@ -89,7 +89,7 @@ number-theory output, the GUI plan status, and the documentation corrections to 
 1. **Make stubs honest before making them real.** A1–A7, A9 and A10 are done. For the rest of A1–A11, either implement the feature or return an explicit
    "not implemented" error and remove the claim from ROADMAP, README and the notebook help. A wrong answer
    presented as a result is worse than a refusal. A11 (GUI export formats) is the smallest; A8 needs a real algorithm.
-2. **Numerical and symbolic correctness (B1–B12).** B1–B4 and B6–B12 are fixed, with tests in
+2. **Numerical and symbolic correctness (B1–B12).** B1–B12 are fixed, with tests in
    `tests/tests/engine/known_defect_tests.rs`. For each remaining item add a failing test, then fix. Each fix needs a test that fails on the old code.
 3. **Panic hygiene: done (17 Nov).** The recount found 29 production sites, not 63; reachable ones are removed and
    `clippy::unwrap_used`, `expect_used` and `panic` are enforced as warnings (errors under CI's `-D warnings`).

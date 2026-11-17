@@ -50,38 +50,74 @@ impl SymbolicSeries for ExprGraph {
         out_var: SymbolId,
         order: u32,
     ) -> AlgebraResult<ExprId> {
-        let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
+        use num_rational::BigRational;
+        use num_traits::{One, Zero};
+        let fail = |why: &str| AlgebraError::EvaluationError(format!("lagrange inversion: {why}"));
+        let order = order as usize;
         let out_name = self.symbols.resolve(out_var).unwrap_or_default();
-        let w = self.symbol(&wrt_name);
         let y = self.symbol(&out_name);
-
-        let zero = self.integer(0);
-        let w_over_f = self.div(w, expr);
-
-        let mut terms = Vec::new();
-        let mut factorial = 1i64;
-
-        for n in 1..=order {
-            if n > 1 {
-                factorial *= n as i64;
-            }
-
-            let n_expr = self.integer(n as i64);
-            let pow_ratio = self.pow(w_over_f, n_expr);
-
-            let mut deriv = pow_ratio;
-            for _ in 0..(n - 1) {
-                deriv = self.diff(deriv, wrt);
-            }
-
-            let eval_at_zero = self.substitute(deriv, wrt, zero);
-            let coeff = self.div(eval_at_zero, self.integer(factorial));
-            let y_pow = self.pow(y, n_expr);
-            let term = self.mul([coeff, y_pow]);
-            terms.push(term);
+        if order == 0 {
+            return Ok(self.integer(0));
         }
 
-        Ok(self.add(terms))
+        // Taylor coefficients of f(w) about 0, which must be exact rationals with f(0) = 0.
+        let coeffs: Vec<BigRational> =
+            crate::calculus::taylor_coeffs_vec(self, expr, wrt, self.integer(0), order)
+                .iter()
+                .map(|&c| crate::calculus::exact_rational(self, c))
+                .collect::<Option<_>>()
+                .ok_or_else(|| fail("the Taylor coefficients of f are not all exact rationals"))?;
+        if !coeffs[0].is_zero() {
+            return Err(fail("f(0) must be 0"));
+        }
+        if coeffs.get(1).is_none_or(|c| c.is_zero()) {
+            return Err(fail("f'(0) must be non-zero for f to be invertible near 0"));
+        }
+
+        // f(w) = w g(w), so g_j = f_{j+1}; w = sum_n y^n/n [w^(n-1)] g(w)^(-n).
+        let len = order; // g is needed through degree order - 1
+        let g: Vec<BigRational> = (0..len).map(|j| coeffs[j + 1].clone()).collect();
+        let mul = |a: &[BigRational], b: &[BigRational]| -> Vec<BigRational> {
+            let mut out = vec![BigRational::zero(); len];
+            for (i, x) in a.iter().enumerate() {
+                for (j, z) in b.iter().enumerate() {
+                    if i + j < len {
+                        out[i + j] += x * z;
+                    }
+                }
+            }
+            out
+        };
+        // Power-series inverse of g (g_0 != 0).
+        let mut inverse = vec![BigRational::zero(); len];
+        inverse[0] = BigRational::one() / g[0].clone();
+        for k in 1..len {
+            let mut acc = BigRational::zero();
+            for j in 1..=k {
+                acc += &g[j] * &inverse[k - j];
+            }
+            inverse[k] = -acc / g[0].clone();
+        }
+
+        let mut terms = Vec::new();
+        let mut power = inverse.clone(); // g^(-1)
+        for n in 1..=order {
+            if n > 1 {
+                power = mul(&power, &inverse);
+            }
+            let coefficient = power[n - 1].clone() / BigRational::from_integer((n as i64).into());
+            if coefficient.is_zero() {
+                continue;
+            }
+            let c = crate::calculus::rational_expr(self, &coefficient)?;
+            terms.push(self.mul([c, self.pow(y, self.integer(n as i64))]));
+        }
+        Ok(if terms.is_empty() {
+            self.integer(0)
+        } else {
+            let sum = self.add(terms);
+            crate::simplify::Simplifier::simplify(self, sum).unwrap_or(sum)
+        })
     }
 
     fn laurent_series(

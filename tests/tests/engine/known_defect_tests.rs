@@ -1,4 +1,4 @@
-//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B7, B10, B12).
+//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B5, B7, B10, B12).
 //!
 //! Each test asserts the correct behaviour and was written to fail on the code it replaced.
 
@@ -542,4 +542,62 @@ fn forced_linear_system_includes_the_duhamel_convolution() {
         DifferentialSystemSolver::solve_linear_system_2x2(&g, &rot, Some(&forced), Some(&y0), t)
             .unwrap();
     assert!(!show(&g, sol[0]).contains("tau"), "{}", show(&g, sol[0]));
+}
+
+#[test]
+fn lagrange_inversion_returns_the_series_of_the_inverse_function() {
+    use algebra_engine::series::SymbolicSeries;
+    let g = ExprGraph::new();
+    let w = g.symbols.get_or_intern("w");
+    let y = g.symbols.get_or_intern("y");
+    let wv = g.symbol("w");
+    let order = 12;
+    type Case = (&'static str, algebra_core::ExprId, Box<dyn Fn(f64) -> f64>);
+    let cases: Vec<Case> = vec![
+        // f(w) = w + w^2  =>  w = (sqrt(1 + 4y) - 1) / 2
+        (
+            "w + w^2",
+            g.add([wv, g.pow(wv, g.integer(2))]),
+            Box::new(|y| ((1.0 + 4.0 * y).sqrt() - 1.0) / 2.0),
+        ),
+        // f(w) = sin w  =>  w = arcsin y   (w / sin w is 0/0 at w = 0)
+        (
+            "sin w",
+            g.function("sin", [wv]),
+            Box::new(|y: f64| y.asin()),
+        ),
+        // f(w) = e^w - 1  =>  w = ln(1 + y)
+        (
+            "exp(w) - 1",
+            g.sub(g.function("exp", [wv]), g.integer(1)),
+            Box::new(|y: f64| (1.0 + y).ln()),
+        ),
+        // f(w) = 2w  =>  w = y / 2
+        ("2 w", g.mul([g.integer(2), wv]), Box::new(|y| y / 2.0)),
+    ];
+    for (name, f, inverse) in cases {
+        let series = g.lagrange_inversion(f, w, y, order).unwrap();
+        for at in [0.02_f64, 0.05, -0.05] {
+            let got = eval_at(&g, series, at);
+            assert!(
+                (got - inverse(at)).abs() < 1e-9,
+                "{name} at {at}: {got} vs {} ({})",
+                inverse(at),
+                show(&g, series)
+            );
+        }
+    }
+    // Not invertible, or not exactly representable: errors, not guesses.
+    assert!(
+        g.lagrange_inversion(g.pow(wv, g.integer(2)), w, y, 4)
+            .is_err()
+    );
+    assert!(
+        g.lagrange_inversion(g.add([wv, g.integer(1)]), w, y, 4)
+            .is_err()
+    );
+    assert!(
+        g.lagrange_inversion(g.function("sin", [g.mul([g.symbol("a"), wv])]), w, y, 4)
+            .is_err()
+    );
 }

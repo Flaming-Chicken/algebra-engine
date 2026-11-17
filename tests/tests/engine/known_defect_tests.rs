@@ -1190,3 +1190,49 @@ fn implicit_surfaces_mesh_to_closed_solids_with_the_right_volume() {
     };
     assert!(shape.to_tri_mesh().unwrap().is_closed());
 }
+
+#[test]
+fn boolean_combinations_of_implicit_solids_have_the_right_volumes() {
+    use algebra_engine::cad::{BoundingBox3D, CsgBooleanOp, CustomShape};
+    use std::f64::consts::PI;
+
+    let bbox = BoundingBox3D::new([-1.5, -1.5, -1.5], [2.5, 1.5, 1.5]);
+    let sphere = |centre: &str| CustomShape::ParametricImplicit {
+        expr_str: format!("({centre})^2 + y^2 + z^2 - 1"),
+        bbox: bbox.clone(),
+    };
+    let (a, b) = (sphere("x"), sphere("x - 1"));
+    let combine = |op| CustomShape::BooleanCSG {
+        op,
+        left: Box::new(a.clone()),
+        right: Box::new(b.clone()),
+    };
+    let ball = 4.0 / 3.0 * PI;
+    // Two unit spheres whose centres are 1 apart: the lens has volume pi (4R + d)(2R - d)^2 / 12.
+    let lens = PI * 5.0 / 12.0;
+    for (op, expected) in [
+        (CsgBooleanOp::Intersection, lens),
+        (CsgBooleanOp::Union, 2.0 * ball - lens),
+        (CsgBooleanOp::Difference, ball - lens),
+    ] {
+        let mesh = combine(op).to_tri_mesh().unwrap();
+        assert!(mesh.is_closed(), "{op:?} must be a closed solid");
+        let v = mesh.compute_volume();
+        assert!(
+            (v - expected).abs() < 0.05 * expected,
+            "{op:?}: volume {v} vs {expected}"
+        );
+    }
+
+    // Operands without a scalar field cannot take part yet, and say so.
+    let cube = CustomShape::Extrusion {
+        profile_2d: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        height: 1.0,
+    };
+    let mixed = CustomShape::BooleanCSG {
+        op: CsgBooleanOp::Union,
+        left: Box::new(a),
+        right: Box::new(cube),
+    };
+    assert!(mixed.to_tri_mesh().is_err());
+}

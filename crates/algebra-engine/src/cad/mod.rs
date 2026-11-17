@@ -1125,12 +1125,6 @@ impl Mesh3D {
         resolution: usize,
     ) -> AlgebraResult<Self> {
         let fail = |why: String| AlgebraError::EvaluationError(format!("implicit surface: {why}"));
-        if !(2..=200).contains(&resolution) {
-            return Err(fail("the resolution must be between 2 and 200".into()));
-        }
-        if (0..3).any(|a| bbox.max[a] <= bbox.min[a]) {
-            return Err(fail("the bounding box must have positive extent".into()));
-        }
         let graph = algebra_core::ExprGraph::new();
         let expr = algebra_core::parser::ExprParser::new(&graph)
             .parse(expression)
@@ -1143,7 +1137,30 @@ impl Mesh3D {
         )
         .map_err(|e| fail(e.to_string()))?;
         let vm = algebra_core::vm::BytecodeVM::new();
+        Self::from_field(
+            &|p| {
+                vm.eval_scalar(&program, p[0], &[p[1], p[2]])
+                    .map_err(|e| fail(e.to_string()))
+            },
+            bbox,
+            resolution,
+        )
+    }
 
+    /// Mesh the zero level set of a scalar field `f(p)` (positive outside, negative inside) inside
+    /// `bbox` by marching tetrahedra; see [`Mesh3D::from_implicit`] for the guarantees.
+    pub fn from_field(
+        field: &dyn Fn([f64; 3]) -> AlgebraResult<f64>,
+        bbox: &BoundingBox3D,
+        resolution: usize,
+    ) -> AlgebraResult<Self> {
+        let fail = |why: String| AlgebraError::EvaluationError(format!("implicit surface: {why}"));
+        if !(2..=200).contains(&resolution) {
+            return Err(fail("the resolution must be between 2 and 200".into()));
+        }
+        if (0..3).any(|a| bbox.max[a] <= bbox.min[a]) {
+            return Err(fail("the bounding box must have positive extent".into()));
+        }
         let n = resolution;
         let stride = n + 1;
         let point = |i: usize, j: usize, k: usize| -> [f64; 3] {
@@ -1159,9 +1176,7 @@ impl Mesh3D {
             for j in 0..=n {
                 for i in 0..=n {
                     let p = point(i, j, k);
-                    let v = vm
-                        .eval_scalar(&program, p[0], &[p[1], p[2]])
-                        .map_err(|e| fail(e.to_string()))?;
+                    let v = field(p)?;
                     if !v.is_finite() {
                         return Err(fail(format!("f is not finite at {p:?}")));
                     }
@@ -1535,7 +1550,73 @@ impl CustomShape {
             CustomShape::ParametricImplicit { expr_str, bbox } => {
                 Mesh3D::from_implicit(expr_str, bbox, 40)
             }
-            CustomShape::BooleanCSG { .. } => unsupported("a Boolean CSG combination"),
+            CustomShape::BooleanCSG { .. } => {
+                let (field, bbox) = self.implicit_field()?;
+                Mesh3D::from_field(&*field, &bbox, 48)
+            }
+        }
+    }
+
+    /// The shape as a scalar field (negative inside, positive outside) and a box containing it,
+    /// when it is an implicit surface or a Boolean combination of such: union is `min(a, b)`,
+    /// intersection `max(a, b)` and difference `max(a, -b)`. Other operand kinds (triangle
+    /// meshes, extrusions, polytopes) have no field here and give an error.
+    #[allow(clippy::type_complexity)]
+    pub fn implicit_field(
+        &self,
+    ) -> AlgebraResult<(
+        Box<dyn Fn([f64; 3]) -> AlgebraResult<f64> + '_>,
+        BoundingBox3D,
+    )> {
+        match self {
+            CustomShape::ParametricImplicit { expr_str, bbox } => {
+                let fail = |why: String| {
+                    AlgebraError::EvaluationError(format!("implicit surface: {why}"))
+                };
+                let graph = algebra_core::ExprGraph::new();
+                let expr = algebra_core::parser::ExprParser::new(&graph)
+                    .parse(expr_str)
+                    .map_err(|e| fail(format!("cannot parse `{expr_str}`: {e:?}")))?;
+                let program = algebra_core::vm::VmCompiler::compile(
+                    &graph,
+                    expr,
+                    "x",
+                    &["y".to_string(), "z".to_string()],
+                )
+                .map_err(|e| fail(e.to_string()))?;
+                let vm = algebra_core::vm::BytecodeVM::new();
+                Ok((
+                    Box::new(move |p| {
+                        vm.eval_scalar(&program, p[0], &[p[1], p[2]])
+                            .map_err(|e| fail(e.to_string()))
+                    }),
+                    bbox.clone(),
+                ))
+            }
+            CustomShape::BooleanCSG { op, left, right } => {
+                let (fa, ba) = left.implicit_field()?;
+                let (fb, bb) = right.implicit_field()?;
+                let bbox = BoundingBox3D::new(
+                    [0, 1, 2].map(|a| ba.min[a].min(bb.min[a])),
+                    [0, 1, 2].map(|a| ba.max[a].max(bb.max[a])),
+                );
+                let op = *op;
+                Ok((
+                    Box::new(move |p| {
+                        let (a, b) = (fa(p)?, fb(p)?);
+                        Ok(match op {
+                            CsgBooleanOp::Union => a.min(b),
+                            CsgBooleanOp::Intersection => a.max(b),
+                            CsgBooleanOp::Difference => a.max(-b),
+                        })
+                    }),
+                    bbox,
+                ))
+            }
+            _ => Err(AlgebraError::EvaluationError(
+                "only implicit surfaces and Boolean combinations of them have a scalar field;                  meshes, extrusions and polytopes cannot take part in a Boolean yet"
+                    .into(),
+            )),
         }
     }
 }

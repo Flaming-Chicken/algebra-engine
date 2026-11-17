@@ -28,3 +28,6 @@ mod gux_gui_modernization_tests;
 
 #[path = "notebook/smart_stream_tests.rs"]
 mod smart_stream_tests;
+
+#[path = "notebook/export_tests.rs"]
+mod export_tests;

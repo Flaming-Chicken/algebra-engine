@@ -41,7 +41,7 @@ code. No item remains unchecked. Fixed defects have a regression test in
 | A8 | `ZeilbergerAlgorithm` / `AlmkvistZeilberger` | **Open** | Three hard-coded showcase proofs; no general creative telescoping |
 | A9 | `ProofTrace::export_lean4/export_coq` | **Fixed** | `export_lean4_with` / `export_coq_with` state each step as a theorem about the real expressions, closed by `ring`, with untranslatable steps listed as comments. Output is not machine-checked by URAE; the skeleton `export_lean4`/`export_coq` remain but are documented as such. CLI and agent use the new methods |
 | A10 | Agent offline fallback | **Fixed** | an unreachable AI provider now returns an error (API key redacted) instead of a fixed `f(x)` explanation |
-| A11 | GUI `.tex/.py/.lean` export, presentation export, `WorkspaceTab` routing | **Open** | `app.rs:1327` wraps the raw buffer; no formatting |
+| A11 | GUI `.tex/.py/.lean` export, presentation export, `WorkspaceTab` routing | **Partly fixed** | `.tex`, `.py` and `.lean` export now translate the parsed document (`urae_notebook::export`): equations and expressions are typeset, emitted as SymPy, or stated as Lean theorems; lines that do not parse are kept as comments. Still open: the presentation print/export and the `WorkspaceTab` routing |
 
 ### B. Formula and algorithm defects
 
@@ -86,7 +86,7 @@ number-theory output, the GUI plan status, and the documentation corrections to 
 
 ## 4. Open work, in priority order
 
-1. **Make stubs honest before making them real.** A1–A7, A9 and A10 are done. For the rest of A1–A11, either implement the feature or return an explicit
+1. **Make stubs honest before making them real.** A1–A7, A9 and A10 are done, A11 partly. For the rest of A1–A11, either implement the feature or return an explicit
    "not implemented" error and remove the claim from ROADMAP, README and the notebook help. A wrong answer
    presented as a result is worse than a refusal. A11 (GUI export formats) is the smallest; A8 needs a real algorithm.
 2. **Numerical and symbolic correctness (B1–B12).** B1–B12 are fixed, with tests in

@@ -48,6 +48,7 @@
 
 pub mod app;
 pub mod examples;
+pub mod export;
 pub mod notebook;
 pub mod ui;
 

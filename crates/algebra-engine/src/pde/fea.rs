@@ -884,6 +884,53 @@ impl FeaEngine {
                         f_global[ni] += heat_source * area / 3.0;
                     }
                 }
+            } else if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 {
+                if elem.len() != 4 {
+                    return Err(AlgebraError::EvaluationError(
+                        "a Quad4 element needs four nodes".into(),
+                    ));
+                }
+                // 2 x 2 Gauss integration of the gradient products and the source.
+                let g = 1.0 / 3.0_f64.sqrt();
+                for &(xi, eta) in &[(-g, -g), (g, -g), (g, g), (-g, g)] {
+                    let Some((b, det)) = Self::quad4_b_matrix(mesh, elem, xi, eta) else {
+                        return Err(AlgebraError::EvaluationError(
+                            "a Quad4 element is degenerate or inverted (non-positive Jacobian)"
+                                .into(),
+                        ));
+                    };
+                    // Nodal gradients: dN_i/dx = b[0][2i], dN_i/dy = b[1][2i + 1].
+                    for r in 0..4 {
+                        for c in 0..4 {
+                            let k = b[0][2 * r] * b[0][2 * c] + b[1][2 * r + 1] * b[1][2 * c + 1];
+                            k_global.add(elem[r], elem[c], conductivity * k * det);
+                        }
+                        // N_i at the Gauss point is (1 + s xi)(1 + t eta) / 4.
+                        let (sx, sy) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)][r];
+                        let n_i = (1.0 + sx * xi) * (1.0 + sy * eta) / 4.0;
+                        f_global[elem[r]] += heat_source * n_i * det;
+                    }
+                }
+            } else if mesh.element_type == ElementType::Tet4 && mesh.dim == 3 {
+                if elem.len() != 4 {
+                    return Err(AlgebraError::EvaluationError(
+                        "a Tet4 element needs four nodes".into(),
+                    ));
+                }
+                if let Some((grads, volume)) = Self::tet4_gradients(mesh, elem) {
+                    for r in 0..4 {
+                        for c in 0..4 {
+                            let dot: f64 = (0..3).map(|a| grads[r][a] * grads[c][a]).sum();
+                            k_global.add(elem[r], elem[c], conductivity * dot * volume);
+                        }
+                        f_global[elem[r]] += heat_source * volume / 4.0;
+                    }
+                }
+            } else {
+                return Err(AlgebraError::EvaluationError(format!(
+                    "heat conduction is not implemented for {:?} elements in {} dimension(s)",
+                    mesh.element_type, mesh.dim
+                )));
             }
         }
 

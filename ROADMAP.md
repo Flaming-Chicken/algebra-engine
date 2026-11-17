@@ -141,6 +141,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 > section 2.1 lists them and `docs/PLANNING.md` tracks the work.
 
 ### 5.1 Phase 12: Cylindrical Algebraic Decomposition (CAD) & Real Quantifier Elimination
+
+> **Status (17 Nov 2026).** Found: Collins, McCallum and Brown projection, `CadCell`, Sturm root isolation, a quantifier-elimination entry point (`cad::QuantifierEliminator::eliminate`). Not found: VAS real-root isolation. Partial: the geometric constraint solver handles only `Distance` and `Coincident` (ledger C3).
 - **Projection Operators**: Collins projection, McCallum projection, Brown augmented projection producing univariate polynomial delineating sets.
 - **Real Root Isolation**: Vincent-Akritas-Strzeboński (VAS) continuous fraction isolation for exact real roots $\alpha \in (a, b)$ with minimal polynomial $p(\alpha) = 0$.
 - **Cylindrical Lifting**: Constructing stack of sign-invariant cylindrical cells over $\mathbb{R}^n$.
@@ -148,6 +150,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 - **Parametric Geometric Constraint Solver**: Solving 2D/3D/ND geometric sketches with tangency, perpendicularity, distance, and fixed area constraints.
 
 ### 5.2 Phase 13: Geometric CAD, B-Rep & $N$-Dimensional Parametric Design
+
+> **Status (17 Nov 2026).** Found: `BvhTree`, CSG boolean operations, shape import/export, Cox-de Boor B-splines and NURBS patches, implicit contouring. Not found: B-Rep topology structures and Euler operators, BSP trees, knot insertion, degree elevation, convex hull / Voronoi / Delaunay, Double Description / Fourier-Motzkin.
 - **B-Rep Data Model**: Manifold and non-manifold solid model topologies: `Solid`, `Shell`, `Face`, `Loop`, `Edge`, `Vertex` with Euler operators ($MVFS, MEV, MEF, KEV$).
 - **CSG Boolean Engine**: Exact boolean operations on polyhedral and curved solids using BSP trees and perturbation algorithms.
 - **NURBS & Splines**: $B$-Spline basis function generation, Cox-de Boor recursion, rational B-spline curves/surfaces, knot insertion, degree elevation, curvature analysis.
@@ -155,6 +159,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 - **$N$-Dimensional Polytope Engine**: Convex hull, Voronoi hyper-diagrams, Delaunay hyper-triangulations, Double Description Method / Fourier-Motzkin elimination.
 
 ### 5.3 Phase 14: Multiphysics FEA / FEM Simulation Suite
+
+> **Status (17 Nov 2026).** Found: Tri6, Quad8, Tet10 and Hex8 elements, elasticity matrices, von Mises stress, a Galerkin solver (dense; ledger C10). Not found: weak-form generator, Hex20/Hex27, plates, hyperelasticity, Navier–Stokes / Taylor–Hood / SUPG, Nédélec elements, h/p refinement and error estimators, CG / GMRES / BiCGSTAB / multigrid.
 - **Variational Weak Form Generator**: Automatically transforms strong-form symbolic PDEs into bilinear forms $a(u, v)$ and linear forms $L(v)$ using symbolic integration by parts and Cartan calculus.
 - **Element Library in $\mathbb{R}^n$**:
   - 1D Elements: 2-node linear, 3-node quadratic, $p$-order spectral.
@@ -171,6 +177,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Conjugate Gradient (CG), GMRES, Preconditioned BiCGSTAB with Incomplete Cholesky / Algebraic Multigrid (AMG) preconditioners.
 
 ### 5.4 Phase 15: Cross-Tooling Integration Pipeline
+
+> **Status (17 Nov 2026).** Found: `CadFeaBridge` (CAD solids to simulation meshes). Not found: automatic mesh generation (step 2) and a symbolic variational engine producing K and F (step 4). Steps 6 and 7 (60 FPS reactive 3D stress view) are not verified.
 - **Unified Parametric Simulation Workflow**:
   1. Define parametric CAD geometry in the reactive notepad (e.g. `bracket = cylinder(r=r1, h=h1) - cylinder(r=r2, h=h1)`).
   2. Automatic mesh generator produces boundary-conforming simplicial mesh in background thread.
@@ -181,6 +189,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   7. Modifying parameter scrubber $r1$ or $F_{\text{load}}$ instantly recalculates and updates the 3D visualization reactively at 60 FPS.
 
 ### 5.5 Phase 16: Next-Gen Differential Algebra & Tensor Curvature
+
+> **Status (17 Nov 2026).** Found: `RittWuReducer`, metric, Christoffel, Riemann, Ricci and Einstein tensors. Not found: differential pseudo-division, Meijer G and Slater's theorem, Killing-vector solver, Weyl tensor. The Zeilberger bullet is a fixed set of showcase proofs (ledger A8).
 - **Ritt-Wu Differential Algebra**: Characteristic sets of differential polynomial ideals, pseudodivision with respect to derivative leaders, checking differential algebraic variety inclusion.
 - **Meijer $G$-Function Definite Integration**: Unified definite integration engine using Slater's theorem and contour Mellin transforms for special function integration.
 - **Einstein Summation & General Relativity**:
@@ -191,6 +201,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 - **Zeilberger Algorithm**: Creative telescoping for holonomic $D$-modules proving $\sum_k F(n, k) = G(n)$.
 
 ### 5.6 Phase 17 & 18: GPU Compute, 3D Complex Visualizer & Ecosystem Tooling
+
+> **Status (17 Nov 2026).** Found: WGSL/`wgpu` code, `DomainColoring`, Riemann surfaces, `urae-lsp`. Rayon is a dependency used for CRT verification only, not a parallel e-graph. PyO3 `#[pymodule]` and ZeroMQ are not implemented (Wave 2, as the bullets say). Standalone offline HTML/WASM export is not verified.
 - **WebGPU & Vulkan Acceleration**: Compute shaders for matrix-free element stiffness integration and multi-point batch evaluation over $10^8$ vertices.
 - **Parallel Lock-Free E-Graph Saturation**: Multi-core Rayon equality saturation with lock-free union-find tables.
 - **3D Riemann Surface & Domain Coloring**: Interactive multi-sheet rendering for $w = \sqrt[n]{z}$ and $w = \ln(z)$, with HSV phase portraits.
@@ -201,6 +213,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Self-contained standalone HTML/WASM export bundling the complete reactive notebook offline.
 
 ### 5.7 Phase 21: High-Performance Automatic Differentiation (AD), Neural ODEs & Physics-Informed ML (PINNs)
+
+> **Status (17 Nov 2026).** Found: dual and hyper-dual numbers, VJP/JVP, Neural ODE, adjoint sensitivity, PINN residuals and the four macros. The adjoint is simplified (ledger C6).
 - **Arbitrary-Order Forward-Mode AD**:
   - Hyper-Dual numbers $\mathbb{D}_k = a + b\,\epsilon_1 + c\,\epsilon_2 + d\,\epsilon_1\epsilon_2$ with $\epsilon_i^2 = 0$ for exact Jacobian and Hessian $\mathbf{H} = \nabla^2 f$ matrices in a single forward pass without symbolic explosion.
 - **High-Throughput Reverse-Mode AD (VJP / JVP)**:
@@ -213,6 +227,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
 - **Ergonomic Macros**: `autodiff_forward!`, `autodiff_hessian!`, `neural_ode_step!`, `pinn_loss!`.
 
 ### 5.8 Phase 22: Topological Data Analysis (TDA), Persistent Homology & Hodge Cohomology
+
+> **Status (17 Nov 2026).** Found: Vietoris–Rips filtration, persistence barcodes, Betti numbers, discrete Hodge Laplacian (338 lines in total; depth not audited). Not found: alpha complexes.
 - **Simplicial Filtrations**:
   - Vietoris-Rips and Alpha complexes constructed over point clouds, FEA mesh nodes, and molecular structures.
 - **Galois Field Boundary Reduction**:
@@ -222,6 +238,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Computational de Rham cohomology groups $H_{\text{dR}}^k(M)$ and harmonic differential forms ($\Delta \omega = 0$) using Hodge decomposition $\omega = \mathrm{d}\alpha + \delta\beta + \gamma$.
 
 ### 5.9 Phase 23: Non-Euclidean Computational Geometry (Hyperbolic & Spherical)
+
+> **Status (17 Nov 2026).** Found: Poincaré disk, upper half-plane, {p,q} tessellations, Schwarz–Christoffel. Not found: Beltrami–Klein model, hyperbolic Voronoi / Delaunay.
 - **Hyperbolic Geometry Models**:
   - Poincaré disk, Beltrami-Klein, and Upper Half-Plane $\mathbb{H}^2, \mathbb{H}^3$ with exact geodesic distance metrics:
     $$d(u, v) = \operatorname{arcosh}\left(1 + 2\frac{\|u - v\|^2}{(1 - \|u\|^2)(1 - \|v\|^2)}\right)$$
@@ -230,6 +248,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Schwarz-Christoffel transformation engine for conformal mapping of polygonal domains to canonical discs.
 
 ### 5.10 Phase 24: SMT-LIB2 Automated Theorem Prover (ATP) Bridge & Formal Verification
+
+> **Status (17 Nov 2026).** Found: SMT-LIB2 serialiser (`SmtProblem` and friends). Not found: any call to Z3 or CVC5. Lean 4 / Coq export is a fixed skeleton ending in `sorry` (ledger A9), so the "verified proof scripts" bullet is not met.
 - **SMT-LIB2 Solver Interface**:
   - Translation of URAE expressions to SMT-LIB2 format for Quantifier-Free Non-Linear Real Arithmetic (`QF_NRA`), Bit-Vectors (`QF_BV`), and Arrays.
   - Subprocess / WASM bridge for Z3 / CVC5 satisfiability checks and model/counterexample extraction.
@@ -237,6 +257,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Constructive proof generator outputting verified Lean 4 and Coq proof scripts for all algebraic transformations and simplifications.
 
 ### 5.11 Phase 25: Geometric Deep Learning & $SE(3)$ Equivariance
+
+> **Status (17 Nov 2026).** Found: spherical harmonics, Clebsch–Gordan, steerable convolutions, GELU layers (depth not audited).
 - **Spherical Harmonics & Clebsch-Gordan**:
   - Real and complex spherical harmonics $Y_{\ell m}$ and exact Clebsch-Gordan coefficients $\langle \ell_1 m_1 \ell_2 m_2 | \ell m \rangle$.
 - **$SE(3)$ Steerable Convolutions**:
@@ -245,6 +267,8 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Geometric algebra $Cl(3, 0)$ multivector neural networks with grade-preserving non-linear activations (GELU).
 
 ### 5.12 Phase 26: Quantum Field Theory & Feynman Diagram Amplitude Calculus
+
+> **Status (17 Nov 2026).** Found: Wick pairing, Feynman diagram generation, Passarino–Veltman, spinor helicity, Dirac traces (356 lines in `qft.rs`; depth not audited).
 - **Perturbative QFT & Wick Contractions**:
   - Symbolic Wick contraction engine and Feynman diagram generation.
 - **Passarino-Veltman 1-Loop Reduction**:
@@ -253,12 +277,16 @@ they are removed. Status lives in section 2; open work, in priority order, lives
   - Angle/square spinor brackets $\langle i j \rangle, [i j]$ and Dirac gamma matrix trace evaluator $\operatorname{Tr}[\gamma^\mu \gamma^\nu \dots]$ in $D$ spacetime dimensions.
 
 ### 5.13 Phase 27: Holonomic $D$-Modules & Zeilberger Creative Telescoping
+
+> **Status (17 Nov 2026).** Found: Weyl algebra and left-ideal Gröbner basis computation. Creative telescoping is three fixed showcase proofs, not an algorithm (ledger A5, A8).
 - **Non-commutative Weyl Algebras**:
   - Gröbner bases for left ideals in $A_n = K\langle x_1, \dots, x_n, \partial_1, \dots, \partial_n \rangle$.
 - **Creative Telescoping**:
   - Automated proofs of hypergeometric summation identities $\sum_k F(n, k) = G(n)$ and definite integrals.
 
 ### 5.14 Phase 28: Affine Kac-Moody & Virasoro Conformal Field Theory
+
+> **Status (17 Nov 2026).** Found: Virasoro algebra, Kac–Moody, OPE, Sugawara (`cft.rs`, 142 lines; marked Foundation in section 2).
 - **Virasoro Algebra**:
   - Central charge $c$ Lie algebra bracket $[L_m, L_n] = (m - n)L_{m+n} + \frac{c}{12}(m^3 - m)\delta_{m+n, 0}$.
 - **Kac-Moody & OPEs**:

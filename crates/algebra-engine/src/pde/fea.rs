@@ -146,6 +146,31 @@ impl FeaMesh {
         mesh
     }
 
+    /// A 2-D rectangular plate of bilinear quadrilaterals (Quad4, counter-clockwise nodes), with
+    /// the same `left`/`right`/`bottom`/`top` boundary groups as [`FeaMesh::plate_2d`].
+    pub fn plate_2d_quad(width: f64, height: f64, nx: usize, ny: usize) -> Self {
+        let mut mesh = Self::new(2, ElementType::Quad4);
+        for j in 0..=ny {
+            for i in 0..=nx {
+                mesh.add_node(vec![
+                    width * i as f64 / nx as f64,
+                    height * j as f64 / ny as f64,
+                ]);
+            }
+        }
+        let id = |i: usize, j: usize| j * (nx + 1) + i;
+        for j in 0..ny {
+            for i in 0..nx {
+                mesh.add_element(vec![id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)]);
+            }
+        }
+        mesh.add_boundary_group("left", (0..=ny).map(|j| id(0, j)).collect());
+        mesh.add_boundary_group("right", (0..=ny).map(|j| id(nx, j)).collect());
+        mesh.add_boundary_group("bottom", (0..=nx).map(|i| id(i, 0)).collect());
+        mesh.add_boundary_group("top", (0..=nx).map(|i| id(i, ny)).collect());
+        mesh
+    }
+
     /// A rectangular block `[0, lx] x [0, ly] x [0, lz]` of linear tetrahedra (Tet4): each of the
     /// `nx * ny * nz` cells is cut into six tetrahedra around its main diagonal, which makes
     /// neighbouring cells agree on shared faces. Boundary groups: `left`/`right` (x = 0 / lx),
@@ -539,6 +564,41 @@ impl FeaEngine {
                         }
                     }
                 }
+                ElementType::Quad4 if mesh.dim == 2 => {
+                    if elem.len() != 4 {
+                        return Err(AlgebraError::EvaluationError(
+                            "a Quad4 element needs four nodes".into(),
+                        ));
+                    }
+                    let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
+                    // 2 x 2 Gauss integration of B^T C B detJ.
+                    let g = 1.0 / 3.0_f64.sqrt();
+                    let mut area = 0.0;
+                    for &(xi, eta) in &[(-g, -g), (g, -g), (g, g), (-g, g)] {
+                        let Some((b, det)) = Self::quad4_b_matrix(mesh, elem, xi, eta) else {
+                            return Err(AlgebraError::EvaluationError(
+                                "a Quad4 element is degenerate or inverted (non-positive Jacobian)"
+                                    .into(),
+                            ));
+                        };
+                        area += det;
+                        for r in 0..8 {
+                            for c in 0..8 {
+                                let val = (b[0][r] * (c11 * b[0][c] + c12 * b[1][c])
+                                    + b[1][r] * (c12 * b[0][c] + c11 * b[1][c])
+                                    + b[2][r] * c33 * b[2][c])
+                                    * det;
+                                k_global.add(elem[r / 2] * 2 + r % 2, elem[c / 2] * 2 + c % 2, val);
+                            }
+                        }
+                    }
+                    for &ni in elem.iter() {
+                        for (d, &bf) in body_force.iter().enumerate().take(2) {
+                            f_global[ni * 2 + d] += bf * area / 4.0;
+                        }
+                    }
+                }
+
                 ElementType::Tet4 if mesh.dim == 3 => {
                     if elem.len() != 4 {
                         return Err(AlgebraError::EvaluationError(
@@ -625,7 +685,34 @@ impl FeaEngine {
         let mut von_mises = Vec::new();
         let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
         for elem in &mesh.elements {
-            if mesh.element_type == ElementType::Tet4 && mesh.dim == 3 && elem.len() == 4 {
+            if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 && elem.len() == 4 {
+                // Stress at the element centre (the superconvergent point for a bilinear element).
+                let Some((b, _)) = Self::quad4_b_matrix(mesh, elem, 0.0, 0.0) else {
+                    von_mises.push(0.0);
+                    continue;
+                };
+                let mut strain = [0.0; 3];
+                for (i, row) in b.iter().enumerate() {
+                    for (col, value) in row.iter().enumerate() {
+                        strain[i] += value * displacement[elem[col / 2] * 2 + col % 2];
+                    }
+                }
+                let sigma_x = c11 * strain[0] + c12 * strain[1];
+                let sigma_y = c12 * strain[0] + c11 * strain[1];
+                let tau_xy = c33 * strain[2];
+                let sigma_z = if plane_stress {
+                    0.0
+                } else {
+                    nu * (sigma_x + sigma_y)
+                };
+                von_mises.push(
+                    (0.5 * ((sigma_x - sigma_y).powi(2)
+                        + (sigma_y - sigma_z).powi(2)
+                        + (sigma_z - sigma_x).powi(2))
+                        + 3.0 * tau_xy * tau_xy)
+                        .sqrt(),
+                );
+            } else if mesh.element_type == ElementType::Tet4 && mesh.dim == 3 && elem.len() == 4 {
                 let Some((grads, _)) = Self::tet4_gradients(mesh, elem) else {
                     von_mises.push(0.0);
                     continue;
@@ -844,6 +931,55 @@ impl FeaEngine {
             reaction_forces: reactions,
             max_magnitude: max_t,
         })
+    }
+
+    /// The 3 x 8 strain-displacement matrix of a bilinear quadrilateral at the natural point
+    /// `(xi, eta)` (strain `[exx, eyy, gxy]`, unknowns `[u0, v0, u1, ...]`) and the Jacobian
+    /// determinant, or `None` when the determinant is not positive (a degenerate or clockwise
+    /// element).
+    fn quad4_b_matrix(
+        mesh: &FeaMesh,
+        elem: &[usize],
+        xi: f64,
+        eta: f64,
+    ) -> Option<([[f64; 8]; 3], f64)> {
+        const SIGN: [[f64; 2]; 4] = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+        // Derivatives of N_i = (1 + s_i xi)(1 + t_i eta) / 4 in the natural coordinates.
+        let dn: Vec<[f64; 2]> = SIGN
+            .iter()
+            .map(|s| {
+                [
+                    s[0] * (1.0 + s[1] * eta) / 4.0,
+                    s[1] * (1.0 + s[0] * xi) / 4.0,
+                ]
+            })
+            .collect();
+        let mut jac = [[0.0; 2]; 2];
+        for (i, &node) in elem.iter().enumerate() {
+            let p = &mesh.nodes[node];
+            jac[0][0] += dn[i][0] * p[0];
+            jac[0][1] += dn[i][0] * p[1];
+            jac[1][0] += dn[i][1] * p[0];
+            jac[1][1] += dn[i][1] * p[1];
+        }
+        let det = jac[0][0] * jac[1][1] - jac[0][1] * jac[1][0];
+        if det <= 1e-14 {
+            return None;
+        }
+        let inv = [
+            [jac[1][1] / det, -jac[0][1] / det],
+            [-jac[1][0] / det, jac[0][0] / det],
+        ];
+        let mut b = [[0.0; 8]; 3];
+        for i in 0..4 {
+            let dx = inv[0][0] * dn[i][0] + inv[0][1] * dn[i][1];
+            let dy = inv[1][0] * dn[i][0] + inv[1][1] * dn[i][1];
+            b[0][2 * i] = dx;
+            b[1][2 * i + 1] = dy;
+            b[2][2 * i] = dy;
+            b[2][2 * i + 1] = dx;
+        }
+        Some((b, det))
     }
 
     /// Shape-function gradients `(b, c, d)` per node of a linear tetrahedron (`N_i = a + b x +

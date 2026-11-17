@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [0.5.0] - 2026-11-17
 
 ### Added
+- `IgaStiffnessMatrix::assemble_2d`, `NurbsPatchND::rational_basis` and `tangents`: the isogeometric Laplace-Beltrami stiffness matrix with analytic NURBS derivatives.
 - `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
 - `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
 - `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
@@ -38,6 +39,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `IgaStiffnessMatrix::integrate_stiffness_entry_2d` ignored the NURBS basis and returned a fixed weight of 1.0 on the diagonal and 0.1 elsewhere times the area; it now integrates the real gradient inner product (the unit square gives the textbook Q1 matrix). `metric_determinant_2d` uses analytic tangents.
 - `DiffPolynomial::differentiate` left repeated indeterminates in a term (`y'` twice), which made degrees and leaders wrong; it now normalises.
 - LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.
 - `StateSpaceSystem::is_stable` judged systems with three or more states by the sign of the trace; it now applies Routh-Hurwitz (continuous) or Schur-Cohn (discrete) to the characteristic polynomial.

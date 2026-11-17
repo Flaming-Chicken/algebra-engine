@@ -217,3 +217,6 @@ mod differential_reduction_tests;
 
 #[path = "engine/adjoint_gradient_tests.rs"]
 mod adjoint_gradient_tests;
+
+#[path = "engine/iga_stiffness_tests.rs"]
+mod iga_stiffness_tests;

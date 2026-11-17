@@ -257,3 +257,42 @@ fn large_systems_use_the_sparse_solver_and_match_the_exact_solution() {
             .is_err()
     );
 }
+
+#[test]
+fn constraints_are_eliminated_exactly_and_reactions_balance_the_load() {
+    let mesh = FeaMesh::bar_1d(10.0, 5);
+    let physics = PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 1000.0,
+        poissons_ratio: 0.3,
+        density: 1.0,
+        body_force: vec![0.0],
+        plane_stress: true,
+    };
+    let bcs = vec![
+        FeaBoundaryCondition::FixedDisplacement {
+            group_name: "left".into(),
+            dof_index: 0,
+            value: 0.25,
+        },
+        FeaBoundaryCondition::PointForce {
+            group_name: "right".into(),
+            force_vector: vec![100.0],
+        },
+    ];
+    let sol = FeaEngine::solve(&mesh, &physics, &bcs).unwrap();
+    // The prescribed value is hit exactly (a penalty would miss it by ~1e-12 relative) and the
+    // tip moves by the elastic extension on top of it.
+    assert_eq!(sol.nodal_values[0], 0.25);
+    assert!(
+        (sol.nodal_values[5] - 1.25).abs() < 1e-12,
+        "{}",
+        sol.nodal_values[5]
+    );
+    // The support reaction equals the applied load, opposite in sign; free nodes carry none.
+    assert!(
+        (sol.reaction_forces[0] + 100.0).abs() < 1e-9,
+        "{:?}",
+        sol.reaction_forces
+    );
+    assert!(sol.reaction_forces[1..].iter().all(|r| *r == 0.0));
+}

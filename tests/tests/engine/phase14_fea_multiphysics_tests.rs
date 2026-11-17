@@ -569,3 +569,69 @@ fn quadrilateral_elements_pass_the_patch_test_on_a_distorted_mesh() {
     };
     assert!(FeaEngine::solve(&bad, &physics, &[]).is_err());
 }
+
+#[test]
+fn heat_conduction_on_quadrilaterals_and_tetrahedra() {
+    let heat = |source: f64| PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: 2.0,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: source,
+    };
+    let temperature = |group: &str, t: f64| FeaBoundaryCondition::PrescribedTemperature {
+        group_name: group.into(),
+        temperature: t,
+    };
+
+    // Bilinear quadrilaterals on a distorted mesh, hot left and cold right, insulated sides:
+    // the exact solution is linear in x and the element reproduces it.
+    let mut quad = FeaMesh::plate_2d_quad(5.0, 2.0, 5, 2);
+    for i in 1..5 {
+        quad.nodes[6 + i][0] += 0.13 * (i % 2) as f64 - 0.05;
+        quad.nodes[6 + i][1] += 0.07 * ((i + 1) % 3) as f64 - 0.06;
+    }
+    let sol = FeaEngine::solve(
+        &quad,
+        &heat(0.0),
+        &[temperature("left", 100.0), temperature("right", 0.0)],
+    )
+    .unwrap();
+    for (i, p) in quad.nodes.iter().enumerate() {
+        let want = 100.0 * (1.0 - p[0] / 5.0);
+        assert!((sol.nodal_values[i] - want).abs() < 1e-9, "quad node {i}");
+    }
+
+    // Tetrahedra in a block: the same linear profile.
+    let block = FeaMesh::box_3d(4.0, 1.0, 1.0, 4, 1, 1);
+    let sol = FeaEngine::solve(
+        &block,
+        &heat(0.0),
+        &[temperature("left", 50.0), temperature("right", 10.0)],
+    )
+    .unwrap();
+    for (i, p) in block.nodes.iter().enumerate() {
+        let want = 50.0 - 40.0 * p[0] / 4.0;
+        assert!((sol.nodal_values[i] - want).abs() < 1e-9, "tet node {i}");
+    }
+
+    // A uniform source between two cold ends peaks at q L^2 / (8 k) in the middle.
+    let slab = FeaMesh::plate_2d_quad(4.0, 1.0, 16, 1);
+    let sol = FeaEngine::solve(
+        &slab,
+        &heat(2.0),
+        &[temperature("left", 0.0), temperature("right", 0.0)],
+    )
+    .unwrap();
+    let peak = sol.nodal_values.iter().cloned().fold(f64::MIN, f64::max);
+    let exact = 2.0 * 16.0 / (8.0 * 2.0);
+    assert!(
+        (peak - exact).abs() < 0.03 * exact,
+        "peak {peak} vs {exact}"
+    );
+
+    // An element type with no heat formulation is an error, not silently ignored.
+    let mut hex = FeaMesh::new(3, algebra_engine::pde::ElementType::Hex8);
+    hex.add_node(vec![0.0, 0.0, 0.0]);
+    hex.add_element(vec![0; 8]);
+    assert!(FeaEngine::solve(&hex, &heat(0.0), &[]).is_err());
+}

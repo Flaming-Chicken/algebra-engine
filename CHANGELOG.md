@@ -29,6 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `CustomShape::BooleanCSG` of implicit surfaces now meshes (`implicit_field`, `Mesh3D::from_field`); Booleans involving meshes/extrusions/polytopes still report unsupported.
 - `InvoluteGear` teeth are true involutes (the pitch-circle thickness was too small before) and support a profile shift coefficient (`with_profile_shift`).
 - FEA assembly is sparse (`SparseAssembly`); constrained systems are built from it directly, so large problems never form a dense matrix.
+- FEA: the plane-strain constitutive matrix was wrong and element von Mises stress was computed from absolute nodal differences; stress is now `C B u` for the constant-strain triangle (plane stress and strain), verified exactly by a uniaxial patch test.
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.
 - `CustomShape::to_tri_mesh` returns `Result`; N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.

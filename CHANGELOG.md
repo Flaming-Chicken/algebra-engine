@@ -6,14 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [Unreleased]
 
 ### Changed
+- `RittWuReducer::characteristic_set` computes a characteristic set (Ritt's procedure) instead of sorting its input; `{y'', y, y'}` now gives `{y}`.
 - `UniversalBridge::weyl_to_diff_polynomial` returns `Result` and `DiffPolynomial` to `WeylDOperator` is now `TryFrom`: conversions that would drop an `x` power, flatten a nonlinear term or merge indeterminates are errors instead of silently wrong output.
 
 ### Added
+- `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
 - `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
 - `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
 - `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
 
 ### Fixed
+- `DiffPolynomial::differentiate` left repeated indeterminates in a term (`y'` twice), which made degrees and leaders wrong; it now normalises.
 - LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.
 
 ## [0.5.0] - 2026-11-17

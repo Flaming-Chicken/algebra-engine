@@ -211,3 +211,6 @@ mod control_general_order_tests;
 
 #[path = "engine/exact_groebner_tests.rs"]
 mod exact_groebner_tests;
+
+#[path = "engine/differential_reduction_tests.rs"]
+mod differential_reduction_tests;

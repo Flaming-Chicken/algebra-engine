@@ -62,12 +62,13 @@ code. No item remains unchecked. Fixed defects have a regression test in
 
 ### C. Oversimplifications
 
-C1 (IGA Jacobian), C2 (differential pseudo-remainder), C4 (gear and screw builders), C5 (Cartan forms hold no
+C1 (IGA Jacobian), C4 (gear and screw builders), C5 (Cartan forms hold no
 `ExprId` coefficients), C6 (neural-ODE adjoint), C10 (FEA solver: dense, no CG or CSR), C13 (visualizer routing),
 C14 (e-graph extraction, wavefront; unification is done, see below) are in files that have not
 changed since the plan, so they are **Open**. Three were checked directly after the files turned out to have
 changed:
 
+- **C2 Fixed.** `RittWuReducer::reduce` is Ritt's differential pseudo-division (derivatives of the leader eliminated highest first using the matching derivative of the divisor, then algebraic pseudo-division by the leader); `characteristic_set` is Ritt's procedure (autoreduced subset, reduce the rest, repeat) and no longer just sorts its input. `DiffPolynomial` gained normalisation and arithmetic, and `differentiate` merges repeated indeterminates (it used to leave `y'` twice in a term). Two existing tests pinned the stub: `{y'', y, y'}` has characteristic set `{y}`, not the three polynomials.
 - **C11 Fixed.** Weyl-operator and differential-polynomial conversions no longer lose information silently: `weyl_to_diff_polynomial` returns an error for an operator with an `x` power or several variables, and `TryFrom<DiffPolynomial> for WeylDOperator` accepts only terms linear in one indeterminate (so `y·y'` and `(y')²` are rejected). Linear constant-coefficient operators round-trip exactly.
 - **C15 Partly fixed.** LSP hover now evaluates the lines above the cursor first, so earlier definitions are in scope (it evaluated the hovered line alone), and `completions_at` offers names defined above the cursor ahead of the catalogue. Still open: the catalogue itself is a hand-written list, not generated from a central function registry (none exists).
 - **C14 unification Fixed.** `UnificationEngine::unify` is first-order Martelli–Montanari: structural decomposition of functions, operators and arithmetic nodes, an occurs check, and a most general unifier whose `apply` makes both sides equal. It is syntactic (no commutativity). The CLI proof export no longer uses unification to gate steps; it records the simplification only when the equivalence check confirms it.

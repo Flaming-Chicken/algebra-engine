@@ -1107,6 +1107,217 @@ impl Mesh3D {
         }
     }
 
+    /// Mesh the implicit surface `f(x, y, z) = 0` inside `bbox` by marching tetrahedra.
+    ///
+    /// `expression` is parsed in the variables `x`, `y` and `z` (any other symbol is an error)
+    /// and compiled once to bytecode. The box is divided into `resolution`^3 cubes, each cut
+    /// into six tetrahedra along a common diagonal so neighbouring cells agree on shared faces;
+    /// the surface crosses an edge where `f` changes sign, at the linearly interpolated point.
+    /// Vertices are shared between triangles, so the mesh is closed and consistently oriented
+    /// (normals point towards `f > 0`) wherever the surface stays inside the box; a surface
+    /// that leaves the box is cut open along the box faces.
+    ///
+    /// The mesh is piecewise linear: the volume it encloses approaches the true one as the
+    /// resolution grows (a few percent at 40 for a sphere).
+    pub fn from_implicit(
+        expression: &str,
+        bbox: &BoundingBox3D,
+        resolution: usize,
+    ) -> AlgebraResult<Self> {
+        let fail = |why: String| AlgebraError::EvaluationError(format!("implicit surface: {why}"));
+        if !(2..=200).contains(&resolution) {
+            return Err(fail("the resolution must be between 2 and 200".into()));
+        }
+        if (0..3).any(|a| bbox.max[a] <= bbox.min[a]) {
+            return Err(fail("the bounding box must have positive extent".into()));
+        }
+        let graph = algebra_core::ExprGraph::new();
+        let expr = algebra_core::parser::ExprParser::new(&graph)
+            .parse(expression)
+            .map_err(|e| fail(format!("cannot parse `{expression}`: {e:?}")))?;
+        let program = algebra_core::vm::VmCompiler::compile(
+            &graph,
+            expr,
+            "x",
+            &["y".to_string(), "z".to_string()],
+        )
+        .map_err(|e| fail(e.to_string()))?;
+        let vm = algebra_core::vm::BytecodeVM::new();
+
+        let n = resolution;
+        let stride = n + 1;
+        let point = |i: usize, j: usize, k: usize| -> [f64; 3] {
+            [
+                bbox.min[0] + (bbox.max[0] - bbox.min[0]) * i as f64 / n as f64,
+                bbox.min[1] + (bbox.max[1] - bbox.min[1]) * j as f64 / n as f64,
+                bbox.min[2] + (bbox.max[2] - bbox.min[2]) * k as f64 / n as f64,
+            ]
+        };
+        let id = |i: usize, j: usize, k: usize| (k * stride + j) * stride + i;
+        let mut values = vec![0.0_f64; stride * stride * stride];
+        for k in 0..=n {
+            for j in 0..=n {
+                for i in 0..=n {
+                    let p = point(i, j, k);
+                    let v = vm
+                        .eval_scalar(&program, p[0], &[p[1], p[2]])
+                        .map_err(|e| fail(e.to_string()))?;
+                    if !v.is_finite() {
+                        return Err(fail(format!("f is not finite at {p:?}")));
+                    }
+                    // A value of exactly zero counts as positive, so every edge crossing has a
+                    // strict sign change.
+                    values[id(i, j, k)] = if v == 0.0 { 1e-300 } else { v };
+                }
+            }
+        }
+
+        // Cube corners and the six tetrahedra of the Kuhn triangulation (all share the 0-6 diagonal).
+        const CORNERS: [[usize; 3]; 8] = [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 1, 1],
+        ];
+        const TETS: [[usize; 4]; 6] = [
+            [0, 1, 2, 6],
+            [0, 1, 5, 6],
+            [0, 3, 2, 6],
+            [0, 3, 7, 6],
+            [0, 4, 5, 6],
+            [0, 4, 7, 6],
+        ];
+
+        let mut mesh = Self::new("Implicit");
+        let mut edge_vertex: HashMap<(usize, usize), usize> = HashMap::new();
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let corner = |c: usize| {
+                        let o = CORNERS[c];
+                        (i + o[0], j + o[1], k + o[2])
+                    };
+                    for tet in TETS {
+                        let verts: Vec<(usize, [f64; 3], f64)> = tet
+                            .iter()
+                            .map(|&c| {
+                                let (a, b, d) = corner(c);
+                                (id(a, b, d), point(a, b, d), values[id(a, b, d)])
+                            })
+                            .collect();
+                        let positive: Vec<usize> = (0..4).filter(|&v| verts[v].2 > 0.0).collect();
+                        if positive.is_empty() || positive.len() == 4 {
+                            continue;
+                        }
+                        let negative: Vec<usize> = (0..4).filter(|&v| verts[v].2 <= 0.0).collect();
+
+                        // The surface point on the edge between a positive and a negative corner.
+                        let mut cross = |pv: usize, nv: usize, mesh: &mut Self| -> usize {
+                            let (gp, gn) = (verts[pv].0, verts[nv].0);
+                            let key = (gp.min(gn), gp.max(gn));
+                            if let Some(&existing) = edge_vertex.get(&key) {
+                                return existing;
+                            }
+                            let (fp, fn_) = (verts[pv].2, verts[nv].2);
+                            let t = fp / (fp - fn_); // fraction from the positive end
+                            let (a, b) = (verts[pv].1, verts[nv].1);
+                            let index = mesh.add_vertex([
+                                a[0] + t * (b[0] - a[0]),
+                                a[1] + t * (b[1] - a[1]),
+                                a[2] + t * (b[2] - a[2]),
+                            ]);
+                            edge_vertex.insert(key, index);
+                            index
+                        };
+
+                        // Direction from the negative towards the positive side, for orientation.
+                        let mean = |set: &[usize]| {
+                            let mut c = [0.0; 3];
+                            for &v in set {
+                                for a in 0..3 {
+                                    c[a] += verts[v].1[a] / set.len() as f64;
+                                }
+                            }
+                            c
+                        };
+                        let (cp, cn) = (mean(&positive), mean(&negative));
+                        let towards = [cp[0] - cn[0], cp[1] - cn[1], cp[2] - cn[2]];
+
+                        // Orientation is decided from the midpoints of the crossed edges, which stay
+                        // well separated even when a surface point lands on a grid vertex and the
+                        // interpolated points coincide.
+                        let mid = |pv: usize, nv: usize| -> [f64; 3] {
+                            let (a, b) = (verts[pv].1, verts[nv].1);
+                            [
+                                (a[0] + b[0]) / 2.0,
+                                (a[1] + b[1]) / 2.0,
+                                (a[2] + b[2]) / 2.0,
+                            ]
+                        };
+                        let mut triangles: Vec<([usize; 3], [[f64; 3]; 3])> = Vec::new();
+                        match (positive.len(), negative.len()) {
+                            (1, 3) => {
+                                let p = positive[0];
+                                let e: Vec<usize> = negative[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&q| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(p, e[0]), mid(p, e[1]), mid(p, e[2])],
+                                ));
+                            }
+                            (3, 1) => {
+                                let q = negative[0];
+                                let e: Vec<usize> = positive[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&p| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(e[0], q), mid(e[1], q), mid(e[2], q)],
+                                ));
+                            }
+                            _ => {
+                                // Two against two: a quad through the four mixed edges.
+                                let (p0, p1) = (positive[0], positive[1]);
+                                let (n0, n1) = (negative[0], negative[1]);
+                                let a = cross(p0, n0, &mut mesh);
+                                let b = cross(p0, n1, &mut mesh);
+                                let c = cross(p1, n1, &mut mesh);
+                                let d = cross(p1, n0, &mut mesh);
+                                let (ma, mb, mc, md) =
+                                    (mid(p0, n0), mid(p0, n1), mid(p1, n1), mid(p1, n0));
+                                triangles.push(([a, b, c], [ma, mb, mc]));
+                                triangles.push(([a, c, d], [ma, mc, md]));
+                            }
+                        }
+                        for ([a, b, c], [va, vb, vc]) in triangles {
+                            let u = [vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]];
+                            let w = [vc[0] - va[0], vc[1] - va[1], vc[2] - va[2]];
+                            let normal = [
+                                u[1] * w[2] - u[2] * w[1],
+                                u[2] * w[0] - u[0] * w[2],
+                                u[0] * w[1] - u[1] * w[0],
+                            ];
+                            let facing = normal[0] * towards[0]
+                                + normal[1] * towards[1]
+                                + normal[2] * towards[2];
+                            if facing >= 0.0 {
+                                mesh.add_triangle(a, b, c);
+                            } else {
+                                mesh.add_triangle(a, c, b);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(mesh)
+    }
+
     /// Create a standard 3D Box / Cube mesh of dimensions $(L_x, L_y, L_z)$.
     pub fn cube(lx: f64, ly: f64, lz: f64) -> Self {
         let mut mesh = Self::new("Cube");
@@ -1275,9 +1486,10 @@ pub enum CustomShape {
 impl CustomShape {
     /// Convert the shape to a concrete `Mesh3D` for visualization and simulation.
     ///
-    /// Triangle meshes, extrusions and 3-dimensional polytopes whose simplices are triangles
-    /// convert. Implicit surfaces and Boolean combinations are not meshed by this library and
-    /// return an error: they used to be replaced silently by a unit cube.
+    /// Triangle meshes, extrusions, 3-dimensional polytopes whose simplices are triangles and
+    /// implicit surfaces (by marching tetrahedra at resolution 40, see [`Mesh3D::from_implicit`])
+    /// convert. Boolean combinations are not meshed by this library and return an error: they
+    /// used to be replaced silently by a unit cube.
     pub fn to_tri_mesh(&self) -> AlgebraResult<Mesh3D> {
         let unsupported = |what: &str| {
             Err(AlgebraError::EvaluationError(format!(
@@ -1320,7 +1532,9 @@ impl CustomShape {
                 }
                 Ok(mesh)
             }
-            CustomShape::ParametricImplicit { .. } => unsupported("an implicit surface"),
+            CustomShape::ParametricImplicit { expr_str, bbox } => {
+                Mesh3D::from_implicit(expr_str, bbox, 40)
+            }
             CustomShape::BooleanCSG { .. } => unsupported("a Boolean CSG combination"),
         }
     }

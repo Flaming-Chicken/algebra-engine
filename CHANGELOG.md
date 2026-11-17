@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [0.5.0] - 2026-11-17
 
 ### Added
+- `cat_egraph::EGraph::rebuild` (congruence closure) and `extract_term`/`ExtractedTerm` (the cheapest expression as a tree). `EGraph::add` now hash-conses.
 - `IgaStiffnessMatrix::assemble_2d`, `NurbsPatchND::rational_basis` and `tangents`: the isogeometric Laplace-Beltrami stiffness matrix with analytic NURBS derivatives.
 - `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
 - `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
@@ -39,6 +40,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `EGraph::extract_min_cost` costed only the chosen node's operator, not its operands, so the cheapest-looking node was not the cheapest expression; it now returns the total cost of the cheapest expression, and handles cyclic classes.
 - `InvoluteGear::generate_3d_mesh` ignored `bore_radius` and capped the ends with a fan from one vertex of the non-convex tooth outline, giving overlapping or inverted faces. It is now a closed solid with a real bore and annular end caps (volume equals the outline area minus the bore, times the face width).
 - `GrobnerProver` (lemma mining) reduced the difference of two expressions modulo an empty ideal, so it could not use identities such as `sin^2 + cos^2 = 1`. It now extracts the side relations of the transcendental atoms present and decides membership exactly over the rationals.
 - `GeometricConstraintSolver::solve` ignored every constraint except distance and coincidence (placing a point along the x-axis); it now solves parallel, perpendicular, angle, tangent and fixed-area constraints too by damped Gauss-Newton, and reports inconsistent systems.

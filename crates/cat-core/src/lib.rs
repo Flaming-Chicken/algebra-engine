@@ -11,6 +11,7 @@ pub mod ball;
 pub mod context;
 pub mod descriptor;
 pub mod dimensions;
+pub mod enclosure;
 pub mod handles;
 pub mod hypergraph;
 pub mod scalar;
@@ -23,6 +24,10 @@ pub use context::{
 };
 pub use descriptor::ObjectDescriptor;
 pub use dimensions::{DimVector, UnitGaugeSystem, UnitSpaceKind};
+pub use enclosure::{
+    ApproxResult, DomainCondition, ErrorEnclosure, EvalForm, FidelityMode, SpreadKind,
+    UncertaintyKind,
+};
 pub use handles::{DiagramId, ObjId, PortId, ScalarId, SymDimId, WireId};
 pub use hypergraph::{BoundaryPort, HyperEdge, HyperOp, OpenHypergraph, PortPolarity};
 pub use scalar::{AlgebraKind, CocycleMultivector, ScalarAtom, ScalarLattice};

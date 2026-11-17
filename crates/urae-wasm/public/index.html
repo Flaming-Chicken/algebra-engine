@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="URAE // Alpha — Computational Intelligence & Categorical Engine with Rust Extended Pad in WebAssembly">
+  <meta name="description" content="URAE // Workbench — Symbolic Intelligence, Graphing Pad, and Systems & Differential Equations in WebAssembly">
   <meta name="theme-color" content="#ff7e00">
   <link rel="manifest" href="manifest.json">
-  <title>URAE // Alpha — Computational Intelligence & Rust Extended Pad</title>
+  <title>URAE // Workbench — Symbolic Solver, Graphing Pad &amp; Systems Studio</title>
 
   <!-- KaTeX for authentic, high-speed mathematical typography -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous">
@@ -21,13 +21,13 @@
   </script>
   <link rel="stylesheet" href="style.css">
 </head>
-<body class="layout-alpha">
+<body class="layout-qa">
   <div id="app_container">
     <!-- ====================================================================
          Top Navigation Bar
          ==================================================================== -->
-    <header class="alpha-navbar">
-      <div class="brand-section" id="brand_home_btn" title="URAE // Alpha Home">
+    <header class="qa-navbar">
+      <div class="brand-section" id="brand_home_btn" title="URAE // Home">
         <svg class="spikey-logo" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
           <polygon points="50,5 61,35 95,35 68,55 79,88 50,68 21,88 32,55 5,35 39,35" fill="url(#spikey-grad)" stroke="#ff7e00" stroke-width="2"/>
           <circle cx="50" cy="50" r="14" fill="#0d1117" stroke="#f5a623" stroke-width="2.5"/>
@@ -41,18 +41,21 @@
           </defs>
         </svg>
         <div class="brand-text">
-          <span class="brand-title">URAE <span class="alpha-tag">// INTELLIGENCE</span></span>
-          <span class="brand-subtitle">Wolfram &middot; Symbolab Solver &amp; GeoGebra / Desmos Pad</span>
+          <span class="brand-title">URAE <span class="qa-tag">// WORKBENCH</span></span>
+          <span class="brand-subtitle">Symbolic Q&amp;A Solver &middot; Graphing Pad &middot; Systems Studio</span>
         </div>
       </div>
 
       <!-- Mode Switcher -->
       <nav class="mode-tabs" role="tablist" aria-label="View Modes">
-        <button class="tab-btn active" data-mode="alpha" role="tab" aria-selected="true" id="tab_alpha">
-          <span>🔍</span> Solver (Wolfram &middot; Symbolab)
+        <button class="tab-btn active" data-mode="qa" role="tab" aria-selected="true" id="tab_qa">
+          <span>🔍</span> Q&amp;A Solver
         </button>
         <button class="tab-btn" data-mode="pad" role="tab" aria-selected="false" id="tab_pad">
-          <span>📈</span> Graphing Pad (GeoGebra &middot; Desmos)
+          <span>📈</span> Graphing Pad
+        </button>
+        <button class="tab-btn" data-mode="systems" role="tab" aria-selected="false" id="tab_systems">
+          <span>⚗</span> Systems &amp; ODEs
         </button>
         <button class="tab-btn" data-mode="split" role="tab" aria-selected="false" id="tab_split">
           <span>◫</span> Split View
@@ -85,17 +88,17 @@
          ==================================================================== -->
     <main class="main-layout" id="main_layout">
       <!-- ------------------------------------------------------------------
-           PANE 1: Wolfram Alpha Computational Search & Pods
+           PANE 1: Structured Q&A Symbolic Search & Result Pods
            ------------------------------------------------------------------ -->
-      <section class="alpha-pane" id="alpha_pane">
-        <div class="alpha-search-wrapper">
-          <div class="alpha-hero">
-            <h1>Step-by-step solutions &amp; computational intelligence</h1>
-            <p>Inspired by Wolfram Alpha and Symbolab &middot; Powered by URAE WebAssembly Symbolic Core</p>
+      <section class="qa-pane" id="qa_pane">
+        <div class="qa-search-wrapper">
+          <div class="qa-hero">
+            <h1>Step-by-step solutions &amp; symbolic intelligence</h1>
+            <p>Multi-pod derivations, exact solving &amp; visualization powered by URAE WebAssembly Core</p>
           </div>
 
-          <!-- Symbolab-style Subject Topic Ribbon -->
-          <div class="symbolab-topic-ribbon" id="symbolab_ribbon">
+          <!-- Subject Topic Ribbon -->
+          <div class="topic-ribbon" id="topic_ribbon">
             <button class="topic-btn active" data-topic="all"><span>🌐</span> All Topics</button>
             <button class="topic-btn" data-topic="calculus"><span>∫</span> Calculus</button>
             <button class="topic-btn" data-topic="algebra"><span>𝑥</span> Algebra</button>
@@ -105,21 +108,21 @@
             <button class="topic-btn" data-topic="trig"><span>📐</span> Trigonometry</button>
           </div>
 
-          <!-- Collapsible Practice / Topic Templates Drawer (Symbolab style) -->
-          <div class="symbolab-drawer" id="symbolab_drawer">
+          <!-- Collapsible Practice / Topic Templates Drawer -->
+          <div class="topic-drawer" id="topic_drawer">
             <div class="drawer-title" id="drawer_topic_title">Calculus Practice Drills</div>
             <div class="drawer-tags" id="drawer_tags_container">
               <!-- Dynamically populated tags based on active subject -->
             </div>
           </div>
 
-          <!-- Iconic Search Box -->
-          <form class="alpha-search-form" id="alpha_form" onsubmit="event.preventDefault(); window.runAlphaQuery();">
+          <!-- Structured Query Input Box -->
+          <form class="qa-search-form" id="qa_form" onsubmit="event.preventDefault(); window.runQaQuery();">
             <div class="search-icon-badge" title="Compute Symbol">=</div>
             <input
               type="text"
-              id="alpha_input"
-              class="alpha-search-input"
+              id="qa_input"
+              class="qa-search-input"
               placeholder="Enter what you want to calculate (e.g. integrate x * sin(x), solve e^(2x) - 3e^x + 2 = 0, gamma(5), d/dx erf(x))..."
               autocomplete="off"
               spellcheck="false"
@@ -137,7 +140,7 @@
             </div>
           </form>
 
-          <!-- Virtual Math Keypad (Collapsible with Symbolab Templates) -->
+          <!-- Virtual Math Keypad -->
           <div class="math-keypad" id="math_keypad">
             <div class="keypad-tabs">
               <button class="keypad-tab-btn active" data-pad="templates">Templates</button>
@@ -149,7 +152,7 @@
               <button class="keypad-tab-btn" data-pad="greek">Greek &middot; Constants</button>
             </div>
 
-            <!-- Symbolab Visual Templates Grid -->
+            <!-- Visual Templates Grid -->
             <div class="keypad-grid" id="keypad_templates">
               <button class="math-key" data-insert="(( ) / ( ))" title="Fraction">a/b</button>
               <button class="math-key" data-insert="^()" title="Power / Exponent">xʸ</button>
@@ -266,33 +269,33 @@
         </div>
 
         <!-- Dynamic Results Pods Container -->
-        <div class="alpha-results-container" id="alpha_results">
+        <div class="qa-results-container" id="qa_results">
           <!-- Initial Welcome Pod Card -->
-          <div class="wa-pod" id="welcome_pod">
-            <div class="wa-pod-header">
-              <span class="wa-pod-title">Universal Rust Computational Engine</span>
+          <div class="query-pod" id="welcome_pod">
+            <div class="query-pod-header">
+              <span class="query-pod-title">Universal Rust Computational Engine</span>
               <span class="engine-status-badge">WASM Ready</span>
             </div>
-            <div class="wa-pod-body">
+            <div class="query-pod-body">
               <p style="margin: 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6;">
-                Welcome to <strong>URAE // Alpha</strong>. Enter any analytical mathematics query above, or click on the <strong>Rust Extended Pad</strong> tab to write reactive, multi-line mathematical notebooks with real-time sliders and category-theoretic hypergraph reduction.
+                Welcome to <strong>URAE // Q&amp;A</strong>. Enter any analytical mathematics query above, open <strong>Systems &amp; ODEs</strong> to set up coupled equations or dynamical phase portraits, or click <strong>Graphing Pad</strong> to write reactive multi-line mathematical notebooks with real-time sliders.
               </p>
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-top: 12px;">
                 <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
-                  <strong style="color: var(--wa-orange);">∫ Symbolic Calculus</strong>
+                  <strong style="color: var(--urae-orange);">∫ Symbolic Calculus</strong>
                   <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Analytical derivatives, generalized IBP, and definite integrals via FTC.</div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
-                  <strong style="color: var(--wa-orange);">W(x) Transcendental &amp; Special</strong>
+                  <strong style="color: var(--urae-orange);">W(x) Transcendental &amp; Special</strong>
                   <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Exact Gamma, Beta, Zeta, Eta, Erf, Bessel, and Lambert W equation solving.</div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
-                  <strong style="color: var(--wa-orange);">[A] Spectral Linear Algebra</strong>
+                  <strong style="color: var(--urae-orange);">[A] Spectral Linear Algebra</strong>
                   <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Eigenvalues, characteristic polynomials, and Putzer closed-form matrix exp e^(At).</div>
                 </div>
                 <div style="padding: 12px; background: var(--bg-app); border-radius: var(--radius-md); border: 1px solid var(--border-main);">
-                  <strong style="color: var(--wa-orange);">📝 Rust Extended Pad</strong>
-                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Transfer any Alpha result directly into live reactive pad lines with sliders.</div>
+                  <strong style="color: var(--urae-orange);">📝 Rust Extended Pad</strong>
+                  <div style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">Transfer any Q&amp;A result directly into live reactive pad lines with sliders.</div>
                 </div>
               </div>
             </div>
@@ -301,20 +304,17 @@
       </section>
 
       <!-- ------------------------------------------------------------------
-           PANE 2: Rust Extended Interactive Math Pad
+           PANE 2: Interactive Coordinate Plane & Graphing Pad
            ------------------------------------------------------------------ -->
-      <!-- ------------------------------------------------------------------
-           PANE 2: GeoGebra / Desmos Inspired Graphing Pad
-           ------------------------------------------------------------------ -->
-      <section class="pad-pane desmos-pad-container" id="pad_pane">
-        <!-- Left: Desmos Expression List Sidebar -->
-        <div class="desmos-expr-sidebar">
-          <div class="desmos-sidebar-header">
-            <div class="desmos-brand">
-              <span class="desmos-pill-tag">GRAPHING PAD</span>
+      <section class="pad-pane pad-container" id="pad_pane">
+        <!-- Left: Reactive Expression List Sidebar -->
+        <div class="pad-expr-sidebar">
+          <div class="pad-sidebar-header">
+            <div class="pad-brand">
+              <span class="pad-pill-tag">GRAPHING PAD</span>
               <h3><span>📈</span> Expressions</h3>
             </div>
-            <div class="desmos-header-actions">
+            <div class="pad-header-actions">
               <button class="icon-btn sm" id="pad_add_line_btn" title="Add Expression">+</button>
               <button class="icon-btn sm" id="pad_play_all_btn" title="Animate All Sliders">▶ Play</button>
               <button class="icon-btn sm" id="pad_eval_all_btn" title="Re-evaluate all lines in WASM">⚡ Eval</button>
@@ -333,8 +333,8 @@
           </div>
 
           <!-- Reactive Expression Cards List -->
-          <div class="desmos-lines-list" id="pad_lines_container">
-            <!-- Dynamically populated Desmos expression cards -->
+          <div class="pad-lines-list" id="pad_lines_container">
+            <!-- Dynamically populated reactive expression cards -->
           </div>
 
           <!-- Add Line Button Bottom -->
@@ -343,12 +343,12 @@
           </button>
         </div>
 
-        <!-- Right: GeoGebra / Desmos 2D Graph Coordinate Plane Canvas -->
-        <div class="desmos-graph-pane" id="desmos_graph_wrapper">
-          <canvas id="desmos_graph_canvas"></canvas>
+        <!-- Right: Interactive 2D Graph Coordinate Plane Canvas -->
+        <div class="pad-graph-pane" id="pad_graph_wrapper">
+          <canvas id="pad_graph_canvas"></canvas>
 
           <!-- Floating On-Graph Controls -->
-          <div class="desmos-graph-controls">
+          <div class="pad-graph-controls">
             <button class="graph-ctrl-btn" id="graph_zoom_in_btn" title="Zoom In">+</button>
             <button class="graph-ctrl-btn" id="graph_zoom_out_btn" title="Zoom Out">&minus;</button>
             <button class="graph-ctrl-btn" id="graph_reset_view_btn" title="Reset View (Default [-10, 10])">⌂</button>
@@ -356,17 +356,153 @@
           </div>
 
           <!-- Cursor Coordinates Badge -->
-          <div class="desmos-coords-badge" id="desmos_coords_badge">
+          <div class="pad-coords-badge" id="pad_coords_badge">
             x: 0.00, y: 0.00
           </div>
 
           <!-- Point inspection tooltip -->
-          <div class="desmos-point-tooltip" id="desmos_point_tooltip" style="display:none;"></div>
+          <div class="pad-point-tooltip" id="pad_point_tooltip" style="display:none;"></div>
         </div>
       </section>
 
       <!-- ------------------------------------------------------------------
-           PANE 3: Canvas View for WebGL / WebGPU egui Notebook
+           PANE 3: Systems of Equations & Differential Equations Workbench
+           ------------------------------------------------------------------ -->
+      <section class="systems-pane" id="systems_pane">
+        <aside class="systems-sidebar">
+          <div class="pad-brand">
+            <span class="pad-pill-tag">WORKBENCH</span>
+            <h3><span>⚗</span> Systems &amp; Differential Studio</h3>
+          </div>
+
+          <div class="systems-subtabs" role="tablist">
+            <button class="sys-subtab-btn active" id="sys_tab_eq" data-sys-mode="equations">📐 Algebraic Equations</button>
+            <button class="sys-subtab-btn" id="sys_tab_ode" data-sys-mode="differentials">🌊 Differential / Phase Plane</button>
+          </div>
+
+          <div class="sys-card">
+            <span class="sys-label">Presets</span>
+            <select class="sys-select" id="sys_preset_select"></select>
+            <div class="sys-row">
+              <button class="sys-btn primary" id="sys_solve_btn" style="flex:1;">⚡ Solve &amp; Analyze</button>
+              <label class="sys-row" style="font-size:12px; color:var(--text-secondary); cursor:pointer;">
+                <input type="checkbox" id="sys_live_toggle" checked /> Live
+              </label>
+            </div>
+          </div>
+
+          <!-- Equation System Controls -->
+          <div id="sys_eq_controls" style="display:flex; flex-direction:column; gap:10px;">
+            <div class="sys-card">
+              <div class="sys-row" style="justify-content:space-between;">
+                <span class="sys-label">Equations (LHS = RHS)</span>
+                <button class="sys-btn" id="sys_add_eq_btn">+ Eq</button>
+              </div>
+              <div id="sys_eq_list" style="display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+
+            <div class="sys-card">
+              <span class="sys-label">Unknown Variables &amp; Viewport Bounds</span>
+              <input class="sys-input" id="sys_eq_vars" placeholder="x, y" />
+              <div class="sys-row">
+                <span style="font-size:11px; color:var(--text-muted); width:26px;">x:</span>
+                <input class="sys-input" id="sys_eq_xmin" type="number" step="0.5" value="-5" />
+                <input class="sys-input" id="sys_eq_xmax" type="number" step="0.5" value="5" />
+                <span style="font-size:11px; color:var(--text-muted); width:26px;">y:</span>
+                <input class="sys-input" id="sys_eq_ymin" type="number" step="0.5" value="-5" />
+                <input class="sys-input" id="sys_eq_ymax" type="number" step="0.5" value="5" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Differential System Controls -->
+          <div id="sys_ode_controls" style="display:none; flex-direction:column; gap:10px;">
+            <div class="sys-card">
+              <div class="sys-row" style="justify-content:space-between;">
+                <span class="sys-label">Coupled 1st-Order ODEs dy_i/dt</span>
+                <button class="sys-btn" id="sys_add_ode_btn">+ State</button>
+              </div>
+              <div id="sys_ode_list" style="display:flex; flex-direction:column; gap:6px;"></div>
+            </div>
+
+            <div class="sys-card">
+              <span class="sys-label">Integration Horizon &amp; Solver Method</span>
+              <div class="sys-row">
+                <span style="font-size:11px; color:var(--text-muted);">t &isin;</span>
+                <input class="sys-input" id="sys_ode_t0" type="number" step="0.5" value="0" />
+                <input class="sys-input" id="sys_ode_t1" type="number" step="0.5" value="15" />
+                <select class="sys-select" id="sys_ode_method">
+                  <option value="tsit5">tsit5 (Explicit 5(4))</option>
+                  <option value="auto">auto (Adaptive Stiff/Explicit)</option>
+                  <option value="dp5">dp5 (Dormand-Prince 5)</option>
+                  <option value="rk4">rk4 (Classical RK4)</option>
+                  <option value="radau5">radau5 (Implicit Stiff)</option>
+                  <option value="gl4">gl4 (Symplectic Gauss)</option>
+                  <option value="meta">meta (Spectral Taylor)</option>
+                </select>
+              </div>
+              <div class="sys-row">
+                <span style="font-size:11px; color:var(--text-muted);">Phase X/Y:</span>
+                <input class="sys-input" id="sys_phase_xmin" type="number" step="0.5" value="-3" />
+                <input class="sys-input" id="sys_phase_xmax" type="number" step="0.5" value="3" />
+                <input class="sys-input" id="sys_phase_ymin" type="number" step="0.5" value="-5" />
+                <input class="sys-input" id="sys_phase_ymax" type="number" step="0.5" value="5" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Shared Parameter Sliders -->
+          <div class="sys-card">
+            <div class="sys-row" style="justify-content:space-between;">
+              <span class="sys-label">Interactive Parameters</span>
+              <button class="sys-btn" id="sys_add_param_btn">+ Param</button>
+            </div>
+            <div id="sys_param_list" style="display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+        </aside>
+
+        <div class="systems-canvas-stage">
+          <div class="sys-card" id="sys_diag_card">
+            <div class="sys-row" style="justify-content:space-between;">
+              <span class="sys-label">Symbolic &amp; Qualitative Analysis</span>
+              <span class="sys-badge" id="sys_status_badge">Ready</span>
+            </div>
+            <div id="sys_diag_output" style="font-size:13px; color:var(--text-secondary); line-height:1.55;">
+              Select a preset or define your system on the left, then click <strong>Solve &amp; Analyze</strong>.
+            </div>
+          </div>
+
+          <div class="sys-plots-single" id="sys_eq_plot_stage">
+            <div class="sys-plot-box">
+              <div class="sys-row" style="justify-content:space-between; margin-bottom:6px;">
+                <span class="sys-label">Implicit Zero-Contours &amp; Solution Intersections</span>
+                <span style="font-size:11px; color:var(--text-muted);" id="sys_eq_plot_meta">Marching Squares + Exact Solver</span>
+              </div>
+              <canvas id="sys_eq_canvas"></canvas>
+            </div>
+          </div>
+
+          <div class="sys-plots-split" id="sys_ode_plot_stage" style="display:none;">
+            <div class="sys-plot-box">
+              <div class="sys-row" style="justify-content:space-between; margin-bottom:6px;">
+                <span class="sys-label">State Trajectories y_i(t)</span>
+                <span style="font-size:11px; color:var(--text-muted);" id="sys_ode_time_meta">Time Evolution</span>
+              </div>
+              <canvas id="sys_de_time_canvas"></canvas>
+            </div>
+            <div class="sys-plot-box">
+              <div class="sys-row" style="justify-content:space-between; margin-bottom:6px;">
+                <span class="sys-label">2D Phase Portrait &amp; Quiver Field</span>
+                <span style="font-size:11px; color:var(--text-muted);" id="sys_ode_phase_meta">Flow &amp; Equilibrium</span>
+              </div>
+              <canvas id="sys_de_phase_canvas"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------------
+           PANE 4: Canvas View for WebGL / WebGPU egui Notebook
            ------------------------------------------------------------------ -->
       <section class="canvas-pane" id="canvas_pane">
         <canvas id="urae_canvas" tabindex="0"></canvas>
@@ -434,12 +570,12 @@
   <!-- Update Toast -->
   <div id="urae_update_toast">
     <span>⚡ <strong>Update ready</strong> &mdash; A new version of URAE was downloaded.</span>
-    <button id="urae_update_reload_btn" class="icon-btn" style="background:var(--wa-orange); color:#fff; border:none;">Reload</button>
+    <button id="urae_update_reload_btn" class="icon-btn" style="background:var(--urae-orange); color:#fff; border:none;">Reload</button>
     <button id="urae_update_dismiss_btn" class="clear-input-btn">&times;</button>
   </div>
 
   <!-- ====================================================================
-       Core Engine & Wolfram Alpha / Rust Pad JavaScript Logic
+       Core Engine & Symbolic / Reactive JavaScript Logic
        ==================================================================== -->
   <script>
     // WebGL Deprecation Interceptor (Firefox privacy compatibility)
@@ -486,22 +622,37 @@
   </script>
 
   <script type="module">
-    import init, { wasm_process_json, wasm_wolfram_query, wasm_pad_eval_line, wasm_pad_eval_session, start_notebook_web } from './pkg/urae_wasm.js?v=20261110';
+    import * as uraePkg from './pkg/urae_wasm.js?v=20261116';
+
+    const init = uraePkg.default;
+    const wasm_process_json = uraePkg.wasm_process_json;
+    const wasm_structured_query = uraePkg.wasm_structured_query;
+    const wasm_pad_eval_line = uraePkg.wasm_pad_eval_line;
+    const wasm_pad_eval_session = uraePkg.wasm_pad_eval_session;
+    const wasm_analyze_equation_system = uraePkg.wasm_analyze_equation_system;
+    const wasm_analyze_differential_system = uraePkg.wasm_analyze_differential_system;
+    const wasm_workbench_presets = uraePkg.wasm_workbench_presets;
+    const wasm_process_ndjson_stream = uraePkg.wasm_process_ndjson_stream;
+    const start_notebook_web = uraePkg.start_notebook_web;
 
     // Global state
     window.wasm_process_json = wasm_process_json;
-    window.wasm_wolfram_query = wasm_wolfram_query;
+    window.wasm_structured_query = wasm_structured_query;
     window.wasm_pad_eval_line = wasm_pad_eval_line;
     window.wasm_pad_eval_session = wasm_pad_eval_session;
+    window.wasm_analyze_equation_system = wasm_analyze_equation_system;
+    window.wasm_analyze_differential_system = wasm_analyze_differential_system;
+    window.wasm_workbench_presets = wasm_workbench_presets;
+    window.wasm_process_ndjson_stream = wasm_process_ndjson_stream;
 
-    const DESMOS_PALETTE = ['#2d70b3', '#c74440', '#388c46', '#6042a6', '#fa7e19', '#0099b8'];
+    const CURVE_PALETTE = ['#2d70b3', '#c74440', '#388c46', '#6042a6', '#fa7e19', '#0099b8'];
 
     let padLines = [
-      { id: 1, text: "a = 2.0", isParam: true, paramName: "a", paramVal: 2.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: DESMOS_PALETTE[0], visible: true },
-      { id: 2, text: "c = 3.0", isParam: true, paramName: "c", paramVal: 3.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: DESMOS_PALETTE[1], visible: true },
-      { id: 3, text: "f(x) = a * x^2 + c", isParam: false, color: DESMOS_PALETTE[2], visible: true },
-      { id: 4, text: "diff f(x), x", isParam: false, color: DESMOS_PALETTE[3], visible: true },
-      { id: 5, text: "integrate x * sin(x), x", isParam: false, color: DESMOS_PALETTE[4], visible: true }
+      { id: 1, text: "a = 2.0", isParam: true, paramName: "a", paramVal: 2.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: CURVE_PALETTE[0], visible: true },
+      { id: 2, text: "c = 3.0", isParam: true, paramName: "c", paramVal: 3.0, min: -10, max: 10, step: 0.1, isPlaying: false, color: CURVE_PALETTE[1], visible: true },
+      { id: 3, text: "f(x) = a * x^2 + c", isParam: false, color: CURVE_PALETTE[2], visible: true },
+      { id: 4, text: "diff f(x), x", isParam: false, color: CURVE_PALETTE[3], visible: true },
+      { id: 5, text: "integrate x * sin(x), x", isParam: false, color: CURVE_PALETTE[4], visible: true }
     ];
 
     // Helper: Render LaTeX or Unicode with KaTeX
@@ -542,9 +693,15 @@
 
       if (mode === 'pad' || mode === 'split') {
         setTimeout(() => {
-          resizeDesmosGraph();
-          drawDesmosGraph();
+          resizePadGraph();
+          drawPadGraph();
         }, 50);
+      }
+
+      if (mode === 'systems' && typeof window.refreshSystemsWorkbench === 'function') {
+        setTimeout(() => {
+          window.refreshSystemsWorkbench();
+        }, 40);
       }
 
       if (mode === 'canvas' && typeof start_notebook_web === 'function') {
@@ -561,12 +718,12 @@
       btn.addEventListener('click', () => setViewMode(btn.dataset.mode));
     });
 
-    document.getElementById('brand_home_btn')?.addEventListener('click', () => setViewMode('alpha'));
+    document.getElementById('brand_home_btn')?.addEventListener('click', () => setViewMode('qa'));
 
     // --------------------------------------------------------------------------
-    // Symbolab Subject Topic Ribbon & Practice Drawer
+    // Subject Topic Ribbon & Practice Drawer
     // --------------------------------------------------------------------------
-    const SYMBOLAB_TOPICS = {
+    const SUBJECT_TOPICS = {
       calculus: {
         title: "Calculus Practice Drills",
         tags: [
@@ -628,7 +785,7 @@
       }
     };
 
-    const symbolabDrawer = document.getElementById('symbolab_drawer');
+    const topicDrawer = document.getElementById('topic_drawer');
     const drawerTopicTitle = document.getElementById('drawer_topic_title');
     const drawerTagsContainer = document.getElementById('drawer_tags_container');
 
@@ -638,12 +795,12 @@
         btn.classList.add('active');
         const topic = btn.dataset.topic;
 
-        if (topic === 'all' || !SYMBOLAB_TOPICS[topic]) {
-          symbolabDrawer?.classList.remove('open');
+        if (topic === 'all' || !SUBJECT_TOPICS[topic]) {
+          topicDrawer?.classList.remove('open');
           return;
         }
 
-        const topicData = SYMBOLAB_TOPICS[topic];
+        const topicData = SUBJECT_TOPICS[topic];
         if (drawerTopicTitle) drawerTopicTitle.textContent = topicData.title;
         if (drawerTagsContainer) {
           drawerTagsContainer.innerHTML = '';
@@ -653,15 +810,15 @@
             tagBtn.textContent = t.label;
             tagBtn.title = t.query;
             tagBtn.addEventListener('click', () => {
-              alphaInput.value = t.query;
+              qaInput.value = t.query;
               updateClearButton();
-              setViewMode('alpha');
-              window.runAlphaQuery(t.query);
+              setViewMode('qa');
+              window.runQaQuery(t.query);
             });
             drawerTagsContainer.appendChild(tagBtn);
           });
         }
-        symbolabDrawer?.classList.add('open');
+        topicDrawer?.classList.add('open');
       });
     });
 
@@ -670,7 +827,7 @@
     // --------------------------------------------------------------------------
     const toggleKeypadBtn = document.getElementById('toggle_keypad_btn');
     const mathKeypad = document.getElementById('math_keypad');
-    const alphaInput = document.getElementById('alpha_input');
+    const qaInput = document.getElementById('qa_input');
     const clearInputBtn = document.getElementById('clear_input_btn');
 
     toggleKeypadBtn?.addEventListener('click', () => {
@@ -696,27 +853,27 @@
         const insertText = key.dataset.insert;
         if (!insertText) return;
 
-        const start = alphaInput.selectionStart;
-        const end = alphaInput.selectionEnd;
-        const val = alphaInput.value;
-        alphaInput.value = val.substring(0, start) + insertText + val.substring(end);
-        alphaInput.focus();
-        alphaInput.selectionStart = alphaInput.selectionEnd = start + insertText.length;
+        const start = qaInput.selectionStart;
+        const end = qaInput.selectionEnd;
+        const val = qaInput.value;
+        qaInput.value = val.substring(0, start) + insertText + val.substring(end);
+        qaInput.focus();
+        qaInput.selectionStart = qaInput.selectionEnd = start + insertText.length;
         updateClearButton();
       });
     });
 
     function updateClearButton() {
       if (clearInputBtn) {
-        clearInputBtn.style.display = alphaInput.value.length > 0 ? 'flex' : 'none';
+        clearInputBtn.style.display = qaInput.value.length > 0 ? 'flex' : 'none';
       }
     }
 
-    alphaInput?.addEventListener('input', updateClearButton);
+    qaInput?.addEventListener('input', updateClearButton);
     clearInputBtn?.addEventListener('click', () => {
-      alphaInput.value = '';
+      qaInput.value = '';
       updateClearButton();
-      alphaInput.focus();
+      qaInput.focus();
     });
 
     // Pill quick-queries
@@ -724,23 +881,23 @@
       btn.addEventListener('click', () => {
         const q = btn.dataset.query;
         if (q) {
-          alphaInput.value = q;
+          qaInput.value = q;
           updateClearButton();
-          setViewMode('alpha');
-          window.runAlphaQuery(q);
+          setViewMode('qa');
+          window.runQaQuery(q);
           document.getElementById('examples_modal')?.classList.remove('open');
         }
       });
     });
 
     // --------------------------------------------------------------------------
-    // Wolfram Alpha + Symbolab Query Execution & Step-by-Step Generator
+    // Structured Symbolic Query Execution & Step-by-Step Generator
     // --------------------------------------------------------------------------
-    window.runAlphaQuery = function(overrideQuery) {
-      const queryStr = (overrideQuery || alphaInput.value).trim();
+    window.runQaQuery = function(overrideQuery) {
+      const queryStr = (overrideQuery || qaInput.value).trim();
       if (!queryStr) return;
 
-      const resultsContainer = document.getElementById('alpha_results');
+      const resultsContainer = document.getElementById('qa_results');
       resultsContainer.innerHTML = `
         <div class="loading-pod">
           <div class="loading-spinner"></div>
@@ -753,17 +910,17 @@
           let pods = [];
           let executionTimeUs = 0;
 
-          // 1. Try dedicated wasm_wolfram_query if available
-          if (typeof window.wasm_wolfram_query === 'function') {
+          // 1. Try dedicated wasm_structured_query if available
+          if (typeof window.wasm_structured_query === 'function') {
             try {
-              const rawJson = window.wasm_wolfram_query(queryStr);
+              const rawJson = window.wasm_structured_query(queryStr);
               const parsed = JSON.parse(rawJson);
               if (parsed.pods && parsed.pods.length > 0) {
                 pods = parsed.pods;
                 executionTimeUs = parsed.execution_time_us || 0;
               }
             } catch (err) {
-              console.debug('wasm_wolfram_query fallback:', err);
+              console.debug('wasm_structured_query fallback:', err);
             }
           }
 
@@ -861,9 +1018,9 @@
 
           if (pods.length === 0) {
             resultsContainer.innerHTML = `
-              <div class="wa-pod">
-                <div class="wa-pod-header"><span class="wa-pod-title">Result</span></div>
-                <div class="wa-pod-body">
+              <div class="query-pod">
+                <div class="query-pod-header"><span class="query-pod-title">Result</span></div>
+                <div class="query-pod-body">
                   <div class="math-render-area">${escapeHtml(queryStr)}</div>
                 </div>
               </div>
@@ -873,46 +1030,49 @@
 
           pods.forEach((pod, idx) => {
             const podEl = document.createElement('div');
-            podEl.className = 'wa-pod';
+            podEl.className = 'query-pod';
 
             const headerEl = document.createElement('div');
-            headerEl.className = 'wa-pod-header';
+            headerEl.className = 'query-pod-header';
             headerEl.innerHTML = `
-              <span class="wa-pod-title">${escapeHtml(pod.title)}</span>
-              <div class="wa-pod-actions">
+              <span class="query-pod-title">${escapeHtml(pod.title)}</span>
+              <div class="query-pod-actions">
                 <button class="pod-action-btn" title="Copy LaTeX Formula" data-action="copy-latex">LaTeX</button>
                 <button class="pod-action-btn" title="Copy Unicode Math" data-action="copy-unicode">Unicode</button>
-                <button class="pod-action-btn" title="Plot on GeoGebra / Desmos Graph" data-action="graph-in-pad">
+                <button class="pod-action-btn" title="Plot Curve in Graphing Pad" data-action="graph-in-pad">
                   <span>📈 Graph in Pad</span>
                 </button>
-                <button class="pod-action-btn send-to-pad" title="Insert into Desmos Pad Expression List" data-action="send-to-pad">
+                <button class="pod-action-btn" title="Open in Systems &amp; ODE Workbench" data-action="send-to-systems">
+                  <span>⚗ Systems</span>
+                </button>
+                <button class="pod-action-btn send-to-pad" title="Insert into Pad Expression List" data-action="send-to-pad">
                   <span>⚡ To Pad</span>
                 </button>
               </div>
             `;
 
             const bodyEl = document.createElement('div');
-            bodyEl.className = 'wa-pod-body';
+            bodyEl.className = 'query-pod-body';
             const renderArea = document.createElement('div');
             renderArea.className = 'math-render-area';
 
             renderMathFormatted(renderArea, pod.latex, pod.unicode);
             bodyEl.appendChild(renderArea);
 
-            // Symbolab-style Step-by-Step accordion
+            // Step-by-step explanation accordion
             if (pod.subpods && pod.subpods.length > 0) {
               const stepsCard = document.createElement('div');
-              stepsCard.className = 'symbolab-steps-card';
+              stepsCard.className = 'topic-steps-card';
 
               const toggleBar = document.createElement('div');
-              toggleBar.className = 'symbolab-steps-toggle';
+              toggleBar.className = 'topic-steps-toggle';
               toggleBar.innerHTML = `
                 <span class="steps-badge"><span>🪜</span> Step-by-Step Explanation (${pod.subpods.length} Steps)</span>
                 <span class="toggle-indicator">▼ Click to Expand</span>
               `;
 
               const stepsBody = document.createElement('div');
-              stepsBody.className = 'symbolab-steps-body';
+              stepsBody.className = 'topic-steps-body';
 
               pod.subpods.forEach((sub, stepIdx) => {
                 const stepCard = document.createElement('div');
@@ -941,7 +1101,7 @@
             }
 
             const footerEl = document.createElement('div');
-            footerEl.className = 'wa-pod-footer';
+            footerEl.className = 'query-pod-footer';
             footerEl.innerHTML = `
               <span>Universal Rust Algebra Engine &middot; Symbolic Verification</span>
               <span>${executionTimeUs} &mu;s execution</span>
@@ -959,8 +1119,15 @@
             headerEl.querySelector('[data-action="graph-in-pad"]')?.addEventListener('click', () => {
               appendResultToRustPad(pod.unicode || pod.text || pod.latex);
               setViewMode('pad');
-              setTimeout(() => { drawDesmosGraph(); }, 60);
-              showToastNotice('Plotted curve in GeoGebra / Desmos Graphing Pad');
+              setTimeout(() => { drawPadGraph(); }, 60);
+              showToastNotice('Plotted curve in Graphing Pad');
+            });
+            headerEl.querySelector('[data-action="send-to-systems"]')?.addEventListener('click', () => {
+              const expr = pod.text || pod.unicode || queryStr;
+              if (typeof window.sendToSystemsWorkbench === 'function') {
+                window.sendToSystemsWorkbench(expr);
+              }
+              setViewMode('systems');
             });
             headerEl.querySelector('[data-action="send-to-pad"]')?.addEventListener('click', () => {
               appendResultToRustPad(pod.unicode || pod.text || pod.latex);
@@ -975,13 +1142,13 @@
 
           // Categorical Arena Dimension Inspector Pod
           const catPod = document.createElement('div');
-          catPod.className = 'wa-pod';
+          catPod.className = 'query-pod';
           catPod.innerHTML = `
-            <div class="wa-pod-header">
-              <span class="wa-pod-title">Rust Categorical Engine &middot; Dimension &amp; Arena Inspector</span>
+            <div class="query-pod-header">
+              <span class="query-pod-title">Rust Categorical Engine &middot; Dimension &amp; Arena Inspector</span>
               <span class="engine-status-badge">cat-core v2.1</span>
             </div>
-            <div class="wa-pod-body" style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); line-height:1.7;">
+            <div class="query-pod-body" style="font-family:var(--font-mono); font-size:12px; color:var(--text-secondary); line-height:1.7;">
               <div>• <strong>Arena Handles:</strong> Lifetime-free ObjId / ScalarId / WireId handles passed across WASM thread</div>
               <div>• <strong>8D Rational DimVector:</strong> Length: [m]⁰, Mass: [kg]⁰, Time: [s]⁰, Dimensionless scale: Exact 1</div>
               <div>• <strong>Equivalence Lattice:</strong> Exact structural canonicalization verified within UniversalBall &approx;st</div>
@@ -991,9 +1158,9 @@
 
         } catch (err) {
           resultsContainer.innerHTML = `
-            <div class="wa-pod">
-              <div class="wa-pod-header"><span class="wa-pod-title" style="color:var(--error);">Evaluation Error</span></div>
-              <div class="wa-pod-body"><span style="color:var(--error); font-family:var(--font-mono);">${escapeHtml(err.message || String(err))}</span></div>
+            <div class="query-pod">
+              <div class="query-pod-header"><span class="query-pod-title" style="color:var(--error);">Evaluation Error</span></div>
+              <div class="query-pod-body"><span style="color:var(--error); font-family:var(--font-mono);">${escapeHtml(err.message || String(err))}</span></div>
             </div>
           `;
         }
@@ -1010,11 +1177,11 @@
     }
 
     // --------------------------------------------------------------------------
-    // GeoGebra / Desmos Inspired Graphing Pad & Continuous Reactive Engine
+    // Interactive Coordinate Plane & Continuous Reactive Pad Engine
     // --------------------------------------------------------------------------
     function appendResultToRustPad(exprText) {
       const newId = padLines.length > 0 ? Math.max(...padLines.map(l => l.id)) + 1 : 1;
-      const color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+      const color = CURVE_PALETTE[(newId - 1) % CURVE_PALETTE.length];
       padLines.push({
         id: newId,
         text: exprText.trim(),
@@ -1024,8 +1191,8 @@
         isPlaying: false
       });
       renderRustPad();
-      drawDesmosGraph();
-      showToastNotice(`Inserted formula into Desmos Expression List (#${newId})`);
+      drawPadGraph();
+      showToastNotice(`Inserted formula into Pad Expression List (#${newId})`);
     }
 
     function renderRustPad() {
@@ -1048,12 +1215,12 @@
 
       padLines.forEach((line, idx) => {
         if (!line.color) {
-          line.color = DESMOS_PALETTE[idx % DESMOS_PALETTE.length];
+          line.color = CURVE_PALETTE[idx % CURVE_PALETTE.length];
         }
         if (line.visible === undefined) line.visible = true;
 
         const lineCard = document.createElement('div');
-        lineCard.className = 'desmos-expr-card';
+        lineCard.className = 'pad-expr-card';
         lineCard.dataset.lineId = line.id;
 
         // Top Row: Color Dot Toggle + Line # + Input + Actions
@@ -1062,14 +1229,14 @@
 
         // Colored Circle Indicator (click toggles visibility on graph)
         const colorDot = document.createElement('div');
-        colorDot.className = 'desmos-color-indicator' + (line.visible ? '' : ' hidden-curve');
+        colorDot.className = 'pad-color-indicator' + (line.visible ? '' : ' hidden-curve');
         colorDot.style.backgroundColor = line.color;
         colorDot.title = line.visible ? 'Visible on graph (Click to hide)' : 'Hidden (Click to show)';
         colorDot.addEventListener('click', () => {
           line.visible = !line.visible;
-          colorDot.className = 'desmos-color-indicator' + (line.visible ? '' : ' hidden-curve');
+          colorDot.className = 'pad-color-indicator' + (line.visible ? '' : ' hidden-curve');
           colorDot.title = line.visible ? 'Visible on graph (Click to hide)' : 'Hidden (Click to show)';
-          drawDesmosGraph();
+          drawPadGraph();
         });
 
         const lineNum = document.createElement('span');
@@ -1086,22 +1253,22 @@
           line.text = e.target.value;
           detectParameterDefinition(line);
           evaluatePadLine(line, lineCard);
-          drawDesmosGraph();
+          drawPadGraph();
         });
 
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'expr-card-actions';
 
-        // Inspect in Solver
+        // Inspect in Q&A Solver
         const inspectBtn = document.createElement('button');
         inspectBtn.className = 'expr-btn';
-        inspectBtn.title = "Inspect in Solver (Wolfram / Symbolab)";
+        inspectBtn.title = "Inspect in Q&A Solver";
         inspectBtn.textContent = "🔍";
         inspectBtn.addEventListener('click', () => {
-          alphaInput.value = line.text;
+          qaInput.value = line.text;
           updateClearButton();
-          setViewMode('alpha');
-          window.runAlphaQuery(line.text);
+          setViewMode('qa');
+          window.runQaQuery(line.text);
         });
 
         // Duplicate Line
@@ -1113,10 +1280,10 @@
           const newId = Math.max(...padLines.map(l => l.id)) + 1;
           const clone = JSON.parse(JSON.stringify(line));
           clone.id = newId;
-          clone.color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+          clone.color = CURVE_PALETTE[(newId - 1) % CURVE_PALETTE.length];
           padLines.splice(idx + 1, 0, clone);
           renderRustPad();
-          drawDesmosGraph();
+          drawPadGraph();
         });
 
         // Delete Line
@@ -1127,7 +1294,7 @@
         delBtn.addEventListener('click', () => {
           padLines = padLines.filter(l => l.id !== line.id);
           renderRustPad();
-          drawDesmosGraph();
+          drawPadGraph();
         });
 
         actionsDiv.appendChild(inspectBtn);
@@ -1140,10 +1307,10 @@
         topRow.appendChild(actionsDiv);
         lineCard.appendChild(topRow);
 
-        // Desmos Continuous Slider Row if `a = 2.0`
+        // Continuous Parameter Slider Row if `a = 2.0`
         if (line.isParam) {
           const sliderRow = document.createElement('div');
-          sliderRow.className = 'desmos-slider-row';
+          sliderRow.className = 'pad-slider-row';
 
           // Play/Pause Animation button
           const playBtn = document.createElement('button');
@@ -1153,14 +1320,14 @@
 
           const slider = document.createElement('input');
           slider.type = 'range';
-          slider.className = 'desmos-slider-track';
+          slider.className = 'pad-slider-track';
           slider.min = line.min !== undefined ? line.min : -10;
           slider.max = line.max !== undefined ? line.max : 10;
           slider.step = line.step || 0.1;
           slider.value = line.paramVal;
 
           const valSpan = document.createElement('span');
-          valSpan.className = 'desmos-slider-value';
+          valSpan.className = 'pad-slider-value';
           valSpan.textContent = Number(line.paramVal).toFixed(2);
 
           slider.addEventListener('input', (e) => {
@@ -1170,7 +1337,7 @@
             line.text = `${line.paramName} = ${val.toFixed(2)}`;
             inputField.value = line.text;
             evaluateAllPadLines();
-            drawDesmosGraph();
+            drawPadGraph();
           });
 
           playBtn.addEventListener('click', () => {
@@ -1280,7 +1447,7 @@
     function evaluateAllPadLines() {
       const container = document.getElementById('pad_lines_container');
       if (!container) return;
-      const cards = container.querySelectorAll('.desmos-expr-card');
+      const cards = container.querySelectorAll('.pad-expr-card');
 
       if (typeof window.wasm_pad_eval_session === 'function') {
         try {
@@ -1315,12 +1482,12 @@
     }
 
     // --------------------------------------------------------------------------
-    // Desmos High-Performance 2D Graph Coordinate Plane Canvas Engine
+    // High-Performance 2D Graph Coordinate Plane Canvas Engine
     // --------------------------------------------------------------------------
-    const graphCanvas = document.getElementById('desmos_graph_canvas');
-    const graphWrapper = document.getElementById('desmos_graph_wrapper');
-    const coordsBadge = document.getElementById('desmos_coords_badge');
-    const pointTooltip = document.getElementById('desmos_point_tooltip');
+    const graphCanvas = document.getElementById('pad_graph_canvas');
+    const graphWrapper = document.getElementById('pad_graph_wrapper');
+    const coordsBadge = document.getElementById('pad_coords_badge');
+    const pointTooltip = document.getElementById('pad_point_tooltip');
 
     let viewState = {
       centerX: 0,
@@ -1334,14 +1501,14 @@
       dpr: window.devicePixelRatio || 1
     };
 
-    function resizeDesmosGraph() {
+    function resizePadGraph() {
       if (!graphCanvas || !graphWrapper) return;
       const rect = graphWrapper.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
       viewState.dpr = window.devicePixelRatio || 1;
       graphCanvas.width = Math.floor(rect.width * viewState.dpr);
       graphCanvas.height = Math.floor(rect.height * viewState.dpr);
-      drawDesmosGraph();
+      drawPadGraph();
     }
 
     function mathToScreen(x, y) {
@@ -1411,7 +1578,7 @@
       }
     }
 
-    function drawDesmosGraph() {
+    function drawPadGraph() {
       if (!graphCanvas) return;
       const ctx = graphCanvas.getContext('2d');
       if (!ctx) return;
@@ -1592,7 +1759,7 @@
         } catch (_) {}
       });
 
-      // 4. Render Special Feature Dots (Desmos signature)
+      // 4. Render Key Geometric Feature Points
       specialDots.forEach(dot => {
         ctx.fillStyle = dot.color;
         ctx.beginPath();
@@ -1624,7 +1791,7 @@
           viewState.centerY += dy / viewState.scale;
           viewState.dragStartX = e.clientX;
           viewState.dragStartY = e.clientY;
-          drawDesmosGraph();
+          drawPadGraph();
         }
 
         // Coordinate indicator
@@ -1680,28 +1847,28 @@
         viewState.centerX += mathBefore.x - mathAfter.x;
         viewState.centerY += mathBefore.y - mathAfter.y;
 
-        drawDesmosGraph();
+        drawPadGraph();
       }, { passive: false });
     }
 
     // On-Graph Controls Listeners
     document.getElementById('graph_zoom_in_btn')?.addEventListener('click', () => {
       viewState.scale = Math.min(1000, viewState.scale * 1.3);
-      drawDesmosGraph();
+      drawPadGraph();
     });
     document.getElementById('graph_zoom_out_btn')?.addEventListener('click', () => {
       viewState.scale = Math.max(5, viewState.scale / 1.3);
-      drawDesmosGraph();
+      drawPadGraph();
     });
     document.getElementById('graph_reset_view_btn')?.addEventListener('click', () => {
       viewState.centerX = 0;
       viewState.centerY = 0;
       viewState.scale = 45;
-      drawDesmosGraph();
+      drawPadGraph();
     });
     document.getElementById('graph_settings_btn')?.addEventListener('click', () => {
       viewState.gridEnabled = !viewState.gridEnabled;
-      drawDesmosGraph();
+      drawPadGraph();
       showToastNotice(`Coordinate Grid: ${viewState.gridEnabled ? 'Enabled' : 'Disabled'}`);
     });
 
@@ -1725,11 +1892,11 @@
             l.paramVal = mid + amp * Math.sin(l.animPhase);
             l.text = `${l.paramName} = ${l.paramVal.toFixed(2)}`;
 
-            const card = document.querySelector(`.desmos-expr-card[data-line-id="${l.id}"]`);
+            const card = document.querySelector(`.pad-expr-card[data-line-id="${l.id}"]`);
             if (card) {
               const inp = card.querySelector('.expr-input-field');
-              const slider = card.querySelector('.desmos-slider-track');
-              const valSpan = card.querySelector('.desmos-slider-value');
+              const slider = card.querySelector('.pad-slider-track');
+              const valSpan = card.querySelector('.pad-slider-value');
               if (inp) inp.value = l.text;
               if (slider) slider.value = l.paramVal;
               if (valSpan) valSpan.textContent = l.paramVal.toFixed(2);
@@ -1738,7 +1905,7 @@
         });
 
         if (anyPlaying) {
-          drawDesmosGraph();
+          drawPadGraph();
           requestAnimationFrame(stepAnimation);
         } else {
           animRunning = false;
@@ -1771,10 +1938,10 @@
     // Pad Toolbar Event Listeners
     document.getElementById('pad_add_line_btn')?.addEventListener('click', () => {
       const newId = padLines.length > 0 ? Math.max(...padLines.map(l => l.id)) + 1 : 1;
-      const color = DESMOS_PALETTE[(newId - 1) % DESMOS_PALETTE.length];
+      const color = CURVE_PALETTE[(newId - 1) % CURVE_PALETTE.length];
       padLines.push({ id: newId, text: "", isParam: false, color: color, visible: true, isPlaying: false });
       renderRustPad();
-      drawDesmosGraph();
+      drawPadGraph();
       const inputs = document.querySelectorAll('.expr-input-field');
       if (inputs.length > 0) inputs[inputs.length - 1].focus();
     });
@@ -1785,7 +1952,7 @@
 
     document.getElementById('pad_eval_all_btn')?.addEventListener('click', () => {
       evaluateAllPadLines();
-      drawDesmosGraph();
+      drawPadGraph();
       showToastNotice('Re-evaluated all pad expressions in Rust WASM Engine');
     });
 
@@ -1793,7 +1960,7 @@
       if (confirm('Clear all expressions in Graphing Pad?')) {
         padLines = [];
         renderRustPad();
-        drawDesmosGraph();
+        drawPadGraph();
       }
     });
 
@@ -1828,10 +1995,10 @@
     // Initialize UI and Graph
     renderRustPad();
     window.addEventListener('resize', () => {
-      resizeDesmosGraph();
+      resizePadGraph();
     });
     setTimeout(() => {
-      resizeDesmosGraph();
+      resizePadGraph();
     }, 100);
 
     // Examples Modal Toggle
@@ -1847,22 +2014,589 @@
     });
 
     // --------------------------------------------------------------------------
+    // Systems of Equations & Differential Equations Workbench Controller
+    // --------------------------------------------------------------------------
+    const sysState = {
+      mode: 'equations',
+      presets: { equations: [], differentials: [] },
+      eqSpec: {
+        name: 'Circle-Line Intersection',
+        equations: ['x^2 + y^2 = r^2', 'y = m * x + c'],
+        variables: ['x', 'y'],
+        parameters: [['r', 3.0], ['m', 1.0], ['c', 0.5]],
+        x_range: [-5, 5],
+        y_range: [-5, 5],
+        grid_res: 48
+      },
+      odeSpec: {
+        name: 'Damped Harmonic Oscillator',
+        state_vars: ['x', 'v'],
+        rhs_expressions: ['v', '-2 * zeta * omega * v - omega^2 * x'],
+        t_var: 't',
+        t_span: [0, 15],
+        y0: [2.0, 0.0],
+        parameters: [['zeta', 0.15], ['omega', 2.0]],
+        method: 'tsit5',
+        phase_axes: [0, 1],
+        phase_x_range: [-3, 3],
+        phase_y_range: [-5, 5]
+      },
+      lastEqAnalysis: null,
+      lastOdeAnalysis: null,
+    };
+
+    function sizeCanvasToBox(canvas) {
+      if (!canvas) return null;
+      const rect = canvas.parentElement?.getBoundingClientRect();
+      const w = Math.max(240, Math.floor((rect?.width || 480) - 20));
+      const h = Math.max(220, Math.floor((rect?.height || 360) - 36));
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      return { ctx, w, h };
+    }
+
+    function drawPlotGrid(ctx, w, h, xmin, xmax, ymin, ymax, xLabel, yLabel) {
+      const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+      ctx.fillStyle = isDark ? '#0d1117' : '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+
+      const pad = 40;
+      const pw = Math.max(40, w - pad * 1.4);
+      const ph = Math.max(40, h - pad * 1.4);
+      const ox = pad;
+      const oy = 14;
+      const toPx = (x, y) => [
+        ox + ((x - xmin) / Math.max(1e-12, xmax - xmin)) * pw,
+        oy + ph - ((y - ymin) / Math.max(1e-12, ymax - ymin)) * ph
+      ];
+
+      ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 8; i++) {
+        const fx = ox + (pw * i) / 8;
+        const fy = oy + (ph * i) / 8;
+        ctx.beginPath(); ctx.moveTo(fx, oy); ctx.lineTo(fx, oy + ph); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ox, fy); ctx.lineTo(ox + pw, fy); ctx.stroke();
+      }
+
+      if (xmin <= 0 && xmax >= 0) {
+        const [ax] = toPx(0, 0);
+        ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
+        ctx.beginPath(); ctx.moveTo(ax, oy); ctx.lineTo(ax, oy + ph); ctx.stroke();
+      }
+      if (ymin <= 0 && ymax >= 0) {
+        const [, ay] = toPx(0, 0);
+        ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)';
+        ctx.beginPath(); ctx.moveTo(ox, ay); ctx.lineTo(ox + pw, ay); ctx.stroke();
+      }
+
+      ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.22)';
+      ctx.strokeRect(ox, oy, pw, ph);
+
+      ctx.fillStyle = isDark ? '#9ea7b3' : '#4a5568';
+      ctx.font = '11px -apple-system, sans-serif';
+      ctx.fillText(`${xLabel}: [${xmin.toFixed(2)}, ${xmax.toFixed(2)}]`, ox + 6, oy + ph + 16);
+      ctx.fillText(`${yLabel}: [${ymin.toFixed(2)}, ${ymax.toFixed(2)}]`, ox + 6, oy + 14);
+
+      return { toPx, ox, oy, pw, ph };
+    }
+
+    function drawEquationPlot(analysis) {
+      const canvas = document.getElementById('sys_eq_canvas');
+      const sized = sizeCanvasToBox(canvas);
+      if (!sized) return;
+      const { ctx, w, h } = sized;
+      const [xmin, xmax] = sysState.eqSpec.x_range;
+      const [ymin, ymax] = sysState.eqSpec.y_range;
+      const v0 = sysState.eqSpec.variables[0] || 'x';
+      const v1 = sysState.eqSpec.variables[1] || 'y';
+      const { toPx } = drawPlotGrid(ctx, w, h, xmin, xmax, ymin, ymax, v0, v1);
+
+      if (!analysis || !analysis.success) return;
+
+      (analysis.contours || []).forEach((segments, idx) => {
+        ctx.strokeStyle = CURVE_PALETTE[idx % CURVE_PALETTE.length];
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        for (const seg of segments) {
+          const [px0, py0] = toPx(seg.x0, seg.y0);
+          const [px1, py1] = toPx(seg.x1, seg.y1);
+          ctx.moveTo(px0, py0);
+          ctx.lineTo(px1, py1);
+        }
+        ctx.stroke();
+      });
+
+      (analysis.solution_points || []).forEach((pt, idx) => {
+        const [px, py] = toPx(pt[0], pt[1]);
+        ctx.fillStyle = '#f5a623';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px, py, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = '#ff9429';
+        ctx.fillText(`S${idx + 1}(${pt[0].toFixed(3)}, ${pt[1].toFixed(3)})`, px + 9, py - 6);
+      });
+    }
+
+    function drawDifferentialPlots(analysis) {
+      const tCanvas = document.getElementById('sys_de_time_canvas');
+      const tSized = sizeCanvasToBox(tCanvas);
+      if (tSized) {
+        const { ctx, w, h } = tSized;
+        const ts = analysis?.t || [];
+        const trajs = analysis?.trajectories || [];
+        const tmin = ts.length ? ts[0] : sysState.odeSpec.t_span[0];
+        const tmax = ts.length ? ts[ts.length - 1] : sysState.odeSpec.t_span[1];
+        let ymin = -1, ymax = 1;
+        if (trajs.length && ts.length) {
+          ymin = Infinity; ymax = -Infinity;
+          for (const tr of trajs) {
+            for (const val of tr) {
+              if (Number.isFinite(val)) {
+                ymin = Math.min(ymin, val);
+                ymax = Math.max(ymax, val);
+              }
+            }
+          }
+          if (!Number.isFinite(ymin) || Math.abs(ymax - ymin) < 1e-9) { ymin -= 1; ymax += 1; }
+          const pad = (ymax - ymin) * 0.1;
+          ymin -= pad; ymax += pad;
+        }
+        const { toPx } = drawPlotGrid(ctx, w, h, tmin, tmax, ymin, ymax, sysState.odeSpec.t_var || 't', 'y_i(t)');
+        trajs.forEach((tr, sIdx) => {
+          ctx.strokeStyle = CURVE_PALETTE[sIdx % CURVE_PALETTE.length];
+          ctx.lineWidth = 2.1;
+          ctx.beginPath();
+          let started = false;
+          for (let i = 0; i < Math.min(ts.length, tr.length); i++) {
+            const [px, py] = toPx(ts[i], tr[i]);
+            if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+          }
+          ctx.stroke();
+          const label = sysState.odeSpec.state_vars[sIdx] || `y${sIdx}`;
+          ctx.fillStyle = CURVE_PALETTE[sIdx % CURVE_PALETTE.length];
+          ctx.font = 'bold 11px monospace';
+          ctx.fillText(label, w - 58, 28 + sIdx * 15);
+        });
+      }
+
+      const pCanvas = document.getElementById('sys_de_phase_canvas');
+      const pSized = sizeCanvasToBox(pCanvas);
+      if (pSized) {
+        const { ctx, w, h } = pSized;
+        const [xmin, xmax] = sysState.odeSpec.phase_x_range;
+        const [ymin, ymax] = sysState.odeSpec.phase_y_range;
+        const ax0 = sysState.odeSpec.phase_axes?.[0] ?? 0;
+        const ax1 = sysState.odeSpec.phase_axes?.[1] ?? (sysState.odeSpec.state_vars.length > 1 ? 1 : 0);
+        const xName = sysState.odeSpec.state_vars[ax0] || 'y0';
+        const yName = sysState.odeSpec.state_vars.length === 1 ? "dy/dt" : (sysState.odeSpec.state_vars[ax1] || 'y1');
+        const { toPx } = drawPlotGrid(ctx, w, h, xmin, xmax, ymin, ymax, xName, yName);
+
+        if (!analysis || !analysis.success) return;
+
+        const scaleX = (xmax - xmin) / 26;
+        const scaleY = (ymax - ymin) / 26;
+        ctx.strokeStyle = 'rgba(130, 175, 230, 0.55)';
+        ctx.lineWidth = 1.2;
+        for (const q of (analysis.quiver_field || [])) {
+          if (q.speed < 1e-12) continue;
+          const nx = q.dx / q.speed;
+          const ny = q.dy / q.speed;
+          const [px0, py0] = toPx(q.x - 0.35 * scaleX * nx, q.y - 0.35 * scaleY * ny);
+          const [px1, py1] = toPx(q.x + 0.45 * scaleX * nx, q.y + 0.45 * scaleY * ny);
+          ctx.beginPath();
+          ctx.moveTo(px0, py0);
+          ctx.lineTo(px1, py1);
+          ctx.stroke();
+        }
+
+        const trajs = analysis.trajectories || [];
+        const ts = analysis.t || [];
+        if (trajs.length >= 2) {
+          const tx = trajs[ax0] || [];
+          const ty = trajs[ax1] || [];
+          ctx.strokeStyle = '#ff7e00';
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          for (let i = 0; i < Math.min(tx.length, ty.length); i++) {
+            const [px, py] = toPx(tx[i], ty[i]);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+          if (tx.length > 0 && ty.length > 0) {
+            const [sx, sy] = toPx(tx[0], ty[0]);
+            ctx.fillStyle = '#388c46';
+            ctx.beginPath(); ctx.arc(sx, sy, 5, 0, Math.PI * 2); ctx.fill();
+          }
+        } else if (trajs.length === 1 && ts.length) {
+          ctx.strokeStyle = '#ff7e00';
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          for (let i = 0; i < Math.min(ts.length, trajs[0].length); i++) {
+            const [px, py] = toPx(ts[i], trajs[0][i]);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+      }
+    }
+
+    function renderSystemsSidebarLists() {
+      const presetSel = document.getElementById('sys_preset_select');
+      const activeList = sysState.mode === 'equations' ? sysState.presets.equations : sysState.presets.differentials;
+      if (presetSel && activeList.length && presetSel.dataset.mode !== sysState.mode) {
+        presetSel.innerHTML = '';
+        activeList.forEach((p, idx) => {
+          const opt = document.createElement('option');
+          opt.value = String(idx);
+          opt.textContent = p.name;
+          presetSel.appendChild(opt);
+        });
+        presetSel.dataset.mode = sysState.mode;
+      }
+
+      document.getElementById('sys_tab_eq')?.classList.toggle('active', sysState.mode === 'equations');
+      document.getElementById('sys_tab_ode')?.classList.toggle('active', sysState.mode === 'differentials');
+      document.getElementById('sys_eq_controls').style.display = sysState.mode === 'equations' ? 'flex' : 'none';
+      document.getElementById('sys_ode_controls').style.display = sysState.mode === 'differentials' ? 'flex' : 'none';
+      document.getElementById('sys_eq_plot_stage').style.display = sysState.mode === 'equations' ? 'flex' : 'none';
+      document.getElementById('sys_ode_plot_stage').style.display = sysState.mode === 'differentials' ? 'grid' : 'none';
+
+      if (sysState.mode === 'equations') {
+        const eqList = document.getElementById('sys_eq_list');
+        eqList.innerHTML = '';
+        sysState.eqSpec.equations.forEach((eq, idx) => {
+          const row = document.createElement('div');
+          row.className = 'sys-row';
+          const inp = document.createElement('input');
+          inp.className = 'sys-input';
+          inp.value = eq;
+          inp.addEventListener('change', () => {
+            sysState.eqSpec.equations[idx] = inp.value;
+            runActiveSystemsAnalysis();
+          });
+          row.appendChild(inp);
+          if (sysState.eqSpec.equations.length > 1) {
+            const rm = document.createElement('button');
+            rm.className = 'sys-btn';
+            rm.textContent = '×';
+            rm.addEventListener('click', () => {
+              sysState.eqSpec.equations.splice(idx, 1);
+              renderSystemsSidebarLists();
+              runActiveSystemsAnalysis();
+            });
+            row.appendChild(rm);
+          }
+          eqList.appendChild(row);
+        });
+        document.getElementById('sys_eq_vars').value = sysState.eqSpec.variables.join(', ');
+        document.getElementById('sys_eq_xmin').value = sysState.eqSpec.x_range[0];
+        document.getElementById('sys_eq_xmax').value = sysState.eqSpec.x_range[1];
+        document.getElementById('sys_eq_ymin').value = sysState.eqSpec.y_range[0];
+        document.getElementById('sys_eq_ymax').value = sysState.eqSpec.y_range[1];
+      } else {
+        const odeList = document.getElementById('sys_ode_list');
+        odeList.innerHTML = '';
+        sysState.odeSpec.state_vars.forEach((sv, idx) => {
+          const row = document.createElement('div');
+          row.className = 'sys-row';
+          const vInp = document.createElement('input');
+          vInp.className = 'sys-input';
+          vInp.style.width = '52px';
+          vInp.value = sv;
+          vInp.title = 'State variable';
+          vInp.addEventListener('change', () => {
+            sysState.odeSpec.state_vars[idx] = vInp.value.trim() || sv;
+            runActiveSystemsAnalysis();
+          });
+          const rhsInp = document.createElement('input');
+          rhsInp.className = 'sys-input';
+          rhsInp.value = sysState.odeSpec.rhs_expressions[idx] || '0';
+          rhsInp.title = `d${sv}/dt`;
+          rhsInp.addEventListener('change', () => {
+            sysState.odeSpec.rhs_expressions[idx] = rhsInp.value;
+            runActiveSystemsAnalysis();
+          });
+          const y0Inp = document.createElement('input');
+          y0Inp.className = 'sys-input';
+          y0Inp.style.width = '58px';
+          y0Inp.type = 'number';
+          y0Inp.step = '0.1';
+          y0Inp.value = String(sysState.odeSpec.y0[idx] ?? 0);
+          y0Inp.title = 'Initial value y0';
+          y0Inp.addEventListener('change', () => {
+            sysState.odeSpec.y0[idx] = parseFloat(y0Inp.value) || 0;
+            runActiveSystemsAnalysis();
+          });
+          row.appendChild(vInp);
+          row.appendChild(rhsInp);
+          row.appendChild(y0Inp);
+          if (sysState.odeSpec.state_vars.length > 1) {
+            const rm = document.createElement('button');
+            rm.className = 'sys-btn';
+            rm.textContent = '×';
+            rm.addEventListener('click', () => {
+              sysState.odeSpec.state_vars.splice(idx, 1);
+              sysState.odeSpec.rhs_expressions.splice(idx, 1);
+              sysState.odeSpec.y0.splice(idx, 1);
+              renderSystemsSidebarLists();
+              runActiveSystemsAnalysis();
+            });
+            row.appendChild(rm);
+          }
+          odeList.appendChild(row);
+        });
+        document.getElementById('sys_ode_t0').value = sysState.odeSpec.t_span[0];
+        document.getElementById('sys_ode_t1').value = sysState.odeSpec.t_span[1];
+        document.getElementById('sys_ode_method').value = sysState.odeSpec.method || 'tsit5';
+        document.getElementById('sys_phase_xmin').value = sysState.odeSpec.phase_x_range[0];
+        document.getElementById('sys_phase_xmax').value = sysState.odeSpec.phase_x_range[1];
+        document.getElementById('sys_phase_ymin').value = sysState.odeSpec.phase_y_range[0];
+        document.getElementById('sys_phase_ymax').value = sysState.odeSpec.phase_y_range[1];
+      }
+
+      const params = sysState.mode === 'equations' ? sysState.eqSpec.parameters : sysState.odeSpec.parameters;
+      const pList = document.getElementById('sys_param_list');
+      pList.innerHTML = '';
+      params.forEach((pair, idx) => {
+        const row = document.createElement('div');
+        row.className = 'sys-slider-row';
+        const nameInp = document.createElement('input');
+        nameInp.className = 'sys-input';
+        nameInp.value = pair[0];
+        nameInp.addEventListener('change', () => {
+          pair[0] = nameInp.value.trim() || pair[0];
+          runActiveSystemsAnalysis();
+        });
+        const range = document.createElement('input');
+        range.type = 'range';
+        const span = Math.max(5, Math.abs(pair[1]) * 2);
+        range.min = String(-span);
+        range.max = String(span);
+        range.step = '0.05';
+        range.value = String(pair[1]);
+        const valSpan = document.createElement('span');
+        valSpan.textContent = Number(pair[1]).toFixed(2);
+        range.addEventListener('input', () => {
+          pair[1] = parseFloat(range.value);
+          valSpan.textContent = Number(pair[1]).toFixed(2);
+          if (document.getElementById('sys_live_toggle')?.checked) {
+            runActiveSystemsAnalysis();
+          }
+        });
+        const rm = document.createElement('button');
+        rm.className = 'sys-btn';
+        rm.textContent = '×';
+        rm.addEventListener('click', () => {
+          params.splice(idx, 1);
+          renderSystemsSidebarLists();
+          runActiveSystemsAnalysis();
+        });
+        row.appendChild(nameInp);
+        row.appendChild(range);
+        row.appendChild(valSpan);
+        row.appendChild(rm);
+        pList.appendChild(row);
+      });
+    }
+
+    function syncSystemsInputsToSpec() {
+      if (sysState.mode === 'equations') {
+        const vars = (document.getElementById('sys_eq_vars')?.value || 'x, y')
+          .split(',').map(s => s.trim()).filter(Boolean);
+        if (vars.length) sysState.eqSpec.variables = vars;
+        sysState.eqSpec.x_range = [
+          parseFloat(document.getElementById('sys_eq_xmin')?.value) || -5,
+          parseFloat(document.getElementById('sys_eq_xmax')?.value) || 5
+        ];
+        sysState.eqSpec.y_range = [
+          parseFloat(document.getElementById('sys_eq_ymin')?.value) || -5,
+          parseFloat(document.getElementById('sys_eq_ymax')?.value) || 5
+        ];
+      } else {
+        sysState.odeSpec.t_span = [
+          parseFloat(document.getElementById('sys_ode_t0')?.value) || 0,
+          parseFloat(document.getElementById('sys_ode_t1')?.value) || 15
+        ];
+        sysState.odeSpec.method = document.getElementById('sys_ode_method')?.value || 'tsit5';
+        sysState.odeSpec.phase_x_range = [
+          parseFloat(document.getElementById('sys_phase_xmin')?.value) || -3,
+          parseFloat(document.getElementById('sys_phase_xmax')?.value) || 3
+        ];
+        sysState.odeSpec.phase_y_range = [
+          parseFloat(document.getElementById('sys_phase_ymin')?.value) || -5,
+          parseFloat(document.getElementById('sys_phase_ymax')?.value) || 5
+        ];
+      }
+    }
+
+    function runActiveSystemsAnalysis() {
+      syncSystemsInputsToSpec();
+      const diagEl = document.getElementById('sys_diag_output');
+      const badgeEl = document.getElementById('sys_status_badge');
+
+      if (sysState.mode === 'equations') {
+        if (typeof window.wasm_analyze_equation_system !== 'function') {
+          if (badgeEl) badgeEl.textContent = 'WASM Update Needed';
+          if (diagEl) {
+            diagEl.innerHTML = `<span style="color:var(--text-muted);">Systems Workbench WASM export not loaded yet (rebuild <code>crates/urae-wasm</code> package to enable live browser execution).</span>`;
+          }
+          drawEquationPlot(null);
+          return;
+        }
+        const a = JSON.parse(window.wasm_analyze_equation_system(JSON.stringify(sysState.eqSpec)));
+        sysState.lastEqAnalysis = a;
+        if (badgeEl) badgeEl.textContent = a.success ? `Rank ${a.rank ?? '?'}` : 'Error';
+        if (diagEl) {
+          if (!a.success) {
+            diagEl.innerHTML = `<span style="color:var(--error-red);">${escapeHtml(a.error_msg || 'Failed')}</span>`;
+          } else {
+            const resMax = (a.residuals || []).length ? Math.max(...a.residuals.map(Math.abs)).toExponential(2) : 'n/a';
+            diagEl.innerHTML = `
+              <div><strong>Solutions:</strong> <code>${escapeHtml(a.solution_text)}</code> &nbsp;|&nbsp; <strong>Max Residual:</strong> ${escapeHtml(resMax)}</div>
+              <div style="margin-top:4px;"><strong>Jacobian J:</strong> <code>${escapeHtml(a.jacobian_unicode)}</code></div>
+              <div id="sys_katex_eq_sol" style="margin-top:6px;"></div>
+            `;
+            renderMathFormatted(document.getElementById('sys_katex_eq_sol'), a.solution_latex, a.solution_text);
+          }
+        }
+        drawEquationPlot(a);
+      } else {
+        if (typeof window.wasm_analyze_differential_system !== 'function') {
+          if (badgeEl) badgeEl.textContent = 'WASM Update Needed';
+          if (diagEl) {
+            diagEl.innerHTML = `<span style="color:var(--text-muted);">Differential Workbench WASM export not loaded yet (rebuild <code>crates/urae-wasm</code> package to enable live browser execution).</span>`;
+          }
+          drawDifferentialPlots(null);
+          return;
+        }
+        const a = JSON.parse(window.wasm_analyze_differential_system(JSON.stringify(sysState.odeSpec)));
+        sysState.lastOdeAnalysis = a;
+        if (badgeEl) badgeEl.textContent = a.success ? (a.stability_label || a.method_used) : 'Error';
+        if (diagEl) {
+          if (!a.success) {
+            diagEl.innerHTML = `<span style="color:var(--error-red);">${escapeHtml(a.error_msg || 'Failed')}</span>`;
+          } else {
+            const closedHtml = a.symbolic_solution_text
+              ? `<div><strong>Exact Closed-Form:</strong> <code>${escapeHtml(a.symbolic_solution_text)}</code></div>` : '';
+            const finalStr = (a.final_state || []).map((v, i) => `${sysState.odeSpec.state_vars[i] || 'y' + i}=${Number(v).toFixed(4)}`).join(', ');
+            diagEl.innerHTML = `
+              ${closedHtml}
+              <div><strong>Solver:</strong> ${escapeHtml(a.method_used)} (${a.steps_accepted} steps) &nbsp;|&nbsp; <strong>Final State:</strong> <code>${escapeHtml(finalStr)}</code></div>
+              <div style="margin-top:4px;"><strong>Linearization Eigenvalues:</strong> <code>${escapeHtml(a.eigenvalues_text)}</code> &nbsp;|&nbsp; <strong>Jacobian:</strong> <code>${escapeHtml(a.jacobian_unicode)}</code></div>
+            `;
+          }
+        }
+        drawDifferentialPlots(a);
+      }
+    }
+
+    window.refreshSystemsWorkbench = function() {
+      renderSystemsSidebarLists();
+      runActiveSystemsAnalysis();
+    };
+
+    window.sendToSystemsWorkbench = function(exprText) {
+      const cleaned = (exprText || '').trim();
+      if (!cleaned) return;
+      if (cleaned.includes('=')) {
+        sysState.mode = 'equations';
+        sysState.eqSpec.equations = [cleaned];
+      } else {
+        sysState.mode = 'differentials';
+        sysState.odeSpec.state_vars = ['y'];
+        sysState.odeSpec.rhs_expressions = [cleaned];
+        sysState.odeSpec.y0 = [1.0];
+      }
+      renderSystemsSidebarLists();
+      runActiveSystemsAnalysis();
+    };
+
+    function initSystemsWorkbench() {
+      if (typeof window.wasm_workbench_presets === 'function') {
+        try {
+          sysState.presets = JSON.parse(window.wasm_workbench_presets());
+          if (sysState.presets.equations?.length) sysState.eqSpec = sysState.presets.equations[0];
+          if (sysState.presets.differentials?.length) sysState.odeSpec = sysState.presets.differentials[0];
+        } catch (_) {}
+      }
+
+      document.getElementById('sys_tab_eq')?.addEventListener('click', () => {
+        sysState.mode = 'equations';
+        renderSystemsSidebarLists();
+        runActiveSystemsAnalysis();
+      });
+      document.getElementById('sys_tab_ode')?.addEventListener('click', () => {
+        sysState.mode = 'differentials';
+        renderSystemsSidebarLists();
+        runActiveSystemsAnalysis();
+      });
+      document.getElementById('sys_preset_select')?.addEventListener('change', (e) => {
+        const idx = parseInt(e.target.value, 10) || 0;
+        if (sysState.mode === 'equations' && sysState.presets.equations[idx]) {
+          sysState.eqSpec = JSON.parse(JSON.stringify(sysState.presets.equations[idx]));
+        } else if (sysState.mode === 'differentials' && sysState.presets.differentials[idx]) {
+          sysState.odeSpec = JSON.parse(JSON.stringify(sysState.presets.differentials[idx]));
+        }
+        renderSystemsSidebarLists();
+        runActiveSystemsAnalysis();
+      });
+      document.getElementById('sys_solve_btn')?.addEventListener('click', runActiveSystemsAnalysis);
+      document.getElementById('sys_add_eq_btn')?.addEventListener('click', () => {
+        sysState.eqSpec.equations.push('x + y = 0');
+        renderSystemsSidebarLists();
+      });
+      document.getElementById('sys_add_ode_btn')?.addEventListener('click', () => {
+        const n = sysState.odeSpec.state_vars.length;
+        sysState.odeSpec.state_vars.push(`y${n}`);
+        sysState.odeSpec.rhs_expressions.push(`-y${n}`);
+        sysState.odeSpec.y0.push(1.0);
+        renderSystemsSidebarLists();
+      });
+      document.getElementById('sys_add_param_btn')?.addEventListener('click', () => {
+        const params = sysState.mode === 'equations' ? sysState.eqSpec.parameters : sysState.odeSpec.parameters;
+        params.push([`k${params.length + 1}`, 1.0]);
+        renderSystemsSidebarLists();
+      });
+      ['sys_eq_vars', 'sys_eq_xmin', 'sys_eq_xmax', 'sys_eq_ymin', 'sys_eq_ymax',
+       'sys_ode_t0', 'sys_ode_t1', 'sys_ode_method', 'sys_phase_xmin', 'sys_phase_xmax', 'sys_phase_ymin', 'sys_phase_ymax'
+      ].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', runActiveSystemsAnalysis);
+      });
+
+      renderSystemsSidebarLists();
+    }
+
+    // --------------------------------------------------------------------------
     // WASM Engine Startup
     // --------------------------------------------------------------------------
     async function runWasm() {
       try {
-        await init({ module_or_path: './pkg/urae_wasm_bg.wasm?v=20261110' });
+        await init({ module_or_path: './pkg/urae_wasm_bg.wasm?v=20261116' });
         window.wasm_process_json = wasm_process_json;
-        window.wasm_wolfram_query = wasm_wolfram_query;
+        window.wasm_structured_query = wasm_structured_query;
         window.wasm_pad_eval_line = wasm_pad_eval_line;
         window.wasm_pad_eval_session = wasm_pad_eval_session;
+        window.wasm_analyze_equation_system = wasm_analyze_equation_system;
+        window.wasm_analyze_differential_system = wasm_analyze_differential_system;
+        window.wasm_workbench_presets = wasm_workbench_presets;
+        window.wasm_process_ndjson_stream = wasm_process_ndjson_stream;
 
         const badgeText = document.getElementById('engine_status_text');
         if (badgeText) badgeText.textContent = 'Rust WASM Engine Active';
 
-        console.log("%c⚡ URAE // INTELLIGENCE — Wolfram & Symbolab Solver + GeoGebra / Desmos Pad Active!", "color: #ff7e00; font-weight: bold; font-size: 14px;");
+        console.log("%c⚡ URAE // INTELLIGENCE — Q&A Solver, Systems Workbench & Reactive Pad Active!", "color: #ff7e00; font-weight: bold; font-size: 14px;");
 
-        // Global console shortcut
+        // Global console shortcuts
         window.urae = function(q) {
           if (!window.wasm_process_json) return "Engine initializing...";
           const res = window.wasm_process_json(JSON.stringify({ input: q }));
@@ -1871,10 +2605,16 @@
             return p.output_unicode || p.output_latex || res;
           } catch (_) { return res; }
         };
+        window.uraeNdjson = function(ndjson) {
+          if (!window.wasm_process_ndjson_stream) return "Engine initializing...";
+          return window.wasm_process_ndjson_stream(ndjson);
+        };
+
+        initSystemsWorkbench();
 
         // Re-evaluate pad lines now that WASM is ready
         evaluateAllPadLines();
-        drawDesmosGraph();
+        drawPadGraph();
 
         // Register ServiceWorker
         if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {

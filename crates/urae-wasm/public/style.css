@@ -1,5 +1,5 @@
 /* ==============================================================================
-   URAE // ALPHA — Modern Wolfram Alpha Computational Interface & Rust Extended Pad
+   URAE // STUDIO — Symbolic Query Interface, Graphing Pad & Systems Workbench
    ============================================================================== */
 
 :root {
@@ -7,26 +7,26 @@
   --font-mono: "Fira Code", "JetBrains Mono", Consolas, "Courier New", monospace;
   --font-math: "KaTeX_Math", "Noto Sans Math", STIXGeneral, serif;
 
-  /* Wolfram Brand Accents */
-  --wa-orange: #ff7e00;
-  --wa-orange-hover: #ff9429;
-  --wa-orange-dark: #cc6500;
-  --wa-orange-glow: rgba(255, 126, 0, 0.25);
-  --wa-gold: #f5a623;
-  --wa-gold-soft: rgba(245, 166, 35, 0.12);
+  /* URAE Brand Accents */
+  --urae-orange: #ff7e00;
+  --urae-orange-hover: #ff9429;
+  --urae-orange-dark: #cc6500;
+  --urae-orange-glow: rgba(255, 126, 0, 0.25);
+  --urae-gold: #f5a623;
+  --urae-gold-soft: rgba(245, 166, 35, 0.12);
 
-/* Desmos & GeoGebra Iconic Palette */
-  --desmos-blue: #2d70b3;
-  --desmos-red: #c74440;
-  --desmos-green: #388c46;
-  --desmos-purple: #6042a6;
-  --desmos-orange: #fa7e19;
-  --desmos-cyan: #0099b8;
+  /* Curve & Plot Accent Palette */
+  --curve-blue: #2d70b3;
+  --curve-red: #c74440;
+  --curve-green: #388c46;
+  --curve-purple: #6042a6;
+  --curve-orange: #fa7e19;
+  --curve-cyan: #0099b8;
 
-  /* Symbolab Accent Palette */
-  --symbolab-red: #e02424;
-  --symbolab-soft: rgba(224, 36, 36, 0.12);
-  --symbolab-green: #0e9f6e;
+  /* Solver & Step Accent Palette */
+  --topic-red: #e02424;
+  --topic-soft: rgba(224, 36, 36, 0.12);
+  --topic-green: #0e9f6e;
 
   /* Dark Theme Palette (Default) */
   --bg-app: #0d1117;
@@ -106,7 +106,7 @@ html, body {
 /* --------------------------------------------------------------------------
    Navbar
    -------------------------------------------------------------------------- */
-.alpha-navbar {
+.qa-navbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -151,7 +151,7 @@ html, body {
   align-items: center;
   gap: 6px;
 }
-.brand-title .alpha-tag {
+.brand-title .qa-tag {
   background: linear-gradient(135deg, #ff7e00, #ffb347);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -197,7 +197,7 @@ html, body {
 
 .tab-btn.active {
   background: var(--bg-surface);
-  color: var(--wa-orange);
+  color: var(--urae-orange);
   font-weight: 600;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
   border: 1px solid var(--border-main);
@@ -228,7 +228,7 @@ html, body {
 .icon-btn:hover {
   background: var(--bg-surface-elevated);
   color: var(--text-main);
-  border-color: var(--wa-orange);
+  border-color: var(--urae-orange);
 }
 
 .engine-status-badge {
@@ -270,7 +270,7 @@ html, body {
 }
 
 /* Panes */
-.alpha-pane {
+.qa-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -300,26 +300,35 @@ html, body {
 }
 
 /* View Mode Toggles via Layout Classes */
-.layout-alpha .alpha-pane { display: flex; }
-.layout-alpha .pad-pane { display: none; }
-.layout-alpha .canvas-pane { display: none; }
+.layout-qa .qa-pane { display: flex; }
+.layout-qa .pad-pane { display: none; }
+.layout-qa .systems-pane { display: none; }
+.layout-qa .canvas-pane { display: none; }
 
-.layout-pad .alpha-pane { display: none; }
+.layout-pad .qa-pane { display: none; }
 .layout-pad .pad-pane { display: flex; flex: 1; border-left: none; }
+.layout-pad .systems-pane { display: none; }
 .layout-pad .canvas-pane { display: none; }
 
-.layout-split .alpha-pane { display: flex; flex: 1; border-right: 1px solid var(--border-main); }
+.layout-systems .qa-pane { display: none; }
+.layout-systems .pad-pane { display: none; }
+.layout-systems .systems-pane { display: flex; flex: 1; }
+.layout-systems .canvas-pane { display: none; }
+
+.layout-split .qa-pane { display: flex; flex: 1; border-right: 1px solid var(--border-main); }
 .layout-split .pad-pane { display: flex; flex: 1; }
+.layout-split .systems-pane { display: none; }
 .layout-split .canvas-pane { display: none; }
 
-.layout-canvas .alpha-pane { display: none; }
+.layout-canvas .qa-pane { display: none; }
 .layout-canvas .pad-pane { display: none; }
+.layout-canvas .systems-pane { display: none; }
 .layout-canvas .canvas-pane { display: block; }
 
 /* --------------------------------------------------------------------------
-   Wolfram Alpha Search Section
+   Symbolic Query Search Section
    -------------------------------------------------------------------------- */
-.alpha-search-wrapper {
+.qa-search-wrapper {
   max-width: 900px;
   width: 100%;
   margin: 0 auto;
@@ -328,27 +337,27 @@ html, body {
   gap: 14px;
 }
 
-.alpha-hero {
+.qa-hero {
   text-align: center;
   margin-top: 10px;
   margin-bottom: 6px;
 }
 
-.alpha-hero h1 {
+.qa-hero h1 {
   font-size: 26px;
   font-weight: 700;
   letter-spacing: -0.5px;
   margin: 0 0 6px 0;
   color: var(--text-main);
 }
-.alpha-hero p {
+.qa-hero p {
   font-size: 14px;
   color: var(--text-muted);
   margin: 0;
 }
 
 /* The Iconic Search Box */
-.alpha-search-form {
+.qa-search-form {
   position: relative;
   display: flex;
   align-items: center;
@@ -360,9 +369,9 @@ html, body {
   transition: var(--transition);
 }
 
-.alpha-search-form:focus-within {
-  border-color: var(--wa-orange);
-  box-shadow: 0 0 0 4px var(--wa-orange-glow), 0 8px 30px rgba(0, 0, 0, 0.35);
+.qa-search-form:focus-within {
+  border-color: var(--urae-orange);
+  box-shadow: 0 0 0 4px var(--urae-orange-glow), 0 8px 30px rgba(0, 0, 0, 0.35);
 }
 
 .search-icon-badge {
@@ -371,13 +380,13 @@ html, body {
   justify-content: center;
   width: 44px;
   height: 44px;
-  color: var(--wa-orange);
+  color: var(--urae-orange);
   font-size: 20px;
   font-weight: 900;
   flex-shrink: 0;
 }
 
-.alpha-search-input {
+.qa-search-input {
   flex: 1;
   background: transparent;
   border: none;
@@ -388,7 +397,7 @@ html, body {
   padding: 8px 12px;
 }
 
-.alpha-search-input::placeholder {
+.qa-search-input::placeholder {
   color: var(--text-muted);
   font-size: 14px;
 }
@@ -432,9 +441,9 @@ html, body {
   transition: var(--transition);
 }
 .keypad-toggle-btn:hover, .keypad-toggle-btn.active {
-  color: var(--wa-orange);
-  border-color: var(--wa-orange);
-  background: var(--wa-gold-soft);
+  color: var(--urae-orange);
+  border-color: var(--urae-orange);
+  background: var(--urae-gold-soft);
 }
 
 .compute-btn {
@@ -502,7 +511,7 @@ html, body {
 }
 .keypad-tab-btn.active {
   background: var(--bg-surface-elevated);
-  color: var(--wa-orange);
+  color: var(--urae-orange);
   font-weight: 600;
 }
 
@@ -528,9 +537,9 @@ html, body {
   user-select: none;
 }
 .math-key:hover {
-  background: var(--wa-gold-soft);
-  color: var(--wa-orange);
-  border-color: var(--wa-orange);
+  background: var(--urae-gold-soft);
+  color: var(--urae-orange);
+  border-color: var(--urae-orange);
   transform: scale(1.05);
 }
 .math-key:active {
@@ -571,15 +580,15 @@ html, body {
 }
 .pill-btn:hover {
   background: var(--bg-surface-elevated);
-  color: var(--wa-orange);
-  border-color: var(--wa-orange);
+  color: var(--urae-orange);
+  border-color: var(--urae-orange);
   transform: translateY(-1px);
 }
 
 /* --------------------------------------------------------------------------
-   Wolfram Alpha Pods Layout
+   Structured Result Pods Layout
    -------------------------------------------------------------------------- */
-.alpha-results-container {
+.qa-results-container {
   max-width: 900px;
   width: 100%;
   margin: 28px auto 0 auto;
@@ -589,7 +598,7 @@ html, body {
 }
 
 /* Pod Card */
-.wa-pod {
+.query-pod {
   background: var(--bg-surface);
   border: 1px solid var(--pod-border);
   border-radius: var(--radius-lg);
@@ -604,12 +613,12 @@ html, body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.wa-pod:hover {
+.query-pod:hover {
   border-color: rgba(255, 126, 0, 0.4);
 }
 
 /* Pod Header */
-.wa-pod-header {
+.query-pod-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -618,7 +627,7 @@ html, body {
   border-bottom: 1px solid var(--pod-border);
 }
 
-.wa-pod-title {
+.query-pod-title {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.2px;
@@ -628,16 +637,16 @@ html, body {
   gap: 8px;
 }
 
-.wa-pod-title::before {
+.query-pod-title::before {
   content: "";
   display: inline-block;
   width: 4px;
   height: 14px;
-  background: var(--wa-orange);
+  background: var(--urae-orange);
   border-radius: 2px;
 }
 
-.wa-pod-actions {
+.query-pod-actions {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -660,22 +669,22 @@ html, body {
 .pod-action-btn:hover {
   background: var(--bg-surface-elevated);
   color: var(--text-main);
-  border-color: var(--wa-orange);
+  border-color: var(--urae-orange);
 }
 
 .pod-action-btn.send-to-pad {
-  background: var(--wa-gold-soft);
-  color: var(--wa-orange);
+  background: var(--urae-gold-soft);
+  color: var(--urae-orange);
   border-color: rgba(255, 126, 0, 0.3);
   font-weight: 600;
 }
 .pod-action-btn.send-to-pad:hover {
-  background: var(--wa-orange);
+  background: var(--urae-orange);
   color: #ffffff;
 }
 
 /* Pod Body */
-.wa-pod-body {
+.query-pod-body {
   padding: 20px 24px;
   display: flex;
   flex-direction: column;
@@ -718,7 +727,7 @@ html, body {
 }
 
 /* Pod Footer */
-.wa-pod-footer {
+.query-pod-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -748,7 +757,7 @@ html, body {
   width: 24px;
   height: 24px;
   border: 3px solid var(--border-main);
-  border-top-color: var(--wa-orange);
+  border-top-color: var(--urae-orange);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -758,9 +767,9 @@ html, body {
 }
 
 /* --------------------------------------------------------------------------
-   Symbolab Topic Ribbon & Visual Templates
+   Subject Topic Ribbon & Visual Templates
    -------------------------------------------------------------------------- */
-.symbolab-topic-ribbon {
+.topic-ribbon {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -768,7 +777,7 @@ html, body {
   padding: 4px 2px 10px 2px;
   scrollbar-width: none;
 }
-.symbolab-topic-ribbon::-webkit-scrollbar {
+.topic-ribbon::-webkit-scrollbar {
   display: none;
 }
 
@@ -788,18 +797,18 @@ html, body {
   transition: var(--transition);
 }
 .topic-btn:hover {
-  background: var(--wa-gold-soft);
-  color: var(--wa-orange);
-  border-color: var(--wa-orange);
+  background: var(--urae-gold-soft);
+  color: var(--urae-orange);
+  border-color: var(--urae-orange);
 }
 .topic-btn.active {
   background: linear-gradient(135deg, #ff7e00, #ff9429);
   color: #ffffff;
-  border-color: var(--wa-orange);
-  box-shadow: 0 2px 8px var(--wa-orange-glow);
+  border-color: var(--urae-orange);
+  box-shadow: 0 2px 8px var(--urae-orange-glow);
 }
 
-.symbolab-drawer {
+.topic-drawer {
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
@@ -810,7 +819,7 @@ html, body {
   margin-top: -6px;
   margin-bottom: 8px;
 }
-.symbolab-drawer.open {
+.topic-drawer.open {
   display: flex;
 }
 .drawer-title {
@@ -836,19 +845,19 @@ html, body {
   transition: var(--transition);
 }
 .drawer-tag-btn:hover {
-  border-color: var(--wa-orange);
-  color: var(--wa-orange);
+  border-color: var(--urae-orange);
+  color: var(--urae-orange);
 }
 
-/* Symbolab Step-by-Step Breakdown Accordion */
-.symbolab-steps-card {
+/* Step-by-Step Breakdown Accordion */
+.topic-steps-card {
   background: var(--bg-app);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
   overflow: hidden;
   margin-top: 10px;
 }
-.symbolab-steps-toggle {
+.topic-steps-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -857,7 +866,7 @@ html, body {
   cursor: pointer;
   user-select: none;
 }
-.symbolab-steps-toggle:hover {
+.topic-steps-toggle:hover {
   background: rgba(255, 126, 0, 0.08);
 }
 .steps-badge {
@@ -866,7 +875,7 @@ html, body {
   gap: 8px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--wa-orange);
+  color: var(--urae-orange);
 }
 .step-item-card {
   padding: 12px 16px;
@@ -878,7 +887,7 @@ html, body {
 .step-rule-pill {
   align-self: flex-start;
   background: var(--badge-rust-bg);
-  color: var(--wa-orange);
+  color: var(--urae-orange);
   font-size: 11px;
   font-weight: 700;
   padding: 2px 8px;
@@ -895,9 +904,9 @@ html, body {
 }
 
 /* --------------------------------------------------------------------------
-   GeoGebra / Desmos Inspired Graphing Pad
+   Interactive Coordinate Plane & Graphing Pad
    -------------------------------------------------------------------------- */
-.desmos-pad-container {
+.pad-container {
   display: flex;
   width: 100%;
   height: 100%;
@@ -905,8 +914,8 @@ html, body {
   background: var(--bg-surface);
 }
 
-/* Left: Desmos Expression List Sidebar */
-.desmos-expr-sidebar {
+/* Left: Reactive Expression List Sidebar */
+.pad-expr-sidebar {
   width: 390px;
   min-width: 320px;
   max-width: 480px;
@@ -920,7 +929,7 @@ html, body {
   flex-shrink: 0;
 }
 
-.desmos-sidebar-header {
+.pad-sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -929,12 +938,12 @@ html, body {
   margin-bottom: 12px;
 }
 
-.desmos-brand {
+.pad-brand {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.desmos-brand h3 {
+.pad-brand h3 {
   font-size: 17px;
   font-weight: 700;
   margin: 0;
@@ -943,19 +952,19 @@ html, body {
   align-items: center;
   gap: 6px;
 }
-.desmos-pill-tag {
+.pad-pill-tag {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: var(--desmos-blue);
+  color: var(--curve-blue);
   background: rgba(45, 112, 179, 0.15);
   padding: 2px 6px;
   border-radius: var(--radius-pill);
   align-self: flex-start;
 }
 
-.desmos-header-actions {
+.pad-header-actions {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1003,15 +1012,15 @@ html, body {
   white-space: nowrap;
 }
 
-/* Desmos Expression Cards */
-.desmos-lines-list {
+/* Expression Cards */
+.pad-lines-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
   flex: 1;
 }
 
-.desmos-expr-card {
+.pad-expr-card {
   background: var(--bg-app);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
@@ -1022,8 +1031,8 @@ html, body {
   position: relative;
   transition: var(--transition);
 }
-.desmos-expr-card:focus-within {
-  border-color: var(--desmos-blue);
+.pad-expr-card:focus-within {
+  border-color: var(--curve-blue);
   box-shadow: 0 0 0 2px rgba(45, 112, 179, 0.25);
 }
 
@@ -1033,8 +1042,8 @@ html, body {
   gap: 10px;
 }
 
-/* Desmos Graph Color Icon Toggle */
-.desmos-color-indicator {
+/* Curve Color Toggle */
+.pad-color-indicator {
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -1047,11 +1056,11 @@ html, body {
   transition: var(--transition);
   position: relative;
 }
-.desmos-color-indicator.hidden-curve {
+.pad-color-indicator.hidden-curve {
   opacity: 0.3;
   border-style: dashed;
 }
-.desmos-color-indicator::after {
+.pad-color-indicator::after {
   content: '';
   width: 8px;
   height: 8px;
@@ -1060,7 +1069,7 @@ html, body {
   opacity: 0;
   transition: var(--transition);
 }
-.desmos-color-indicator:hover::after {
+.pad-color-indicator:hover::after {
   opacity: 0.9;
 }
 
@@ -1089,8 +1098,8 @@ html, body {
   opacity: 0.6;
   transition: var(--transition);
 }
-.desmos-expr-card:hover .expr-card-actions,
-.desmos-expr-card:focus-within .expr-card-actions {
+.pad-expr-card:hover .expr-card-actions,
+.pad-expr-card:focus-within .expr-card-actions {
   opacity: 1;
 }
 
@@ -1126,8 +1135,8 @@ html, body {
   color: var(--text-main);
 }
 
-/* Desmos Continuous Parameter Slider Row */
-.desmos-slider-row {
+/* Continuous Parameter Slider Row */
+.pad-slider-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1138,7 +1147,7 @@ html, body {
 .slider-play-btn {
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-main);
-  color: var(--desmos-blue);
+  color: var(--curve-blue);
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -1151,27 +1160,27 @@ html, body {
   flex-shrink: 0;
 }
 .slider-play-btn:hover, .slider-play-btn.playing {
-  background: var(--desmos-blue);
+  background: var(--curve-blue);
   color: #ffffff;
-  border-color: var(--desmos-blue);
+  border-color: var(--curve-blue);
 }
 
-.desmos-slider-track {
+.pad-slider-track {
   flex: 1;
-  accent-color: var(--desmos-blue);
+  accent-color: var(--curve-blue);
   cursor: pointer;
 }
 
-.desmos-slider-value {
+.pad-slider-value {
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 700;
-  color: var(--desmos-blue);
+  color: var(--curve-blue);
   min-width: 42px;
   text-align: right;
 }
 
-/* Desmos Slider Bounds Editor */
+/* Slider Bounds Editor */
 .slider-bounds-editor {
   display: flex;
   align-items: center;
@@ -1210,14 +1219,14 @@ html, body {
 }
 .add-line-btn:hover {
   background: var(--bg-surface-elevated);
-  color: var(--desmos-blue);
-  border-color: var(--desmos-blue);
+  color: var(--curve-blue);
+  border-color: var(--curve-blue);
 }
 
 /* --------------------------------------------------------------------------
-   Right: GeoGebra / Desmos 2D Graph Coordinate Plane Canvas
+   Right: 2D Coordinate Plane Canvas
    -------------------------------------------------------------------------- */
-.desmos-graph-pane {
+.pad-graph-pane {
   flex: 1;
   height: 100%;
   position: relative;
@@ -1225,22 +1234,22 @@ html, body {
   overflow: hidden;
   user-select: none;
 }
-[data-theme="dark"] .desmos-graph-pane {
+[data-theme="dark"] .pad-graph-pane {
   background: #0d1117;
 }
 
-canvas#desmos_graph_canvas {
+canvas#pad_graph_canvas {
   width: 100%;
   height: 100%;
   display: block;
   cursor: grab;
 }
-canvas#desmos_graph_canvas:active {
+canvas#pad_graph_canvas:active {
   cursor: grabbing;
 }
 
 /* Floating On-Graph Control Widget */
-.desmos-graph-controls {
+.pad-graph-controls {
   position: absolute;
   top: 16px;
   right: 16px;
@@ -1271,11 +1280,11 @@ canvas#desmos_graph_canvas:active {
 }
 .graph-ctrl-btn:hover {
   background: var(--bg-surface-elevated);
-  color: var(--desmos-blue);
+  color: var(--curve-blue);
 }
 
 /* Cursor Coordinates Badge */
-.desmos-coords-badge {
+.pad-coords-badge {
   position: absolute;
   bottom: 16px;
   left: 16px;
@@ -1292,7 +1301,7 @@ canvas#desmos_graph_canvas:active {
 }
 
 /* Point inspection tooltip */
-.desmos-point-tooltip {
+.pad-point-tooltip {
   position: absolute;
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-main);
@@ -1377,7 +1386,7 @@ canvas#urae_canvas {
 .example-category-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--wa-orange);
+  color: var(--urae-orange);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
@@ -1403,8 +1412,8 @@ canvas#urae_canvas {
 }
 .example-item-btn:hover {
   background: var(--bg-surface-elevated);
-  border-color: var(--wa-orange);
-  color: var(--wa-orange);
+  border-color: var(--urae-orange);
+  color: var(--urae-orange);
 }
 
 /* --------------------------------------------------------------------------
@@ -1425,4 +1434,163 @@ canvas#urae_canvas {
   font-size: 13px;
   align-items: center;
   gap: 12px;
+}
+
+/* ==============================================================================
+   Systems & Differential Equations Workbench Pane
+   ============================================================================== */
+.systems-pane {
+  display: none;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.systems-sidebar {
+  width: 430px;
+  min-width: 340px;
+  max-width: 520px;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-main);
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.systems-subtabs {
+  display: flex;
+  gap: 8px;
+}
+
+.sys-subtab-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-main);
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sys-subtab-btn.active {
+  background: var(--urae-orange);
+  color: #fff;
+  border-color: var(--urae-orange);
+}
+
+.sys-card {
+  background: var(--bg-app);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sys-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+
+.sys-input, .sys-select {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sys-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sys-btn {
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-main);
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sys-btn.primary {
+  background: var(--urae-orange);
+  border-color: var(--urae-orange);
+  color: #fff;
+}
+
+.sys-slider-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 56px 24px;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.systems-canvas-stage {
+  flex: 1;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.sys-plots-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 360px;
+}
+
+.sys-plots-single {
+  flex: 1;
+  display: flex;
+  min-height: 380px;
+}
+
+.sys-plot-box {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.sys-plot-box canvas {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.sys-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--urae-gold-soft);
+  color: var(--urae-gold);
+  font-size: 11px;
+  font-weight: 700;
 }

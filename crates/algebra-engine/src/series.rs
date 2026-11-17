@@ -92,9 +92,17 @@ impl SymbolicSeries for ExprGraph {
         pole_order: u32,
         regular_order: u32,
     ) -> AlgebraResult<ExprId> {
+        if pole_order == 0 {
+            return Ok(self.taylor_series(expr, wrt, point, regular_order));
+        }
+
         let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
         let x = self.symbol(&wrt_name);
-        let x_minus_a = self.sub(x, point);
+        let x_minus_a = if point == self.integer(0) {
+            x
+        } else {
+            self.sub(x, point)
+        };
 
         let k_expr = self.integer(pole_order as i64);
         let shift = self.pow(x_minus_a, k_expr);
@@ -102,8 +110,8 @@ impl SymbolicSeries for ExprGraph {
 
         let total_order = pole_order + regular_order;
         let taylor = self.taylor_series(analytic_f, wrt, point, total_order);
-
-        Ok(self.div(taylor, shift))
+        let raw = self.div(taylor, shift);
+        Ok(crate::simplify::Simplifier::simplify(self, raw).unwrap_or(raw))
     }
 
     fn puiseux_series(

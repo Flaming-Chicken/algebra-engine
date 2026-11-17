@@ -481,17 +481,486 @@ impl BoolExpr {
     }
 }
 
-/// Simple DPLL SAT Solver for propositional logic satisfiability.
+/// DPLL SAT Solver & Truth Table generator for propositional logic.
 pub struct SatSolver;
 
+impl BoolExpr {
+    /// Collect all variable IDs referenced in the formula.
+    pub fn collect_vars(&self, out: &mut std::collections::BTreeSet<u32>) {
+        match self {
+            BoolExpr::True | BoolExpr::False => {}
+            BoolExpr::Var(v) => {
+                out.insert(*v);
+            }
+            BoolExpr::Not(inner) => inner.collect_vars(out),
+            BoolExpr::And(terms) | BoolExpr::Or(terms) => {
+                for t in terms {
+                    t.collect_vars(out);
+                }
+            }
+            BoolExpr::Implies(a, b) => {
+                a.collect_vars(out);
+                b.collect_vars(out);
+            }
+        }
+    }
+
+    /// Substitute `var = value` into the formula without simplifying away structure yet.
+    pub fn substitute_var(&self, var: u32, value: bool) -> BoolExpr {
+        match self {
+            BoolExpr::True => BoolExpr::True,
+            BoolExpr::False => BoolExpr::False,
+            BoolExpr::Var(v) => {
+                if *v == var {
+                    if value {
+                        BoolExpr::True
+                    } else {
+                        BoolExpr::False
+                    }
+                } else {
+                    BoolExpr::Var(*v)
+                }
+            }
+            BoolExpr::Not(inner) => BoolExpr::Not(Box::new(inner.substitute_var(var, value))),
+            BoolExpr::And(terms) => {
+                BoolExpr::And(terms.iter().map(|t| t.substitute_var(var, value)).collect())
+            }
+            BoolExpr::Or(terms) => {
+                BoolExpr::Or(terms.iter().map(|t| t.substitute_var(var, value)).collect())
+            }
+            BoolExpr::Implies(a, b) => BoolExpr::Implies(
+                Box::new(a.substitute_var(var, value)),
+                Box::new(b.substitute_var(var, value)),
+            ),
+        }
+    }
+
+    /// Evaluate a closed or partially-bound boolean expression under an assignment map.
+    pub fn eval_with(&self, env: &HashMap<u32, bool>) -> Option<bool> {
+        match self {
+            BoolExpr::True => Some(true),
+            BoolExpr::False => Some(false),
+            BoolExpr::Var(v) => env.get(v).copied(),
+            BoolExpr::Not(inner) => inner.eval_with(env).map(|b| !b),
+            BoolExpr::And(terms) => {
+                let mut all_known = true;
+                for t in terms {
+                    match t.eval_with(env) {
+                        Some(false) => return Some(false),
+                        None => all_known = false,
+                        Some(true) => {}
+                    }
+                }
+                if all_known { Some(true) } else { None }
+            }
+            BoolExpr::Or(terms) => {
+                let mut all_known = true;
+                for t in terms {
+                    match t.eval_with(env) {
+                        Some(true) => return Some(true),
+                        None => all_known = false,
+                        Some(false) => {}
+                    }
+                }
+                if all_known { Some(false) } else { None }
+            }
+            BoolExpr::Implies(a, b) => match (a.eval_with(env), b.eval_with(env)) {
+                (Some(false), _) | (_, Some(true)) => Some(true),
+                (Some(true), Some(false)) => Some(false),
+                _ => None,
+            },
+        }
+    }
+}
+
 impl SatSolver {
-    /// Check if a boolean expression is satisfiable.
+    /// Check if a boolean expression is satisfiable via recursive unit-propagating DPLL.
     pub fn is_satisfiable(expr: &BoolExpr) -> bool {
-        let simplified = expr.simplify();
-        match simplified {
-            BoolExpr::True => true,
-            BoolExpr::False => false,
-            _ => true,
+        Self::solve_model(expr).is_some()
+    }
+
+    /// Solve a boolean expression and return a satisfying assignment if one exists.
+    pub fn solve_model(expr: &BoolExpr) -> Option<std::collections::BTreeMap<u32, bool>> {
+        let mut assignment = std::collections::BTreeMap::new();
+        Self::dpll_rec(expr.simplify(), &mut assignment).then_some(assignment)
+    }
+
+    fn dpll_rec(expr: BoolExpr, assignment: &mut std::collections::BTreeMap<u32, bool>) -> bool {
+        let simp = expr.simplify();
+        match &simp {
+            BoolExpr::True => return true,
+            BoolExpr::False => return false,
+            BoolExpr::Var(v) => {
+                assignment.insert(*v, true);
+                return true;
+            }
+            BoolExpr::Not(inner) => {
+                if let BoolExpr::Var(v) = inner.as_ref() {
+                    assignment.insert(*v, false);
+                    return true;
+                }
+            }
+            BoolExpr::And(terms) => {
+                // Unit propagation on top-level conjunction literals.
+                for t in terms {
+                    match t {
+                        BoolExpr::Var(v) => {
+                            let next = simp.substitute_var(*v, true);
+                            let mut branch = assignment.clone();
+                            branch.insert(*v, true);
+                            if Self::dpll_rec(next, &mut branch) {
+                                *assignment = branch;
+                                return true;
+                            }
+                            return false;
+                        }
+                        BoolExpr::Not(inner) => {
+                            if let BoolExpr::Var(v) = inner.as_ref() {
+                                let next = simp.substitute_var(*v, false);
+                                let mut branch = assignment.clone();
+                                branch.insert(*v, false);
+                                if Self::dpll_rec(next, &mut branch) {
+                                    *assignment = branch;
+                                    return true;
+                                }
+                                return false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let mut vars = std::collections::BTreeSet::new();
+        simp.collect_vars(&mut vars);
+        let Some(&branch_var) = vars.iter().next() else {
+            return matches!(simp, BoolExpr::True);
+        };
+
+        for val in [true, false] {
+            let mut branch_assign = assignment.clone();
+            branch_assign.insert(branch_var, val);
+            let next = simp.substitute_var(branch_var, val);
+            if Self::dpll_rec(next, &mut branch_assign) {
+                *assignment = branch_assign;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Parse a propositional boolean formula string into `(BoolExpr, ordered_vars)`.
+    ///
+    /// Supports `not`/`!`/`~`, `and`/`&&`/`&`/`/\`, `or`/`||`/`|`/`\/`, `xor`,
+    /// `->`/`=>`/`implies`, `<->`/`<=>`/`iff`, `true`/`false`, parentheses, and identifiers.
+    pub fn parse_formula(input: &str) -> Result<(BoolExpr, Vec<(u32, String)>), String> {
+        let tokens = tokenize_bool(input)?;
+        if tokens.is_empty() {
+            return Err("Empty boolean formula".to_string());
+        }
+        let mut parser = BoolParser {
+            tokens,
+            pos: 0,
+            vars: Vec::new(),
+        };
+        let expr = parser.parse_iff()?;
+        if parser.pos < parser.tokens.len() {
+            return Err(format!(
+                "Unexpected token near {:?}",
+                parser.tokens[parser.pos]
+            ));
+        }
+        Ok((expr, parser.vars))
+    }
+
+    /// Generate an ASCII truth table for a propositional logic formula.
+    pub fn truth_table(formula: &str) -> Result<String, String> {
+        let (expr, vars) = Self::parse_formula(formula)?;
+        if vars.len() > 10 {
+            return Err(format!(
+                "Truth table supports at most 10 variables (got {})",
+                vars.len()
+            ));
+        }
+        let n = vars.len();
+        let rows = 1usize << n;
+        let mut lines = Vec::with_capacity(rows + 2);
+
+        let mut header_cols: Vec<String> = vars.iter().map(|(_, name)| name.clone()).collect();
+        header_cols.push(formula.trim().to_string());
+        lines.push(header_cols.join(" | "));
+        lines.push(
+            header_cols
+                .iter()
+                .map(|c| "-".repeat(c.len().max(1)))
+                .collect::<Vec<_>>()
+                .join("-+-"),
+        );
+
+        let mut env = HashMap::with_capacity(n);
+        for mask in 0..rows {
+            env.clear();
+            let mut row_cols = Vec::with_capacity(n + 1);
+            for (idx, (vid, _)) in vars.iter().enumerate() {
+                let bit = ((mask >> (n - 1 - idx)) & 1) == 1;
+                env.insert(*vid, bit);
+                row_cols.push(if bit { "T" } else { "F" }.to_string());
+            }
+            let out = expr
+                .eval_with(&env)
+                .ok_or_else(|| "Unbound variable during truth table evaluation".to_string())?;
+            row_cols.push(if out { "T" } else { "F" }.to_string());
+            lines.push(row_cols.join(" | "));
+        }
+        Ok(lines.join("\n"))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BoolTok {
+    LParen,
+    RParen,
+    Not,
+    And,
+    Or,
+    Xor,
+    Implies,
+    Iff,
+    True,
+    False,
+    Ident(String),
+}
+
+fn tokenize_bool(input: &str) -> Result<Vec<BoolTok>, String> {
+    let mut toks = Vec::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        match c {
+            '(' => {
+                toks.push(BoolTok::LParen);
+                i += 1;
+            }
+            ')' => {
+                toks.push(BoolTok::RParen);
+                i += 1;
+            }
+            '!' | '~' | '¬' => {
+                toks.push(BoolTok::Not);
+                i += 1;
+            }
+            '∧' => {
+                toks.push(BoolTok::And);
+                i += 1;
+            }
+            '∨' => {
+                toks.push(BoolTok::Or);
+                i += 1;
+            }
+            '⊕' => {
+                toks.push(BoolTok::Xor);
+                i += 1;
+            }
+            '→' => {
+                toks.push(BoolTok::Implies);
+                i += 1;
+            }
+            '↔' => {
+                toks.push(BoolTok::Iff);
+                i += 1;
+            }
+            '&' => {
+                if i + 1 < chars.len() && chars[i + 1] == '&' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                toks.push(BoolTok::And);
+            }
+            '|' => {
+                if i + 1 < chars.len() && chars[i + 1] == '|' {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                toks.push(BoolTok::Or);
+            }
+            '/' if i + 1 < chars.len() && chars[i + 1] == '\\' => {
+                toks.push(BoolTok::And);
+                i += 2;
+            }
+            '\\' if i + 1 < chars.len() && chars[i + 1] == '/' => {
+                toks.push(BoolTok::Or);
+                i += 2;
+            }
+            '=' if i + 1 < chars.len() && chars[i + 1] == '>' => {
+                toks.push(BoolTok::Implies);
+                i += 2;
+            }
+            '-' if i + 1 < chars.len() && chars[i + 1] == '>' => {
+                toks.push(BoolTok::Implies);
+                i += 2;
+            }
+            '<' if i + 2 < chars.len()
+                && (chars[i + 1] == '=' || chars[i + 1] == '-')
+                && chars[i + 2] == '>' =>
+            {
+                toks.push(BoolTok::Iff);
+                i += 3;
+            }
+            '^' => {
+                toks.push(BoolTok::Xor);
+                i += 1;
+            }
+            _ if c.is_ascii_alphanumeric() || c == '_' => {
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                match word.to_ascii_lowercase().as_str() {
+                    "not" => toks.push(BoolTok::Not),
+                    "and" => toks.push(BoolTok::And),
+                    "or" => toks.push(BoolTok::Or),
+                    "xor" => toks.push(BoolTok::Xor),
+                    "implies" => toks.push(BoolTok::Implies),
+                    "iff" => toks.push(BoolTok::Iff),
+                    "true" | "1" => toks.push(BoolTok::True),
+                    "false" | "0" => toks.push(BoolTok::False),
+                    _ => toks.push(BoolTok::Ident(word)),
+                }
+            }
+            _ => {
+                return Err(format!("Unexpected character '{}' in boolean formula", c));
+            }
+        }
+    }
+    Ok(toks)
+}
+
+struct BoolParser {
+    tokens: Vec<BoolTok>,
+    pos: usize,
+    vars: Vec<(u32, String)>,
+}
+
+impl BoolParser {
+    fn peek(&self) -> Option<&BoolTok> {
+        self.tokens.get(self.pos)
+    }
+
+    fn intern_var(&mut self, name: String) -> u32 {
+        if let Some((id, _)) = self.vars.iter().find(|(_, n)| *n == name) {
+            return *id;
+        }
+        let id = self.vars.len() as u32;
+        self.vars.push((id, name));
+        id
+    }
+
+    fn parse_iff(&mut self) -> Result<BoolExpr, String> {
+        let mut lhs = self.parse_implies()?;
+        while matches!(self.peek(), Some(BoolTok::Iff)) {
+            self.pos += 1;
+            let rhs = self.parse_implies()?;
+            // (a -> b) & (b -> a)
+            lhs = BoolExpr::And(vec![
+                BoolExpr::Implies(Box::new(lhs.clone()), Box::new(rhs.clone())),
+                BoolExpr::Implies(Box::new(rhs), Box::new(lhs)),
+            ]);
+        }
+        Ok(lhs)
+    }
+
+    fn parse_implies(&mut self) -> Result<BoolExpr, String> {
+        let lhs = self.parse_or()?;
+        if matches!(self.peek(), Some(BoolTok::Implies)) {
+            self.pos += 1;
+            let rhs = self.parse_implies()?;
+            return Ok(BoolExpr::Implies(Box::new(lhs), Box::new(rhs)));
+        }
+        Ok(lhs)
+    }
+
+    fn parse_or(&mut self) -> Result<BoolExpr, String> {
+        let mut terms = vec![self.parse_xor()?];
+        while matches!(self.peek(), Some(BoolTok::Or)) {
+            self.pos += 1;
+            terms.push(self.parse_xor()?);
+        }
+        if terms.len() == 1 {
+            Ok(terms.remove(0))
+        } else {
+            Ok(BoolExpr::Or(terms))
+        }
+    }
+
+    fn parse_xor(&mut self) -> Result<BoolExpr, String> {
+        let mut lhs = self.parse_and()?;
+        while matches!(self.peek(), Some(BoolTok::Xor)) {
+            self.pos += 1;
+            let rhs = self.parse_and()?;
+            // (a & !b) | (!a & b)
+            lhs = BoolExpr::Or(vec![
+                BoolExpr::And(vec![lhs.clone(), BoolExpr::Not(Box::new(rhs.clone()))]),
+                BoolExpr::And(vec![BoolExpr::Not(Box::new(lhs)), rhs]),
+            ]);
+        }
+        Ok(lhs)
+    }
+
+    fn parse_and(&mut self) -> Result<BoolExpr, String> {
+        let mut terms = vec![self.parse_not()?];
+        while matches!(self.peek(), Some(BoolTok::And)) {
+            self.pos += 1;
+            terms.push(self.parse_not()?);
+        }
+        if terms.len() == 1 {
+            Ok(terms.remove(0))
+        } else {
+            Ok(BoolExpr::And(terms))
+        }
+    }
+
+    fn parse_not(&mut self) -> Result<BoolExpr, String> {
+        if matches!(self.peek(), Some(BoolTok::Not)) {
+            self.pos += 1;
+            return Ok(BoolExpr::Not(Box::new(self.parse_not()?)));
+        }
+        self.parse_atom()
+    }
+
+    fn parse_atom(&mut self) -> Result<BoolExpr, String> {
+        match self.tokens.get(self.pos).cloned() {
+            Some(BoolTok::True) => {
+                self.pos += 1;
+                Ok(BoolExpr::True)
+            }
+            Some(BoolTok::False) => {
+                self.pos += 1;
+                Ok(BoolExpr::False)
+            }
+            Some(BoolTok::Ident(name)) => {
+                self.pos += 1;
+                Ok(BoolExpr::Var(self.intern_var(name)))
+            }
+            Some(BoolTok::LParen) => {
+                self.pos += 1;
+                let inner = self.parse_iff()?;
+                if !matches!(self.peek(), Some(BoolTok::RParen)) {
+                    return Err("Expected closing ')' in boolean formula".to_string());
+                }
+                self.pos += 1;
+                Ok(inner)
+            }
+            other => Err(format!("Unexpected token {:?} in boolean formula", other)),
         }
     }
 }

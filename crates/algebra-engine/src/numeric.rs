@@ -4,23 +4,37 @@
 //!
 //! Utilizes `dashu` for arbitrary-precision integers, floats, and rationals without external C dependencies.
 
-use algebra_core::{AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind, Number};
+use crate::branch::{BranchCutFunctionKind, BranchCutManager, BranchSelection};
+use algebra_core::{
+    AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind, Number, RealInterval,
+    UncertainValue,
+};
+use std::collections::HashMap;
 use std::f64::consts;
 
-/// Precision context for numerical evaluation.
+/// Precision, parameter bindings, uncertainty metadata, and branch-sheet context for numerical evaluation.
 #[derive(Debug, Clone)]
 pub struct EvalContext {
     /// Desired decimal precision digits for numerical evaluation.
     pub precision_digits: usize,
     /// Symbol variable/parameter substitution map for numerical evaluation.
-    pub bindings: std::collections::HashMap<String, f64>,
+    pub bindings: HashMap<String, f64>,
+    /// Optional 1-sigma Gaussian uncertainties keyed by symbol name.
+    pub uncertainties: HashMap<String, f64>,
+    /// Optional certified real intervals keyed by symbol name.
+    pub intervals: HashMap<String, RealInterval>,
+    /// Optional default Riemann sheet index `k` (None => principal sheet `k = 0`).
+    pub branch_sheet: Option<i64>,
 }
 
 impl Default for EvalContext {
     fn default() -> Self {
         Self {
             precision_digits: 50,
-            bindings: std::collections::HashMap::new(),
+            bindings: HashMap::new(),
+            uncertainties: HashMap::new(),
+            intervals: HashMap::new(),
+            branch_sheet: None,
         }
     }
 }
@@ -30,19 +44,41 @@ impl EvalContext {
     pub fn new(precision_digits: usize) -> Self {
         Self {
             precision_digits,
-            bindings: std::collections::HashMap::new(),
+            ..Default::default()
         }
     }
 
     /// Create a new evaluation context with precision digits and symbol value bindings.
-    pub fn with_bindings(
-        precision_digits: usize,
-        bindings: std::collections::HashMap<String, f64>,
-    ) -> Self {
+    pub fn with_bindings(precision_digits: usize, bindings: HashMap<String, f64>) -> Self {
         Self {
             precision_digits,
             bindings,
+            ..Default::default()
         }
+    }
+
+    /// Builder helper to attach symbol 1-sigma uncertainties.
+    pub fn with_uncertainties(mut self, uncertainties: HashMap<String, f64>) -> Self {
+        self.uncertainties = uncertainties;
+        self
+    }
+
+    /// Builder helper to attach explicit symbol interval bounds.
+    pub fn with_intervals(mut self, intervals: HashMap<String, RealInterval>) -> Self {
+        self.intervals = intervals;
+        self
+    }
+
+    /// Builder helper to select a specific Riemann sheet index.
+    pub fn with_branch_sheet(mut self, sheet: Option<i64>) -> Self {
+        self.branch_sheet = sheet;
+        self
+    }
+
+    /// Returns `true` if any symbol has non-zero uncertainty or a non-point interval.
+    pub fn has_uncertainty(&self) -> bool {
+        self.uncertainties.values().any(|&u| u.abs() > 0.0)
+            || self.intervals.values().any(|iv| iv.diam() > 0.0)
     }
 }
 
@@ -61,6 +97,25 @@ impl BigValue {
         match self {
             BigValue::Real(r) => *r,
             BigValue::Complex(r, _) => *r,
+        }
+    }
+
+    /// Convert to `(re, im)` complex coordinates.
+    pub fn as_complex(&self) -> (f64, f64) {
+        match self {
+            BigValue::Real(r) => (*r, 0.0),
+            BigValue::Complex(r, i) => (*r, *i),
+        }
+    }
+
+    /// Construct from `(re, im)`, normalizing negligible imaginary parts (`|im| <= 1e-14`) to `Real`.
+    pub fn from_complex(re: f64, im: f64) -> Self {
+        if im == 0.0 || (im.is_finite() && re.is_finite() && im.abs() <= 1e-14 * re.abs().max(1.0))
+        {
+            let clean_re = if re.abs() <= 1e-15 { 0.0 } else { re };
+            BigValue::Real(clean_re)
+        } else {
+            BigValue::Complex(re, im)
         }
     }
 }
@@ -130,10 +185,19 @@ impl NumericalEval for ExprGraph {
                 if let Some(&val) = ctx.bindings.get(&name) {
                     Ok(BigValue::Real(val))
                 } else {
-                    Err(AlgebraError::EvaluationError(format!(
-                        "Cannot evaluate free symbol '{}' numerically",
-                        name
-                    )))
+                    match name.as_str() {
+                        "pi" | "π" | "Pi" | "PI" => Ok(BigValue::Real(consts::PI)),
+                        "tau" | "τ" => Ok(BigValue::Real(2.0 * consts::PI)),
+                        "e" | "E" => Ok(BigValue::Real(consts::E)),
+                        "i" | "I" => Ok(BigValue::Complex(0.0, 1.0)),
+                        "phi" | "φ" | "GoldenRatio" => Ok(BigValue::Real(1.618033988749895)),
+                        "gamma" | "EulerGamma" => Ok(BigValue::Real(0.5772156649015329)),
+                        "oo" | "inf" | "infinity" | "Infinity" => Ok(BigValue::Real(f64::INFINITY)),
+                        _ => Err(AlgebraError::EvaluationError(format!(
+                            "Cannot evaluate free symbol '{}' numerically",
+                            name
+                        ))),
+                    }
                 }
             }
             ExprKind::Add(terms) => {
@@ -194,30 +258,24 @@ impl NumericalEval for ExprGraph {
                 }
             }
             ExprKind::Div(num, den) => {
-                let n = self.evalf(*num, ctx)?;
-                let d = self.evalf(*den, ctx)?;
-                match (n, d) {
-                    (BigValue::Real(nr), BigValue::Real(dr)) => {
-                        if dr == 0.0 {
-                            Err(AlgebraError::DivisionByZero {
-                                domain: "Reals".into(),
-                            })
+                let (nr, ni) = self.evalf(*num, ctx)?.as_complex();
+                let (dr, di) = self.evalf(*den, ctx)?.as_complex();
+                let den2 = dr * dr + di * di;
+                if den2 == 0.0 {
+                    return Err(AlgebraError::DivisionByZero {
+                        domain: if ni == 0.0 && di == 0.0 {
+                            "Reals".into()
                         } else {
-                            Ok(BigValue::Real(nr / dr))
-                        }
-                    }
-                    (BigValue::Complex(nr, ni), BigValue::Real(dr)) => {
-                        if dr == 0.0 {
-                            Err(AlgebraError::DivisionByZero {
-                                domain: "Complex".into(),
-                            })
-                        } else {
-                            Ok(BigValue::Complex(nr / dr, ni / dr))
-                        }
-                    }
-                    _ => Err(AlgebraError::EvaluationError(
-                        "Complex division in evalf not yet fully expanded".into(),
-                    )),
+                            "Complex".into()
+                        },
+                    });
+                }
+                if ni == 0.0 && di == 0.0 {
+                    Ok(BigValue::Real(nr / dr))
+                } else {
+                    let re = (nr * dr + ni * di) / den2;
+                    let im = (ni * dr - nr * di) / den2;
+                    Ok(BigValue::from_complex(re, im))
                 }
             }
             ExprKind::Neg(inner) => match self.evalf(*inner, ctx)? {
@@ -227,103 +285,56 @@ impl NumericalEval for ExprGraph {
             ExprKind::Pow(base, exp) => {
                 let b = self.evalf(*base, ctx)?;
                 let e = self.evalf(*exp, ctx)?;
+                let sheet_sel = ctx
+                    .branch_sheet
+                    .map(BranchSelection::Sheet)
+                    .unwrap_or(BranchSelection::Principal);
                 match (b, e) {
-                    (BigValue::Real(br), BigValue::Real(er)) => {
-                        if br < 0.0 && er.fract() != 0.0 {
-                            let mag = (-br).powf(er);
-                            let arg = std::f64::consts::PI * er;
-                            Ok(BigValue::Complex(mag * arg.cos(), mag * arg.sin()))
-                        } else {
-                            Ok(BigValue::Real(br.powf(er)))
-                        }
+                    (BigValue::Real(br), BigValue::Real(er))
+                        if (br > 0.0 || (br == 0.0 && er >= 0.0) || er.fract() == 0.0)
+                            && ctx.branch_sheet.is_none() =>
+                    {
+                        Ok(BigValue::Real(br.powf(er)))
                     }
-                    _ => Err(AlgebraError::EvaluationError(
-                        "Complex exponentiation in evalf not yet fully expanded".into(),
-                    )),
+                    (b_val, e_val) => {
+                        let (bre, bim) = b_val.as_complex();
+                        let (ere, eim) = e_val.as_complex();
+                        // Exact integer power via repeated squaring to avoid log branch noise
+                        if eim == 0.0 && ere.fract() == 0.0 && ere.abs() <= 1024.0 {
+                            let n = ere as i32;
+                            if n >= 0 {
+                                let (re, im) = complex_powi(bre, bim, n);
+                                return Ok(BigValue::from_complex(re, im));
+                            } else {
+                                let (pr, pi) = complex_powi(bre, bim, -n);
+                                let d2 = pr * pr + pi * pi;
+                                if d2 == 0.0 {
+                                    return Err(AlgebraError::DivisionByZero {
+                                        domain: "Complex".into(),
+                                    });
+                                }
+                                return Ok(BigValue::from_complex(pr / d2, -pi / d2));
+                            }
+                        }
+                        let mv = BranchCutManager::eval_power(bre, bim, ere, eim, &sheet_sel)?;
+                        let (re, im) = mv.primary_value();
+                        Ok(BigValue::from_complex(re, im))
+                    }
                 }
             }
             ExprKind::Function { name, args } => {
                 let fn_name = self.symbols.resolve(*name).unwrap_or_default();
+                let default_sel = ctx
+                    .branch_sheet
+                    .map(BranchSelection::Sheet)
+                    .unwrap_or(BranchSelection::Principal);
                 if args.len() == 1 {
                     let arg_val = self.evalf(args[0], ctx)?;
-                    match (fn_name.as_str(), arg_val) {
-                        ("sin", BigValue::Real(r)) => Ok(BigValue::Real(r.sin())),
-                        ("cos", BigValue::Real(r)) => Ok(BigValue::Real(r.cos())),
-                        ("tan", BigValue::Real(r)) => Ok(BigValue::Real(r.tan())),
-                        ("sinh", BigValue::Real(r)) => Ok(BigValue::Real(r.sinh())),
-                        ("cosh", BigValue::Real(r)) => Ok(BigValue::Real(r.cosh())),
-                        ("tanh", BigValue::Real(r)) => Ok(BigValue::Real(r.tanh())),
-                        ("asin", BigValue::Real(r)) => Ok(BigValue::Real(r.asin())),
-                        ("acos", BigValue::Real(r)) => Ok(BigValue::Real(r.acos())),
-                        ("atan", BigValue::Real(r)) => Ok(BigValue::Real(r.atan())),
-                        ("exp", BigValue::Real(r)) => Ok(BigValue::Real(r.exp())),
-                        ("ln", BigValue::Real(r)) | ("log", BigValue::Real(r)) => {
-                            if r < 0.0 {
-                                Ok(BigValue::Complex(r.abs().ln(), consts::PI))
-                            } else {
-                                Ok(BigValue::Real(r.ln()))
-                            }
-                        }
-                        ("sqrt", BigValue::Real(r)) => {
-                            if r < 0.0 {
-                                Ok(BigValue::Complex(0.0, (-r).sqrt()))
-                            } else {
-                                Ok(BigValue::Real(r.sqrt()))
-                            }
-                        }
-                        ("BringRadical" | "BR", BigValue::Real(r)) => {
-                            Ok(BigValue::Real(crate::poly::roots::BringRadical::eval(r)))
-                        }
-                        ("gamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_gamma(r))),
-                        ("log_gamma" | "lngamma", BigValue::Real(r)) => {
-                            Ok(BigValue::Real(eval_log_gamma(r)))
-                        }
-                        ("digamma" | "psi", BigValue::Real(r)) => {
-                            Ok(BigValue::Real(eval_digamma(r)))
-                        }
-                        ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(eval_zeta(r))),
-                        ("erf", BigValue::Real(r)) => Ok(BigValue::Real(eval_erf(r))),
-                        ("erfc", BigValue::Real(r)) => Ok(BigValue::Real(eval_erfc(r))),
-                        ("lambert_w" | "W" | "LambertW", BigValue::Real(r)) => {
-                            Ok(BigValue::Real(eval_lambert_w(r)))
-                        }
-                        ("si" | "Si", BigValue::Real(r)) => Ok(BigValue::Real(eval_si(r))),
-                        ("ci" | "Ci", BigValue::Real(r)) => Ok(BigValue::Real(eval_ci(r))),
-                        ("airy_ai" | "Ai", BigValue::Real(r)) => {
-                            Ok(BigValue::Real(eval_airy_ai(r)))
-                        }
-                        _ => Err(AlgebraError::EvaluationError(format!(
-                            "Unsupported function '{}' in numerical evaluation",
-                            fn_name
-                        ))),
-                    }
+                    eval_unary_fn(&fn_name, arg_val, &default_sel)
                 } else if args.len() == 2 {
-                    let a1 = self.evalf(args[0], ctx)?.to_f64();
-                    let a2 = self.evalf(args[1], ctx)?.to_f64();
-                    match fn_name.as_str() {
-                        "atan2" => Ok(BigValue::Real(a1.atan2(a2))),
-                        "besselj" | "bessel_j" => {
-                            let n = a1.round() as i64;
-                            Ok(BigValue::Real(eval_bessel_j(n, a2)))
-                        }
-                        "beta" | "Beta" => Ok(BigValue::Real(eval_beta(a1, a2))),
-                        "bessel_y" | "bessely" => {
-                            let n = a1.round() as i64;
-                            Ok(BigValue::Real(eval_bessel_y(n, a2)))
-                        }
-                        "bessel_i" | "besseli" => {
-                            let n = a1.round() as i64;
-                            Ok(BigValue::Real(eval_bessel_i(n, a2)))
-                        }
-                        "bessel_k" | "besselk" => {
-                            let n = a1.round() as i64;
-                            Ok(BigValue::Real(eval_bessel_k(n, a2)))
-                        }
-                        _ => Err(AlgebraError::EvaluationError(format!(
-                            "Unsupported binary function '{}' in numerical evaluation",
-                            fn_name
-                        ))),
-                    }
+                    eval_binary_fn(self, &fn_name, args[0], args[1], ctx, &default_sel)
+                } else if args.len() == 3 {
+                    eval_ternary_fn(self, &fn_name, args[0], args[1], args[2], ctx)
                 } else {
                     Err(AlgebraError::EvaluationError(format!(
                         "Unsupported function call '{}' with {} args",
@@ -677,4 +688,1206 @@ pub fn eval_bessel_k(n: i64, x: f64) -> f64 {
     let i1 = eval_bessel_i(n, x);
     let i2 = eval_bessel_i(n + 1, x);
     (pi / 2.0) * (i_neg_n + i_n) / (2.0 * (x + 1.0)).sqrt() + (i2 - i1) * eps
+}
+
+/// Exact arbitrary-precision evaluation over $\mathbb{Q}$ when the expression contains
+/// only exact integers/rationals, arithmetic, integer powers, exact square roots,
+/// factorials, gcd/lcm/mod/binomial, and no floats or transcendental quantities.
+pub fn try_eval_exact(
+    graph: &ExprGraph,
+    id: ExprId,
+    bindings: &std::collections::HashMap<String, f64>,
+) -> AlgebraResult<Option<num_rational::BigRational>> {
+    use num::Integer as _;
+    use num_bigint::{BigInt, BigUint};
+    use num_rational::BigRational;
+    use num_traits::{Signed as _, ToPrimitive as _, Zero as _};
+
+    fn perfect_square_biguint(u: &BigUint) -> Option<BigUint> {
+        let s = u.sqrt();
+        if &(&s * &s) == u { Some(s) } else { None }
+    }
+
+    fn factorial_bigint(n: usize) -> BigInt {
+        let mut acc = BigInt::from(1u8);
+        for k in 2..=n {
+            acc *= k;
+        }
+        acc
+    }
+
+    fn pi_multiple_rational(
+        g: &ExprGraph,
+        id: ExprId,
+        bindings: &std::collections::HashMap<String, f64>,
+    ) -> Option<BigRational> {
+        match &g.get(id).kind {
+            ExprKind::Number(Number::Constant(Constant::Pi)) => {
+                Some(BigRational::from_integer(BigInt::from(1u8)))
+            }
+            ExprKind::Symbol(s) if g.symbols.resolve(*s).as_deref() == Some("pi") => {
+                Some(BigRational::from_integer(BigInt::from(1u8)))
+            }
+            ExprKind::Neg(inner) => Some(-pi_multiple_rational(g, *inner, bindings)?),
+            ExprKind::Add(terms) => {
+                let mut acc = BigRational::zero();
+                for &t in terms {
+                    acc += pi_multiple_rational(g, t, bindings)?;
+                }
+                Some(acc)
+            }
+            ExprKind::Sub(a, b) => Some(
+                pi_multiple_rational(g, *a, bindings)? - pi_multiple_rational(g, *b, bindings)?,
+            ),
+            ExprKind::Div(a, b) => {
+                let pa = pi_multiple_rational(g, *a, bindings)?;
+                let rb = eval_node(g, *b, bindings).ok()??;
+                if rb.is_zero() { None } else { Some(pa / rb) }
+            }
+            ExprKind::Mul(factors) => {
+                let mut pi_count = 0usize;
+                let mut coeff = BigRational::from_integer(BigInt::from(1u8));
+                for &f in factors {
+                    if let Some(p) = pi_multiple_rational(g, f, bindings) {
+                        pi_count += 1;
+                        coeff *= p;
+                    } else if let Ok(Some(r)) = eval_node(g, f, bindings) {
+                        coeff *= r;
+                    } else {
+                        return None;
+                    }
+                }
+                if pi_count == 1 { Some(coeff) } else { None }
+            }
+            _ => None,
+        }
+    }
+
+    fn exact_rational_trig(fn_name: &str, q_pi: &BigRational) -> Option<BigRational> {
+        let twelve = BigRational::from_integer(BigInt::from(12u8));
+        let scaled = q_pi * twelve;
+        if !scaled.is_integer() {
+            return None;
+        }
+        let k24 = scaled.numer().mod_floor(&BigInt::from(24u8)).to_i64()?;
+        match fn_name {
+            "sin" => match k24 {
+                0 | 12 => Some(BigRational::zero()),
+                2 | 10 => Some(BigRational::new(BigInt::from(1), BigInt::from(2))),
+                6 => Some(BigRational::from_integer(BigInt::from(1))),
+                14 | 22 => Some(BigRational::new(BigInt::from(-1), BigInt::from(2))),
+                18 => Some(BigRational::from_integer(BigInt::from(-1))),
+                _ => None,
+            },
+            "cos" => match k24 {
+                0 => Some(BigRational::from_integer(BigInt::from(1))),
+                4 | 20 => Some(BigRational::new(BigInt::from(1), BigInt::from(2))),
+                6 | 18 => Some(BigRational::zero()),
+                8 | 16 => Some(BigRational::new(BigInt::from(-1), BigInt::from(2))),
+                12 => Some(BigRational::from_integer(BigInt::from(-1))),
+                _ => None,
+            },
+            "tan" => match k24 {
+                0 | 12 => Some(BigRational::zero()),
+                3 | 15 => Some(BigRational::from_integer(BigInt::from(1))),
+                9 | 21 => Some(BigRational::from_integer(BigInt::from(-1))),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn eval_node(
+        g: &ExprGraph,
+        id: ExprId,
+        bindings: &std::collections::HashMap<String, f64>,
+    ) -> AlgebraResult<Option<BigRational>> {
+        match &g.get(id).kind {
+            ExprKind::Number(n) => match n {
+                Number::Integer(i) => Ok(Some(BigRational::from_integer(BigInt::from(*i)))),
+                Number::BigInteger(b) => Ok(Some(BigRational::from_integer(b.clone()))),
+                Number::Rational(num, den) => {
+                    if *den == 0 {
+                        Err(AlgebraError::DivisionByZero {
+                            domain: "Rationals".into(),
+                        })
+                    } else {
+                        Ok(Some(BigRational::new(
+                            BigInt::from(*num),
+                            BigInt::from(*den),
+                        )))
+                    }
+                }
+                Number::BigRational(r) => Ok(Some((**r).clone())),
+                Number::Float(_) | Number::Scientific { .. } | Number::Constant(_) => Ok(None),
+            },
+            ExprKind::Symbol(s) => {
+                if let Some(name) = g.symbols.resolve(*s)
+                    && let Some(&v) = bindings.get(&name)
+                    && v.is_finite()
+                    && v.fract() == 0.0
+                    && v.abs() < 9.0e15
+                {
+                    return Ok(Some(BigRational::from_integer(BigInt::from(v as i64))));
+                }
+                Ok(None)
+            }
+            ExprKind::Neg(a) => Ok(eval_node(g, *a, bindings)?.map(|r| -r)),
+            ExprKind::Add(terms) => {
+                let mut sum = BigRational::zero();
+                for &t in terms {
+                    match eval_node(g, t, bindings)? {
+                        Some(r) => sum += r,
+                        None => return Ok(None),
+                    }
+                }
+                Ok(Some(sum))
+            }
+            ExprKind::Sub(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?)
+            {
+                (Some(ra), Some(rb)) => Ok(Some(ra - rb)),
+                _ => Ok(None),
+            },
+            ExprKind::Mul(factors) => {
+                let mut prod = BigRational::from_integer(BigInt::from(1u8));
+                for &f in factors {
+                    match eval_node(g, f, bindings)? {
+                        Some(r) => prod *= r,
+                        None => return Ok(None),
+                    }
+                }
+                Ok(Some(prod))
+            }
+            ExprKind::Div(a, b) => match (eval_node(g, *a, bindings)?, eval_node(g, *b, bindings)?)
+            {
+                (Some(ra), Some(rb)) => {
+                    if rb.is_zero() {
+                        Err(AlgebraError::DivisionByZero {
+                            domain: "Rationals".into(),
+                        })
+                    } else {
+                        Ok(Some(ra / rb))
+                    }
+                }
+                _ => Ok(None),
+            },
+            ExprKind::Pow(b, e) => {
+                let is_i = matches!(
+                    g.get(*b).kind,
+                    ExprKind::Number(Number::Constant(algebra_core::Constant::I))
+                ) || matches!(
+                    g.get(*b).kind,
+                    ExprKind::Symbol(sym) if matches!(g.symbols.resolve(sym).as_deref(), Some("i" | "I"))
+                );
+                if is_i
+                    && let Ok(Some(re)) = eval_node(g, *e, bindings)
+                    && re.is_integer()
+                {
+                    let m4 = re.numer().mod_floor(&BigInt::from(4u8)).to_i64();
+                    if m4 == Some(0) {
+                        return Ok(Some(BigRational::from_integer(BigInt::from(1u8))));
+                    } else if m4 == Some(2) {
+                        return Ok(Some(BigRational::from_integer(BigInt::from(-1i8))));
+                    }
+                }
+                match (eval_node(g, *b, bindings)?, eval_node(g, *e, bindings)?) {
+                    (Some(rb), Some(re)) => {
+                        if re.is_integer() {
+                            let Some(exp_i64) = re.numer().to_i64() else {
+                                return Ok(None);
+                            };
+                            if exp_i64 < 0 && rb.is_zero() {
+                                return Err(AlgebraError::DivisionByZero {
+                                    domain: "Rationals".into(),
+                                });
+                            }
+                            if exp_i64 == 0 {
+                                return Ok(Some(BigRational::from_integer(BigInt::from(1u8))));
+                            }
+                            let abs_exp = exp_i64.unsigned_abs();
+                            if abs_exp > 100_000 {
+                                return Ok(None);
+                            }
+                            let base_bits = rb.numer().bits().max(rb.denom().bits()).max(1);
+                            if base_bits.saturating_mul(abs_exp) > 2_000_000 {
+                                return Ok(None);
+                            }
+                            let Ok(exp_u32) = u32::try_from(abs_exp) else {
+                                return Ok(None);
+                            };
+                            let res = if exp_i64 > 0 {
+                                BigRational::new(rb.numer().pow(exp_u32), rb.denom().pow(exp_u32))
+                            } else {
+                                BigRational::new(rb.denom().pow(exp_u32), rb.numer().pow(exp_u32))
+                            };
+                            Ok(Some(res))
+                        } else if *re.denom() == BigInt::from(2u8)
+                            && !rb.is_negative()
+                            && let (Some(nu), Some(du)) =
+                                (rb.numer().to_biguint(), rb.denom().to_biguint())
+                            && let (Some(sn), Some(sd)) =
+                                (perfect_square_biguint(&nu), perfect_square_biguint(&du))
+                        {
+                            let sqrt_q = BigRational::new(BigInt::from(sn), BigInt::from(sd));
+                            let Some(exp_i64) = re.numer().to_i64() else {
+                                return Ok(None);
+                            };
+                            if exp_i64 < 0 && sqrt_q.is_zero() {
+                                return Err(AlgebraError::DivisionByZero {
+                                    domain: "Rationals".into(),
+                                });
+                            }
+                            let Ok(exp_u32) = u32::try_from(exp_i64.unsigned_abs()) else {
+                                return Ok(None);
+                            };
+                            if exp_u32 > 10_000 {
+                                return Ok(None);
+                            }
+                            let res = if exp_i64 >= 0 {
+                                BigRational::new(
+                                    sqrt_q.numer().pow(exp_u32),
+                                    sqrt_q.denom().pow(exp_u32),
+                                )
+                            } else {
+                                BigRational::new(
+                                    sqrt_q.denom().pow(exp_u32),
+                                    sqrt_q.numer().pow(exp_u32),
+                                )
+                            };
+                            Ok(Some(res))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    _ => Ok(None),
+                }
+            }
+            ExprKind::Function { name, args } => {
+                let fn_name = g.symbols.resolve(*name).unwrap_or_default();
+                if args.len() == 1 {
+                    if matches!(fn_name.as_str(), "sin" | "cos" | "tan")
+                        && let Some(q_pi) = pi_multiple_rational(g, args[0], bindings)
+                        && let Some(exact_trig) = exact_rational_trig(&fn_name, &q_pi)
+                    {
+                        return Ok(Some(exact_trig));
+                    }
+                    if matches!(fn_name.as_str(), "ln" | "log") {
+                        let is_e_node = |node_id: ExprId| -> bool {
+                            matches!(
+                                g.get(node_id).kind,
+                                ExprKind::Number(Number::Constant(algebra_core::Constant::E))
+                            ) || matches!(
+                                g.get(node_id).kind,
+                                ExprKind::Symbol(sym) if g.symbols.resolve(sym).as_deref() == Some("e")
+                            )
+                        };
+                        if is_e_node(args[0]) {
+                            return Ok(Some(BigRational::from_integer(BigInt::from(1u8))));
+                        }
+                        if let ExprKind::Pow(eb, ee) = g.get(args[0]).kind
+                            && is_e_node(eb)
+                            && let Some(q_exp) = eval_node(g, ee, bindings)?
+                        {
+                            return Ok(Some(q_exp));
+                        }
+                        if let ExprKind::Function {
+                            name: inner_n,
+                            args: inner_a,
+                        } = g.get(args[0]).kind
+                            && g.symbols.resolve(inner_n).as_deref() == Some("exp")
+                            && inner_a.len() == 1
+                            && let Some(q_exp) = eval_node(g, inner_a[0], bindings)?
+                        {
+                            return Ok(Some(q_exp));
+                        }
+                    }
+                    let Some(arg) = eval_node(g, args[0], bindings)? else {
+                        return Ok(None);
+                    };
+                    match fn_name.as_str() {
+                        "abs" | "Abs" => Ok(Some(arg.abs())),
+                        "floor" => Ok(Some(BigRational::from_integer(arg.floor().to_integer()))),
+                        "ceil" => Ok(Some(BigRational::from_integer(arg.ceil().to_integer()))),
+                        "sqrt" => {
+                            if !arg.is_negative()
+                                && let (Some(nu), Some(du)) =
+                                    (arg.numer().to_biguint(), arg.denom().to_biguint())
+                                && let (Some(sn), Some(sd)) =
+                                    (perfect_square_biguint(&nu), perfect_square_biguint(&du))
+                            {
+                                Ok(Some(BigRational::new(BigInt::from(sn), BigInt::from(sd))))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        "factorial" => {
+                            if arg.is_integer()
+                                && !arg.is_negative()
+                                && let Some(n) = arg.numer().to_usize()
+                                && n <= 5000
+                            {
+                                Ok(Some(BigRational::from_integer(factorial_bigint(n))))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        "sin" | "tan" | "sinh" | "tanh" | "asin" | "arcsin" | "atan" | "arctan"
+                            if arg.is_zero() =>
+                        {
+                            Ok(Some(BigRational::zero()))
+                        }
+                        "cos" | "cosh" | "exp" if arg.is_zero() => {
+                            Ok(Some(BigRational::from_integer(BigInt::from(1u8))))
+                        }
+                        "ln" | "log" => {
+                            if *arg.numer() == BigInt::from(1u8)
+                                && *arg.denom() == BigInt::from(1u8)
+                            {
+                                Ok(Some(BigRational::zero()))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        _ => Ok(None),
+                    }
+                } else if args.len() == 2 {
+                    let (Some(a), Some(b)) = (
+                        eval_node(g, args[0], bindings)?,
+                        eval_node(g, args[1], bindings)?,
+                    ) else {
+                        return Ok(None);
+                    };
+                    match fn_name.as_str() {
+                        "gcd" if a.is_integer() && b.is_integer() => {
+                            Ok(Some(BigRational::from_integer(a.numer().gcd(b.numer()))))
+                        }
+                        "lcm" if a.is_integer() && b.is_integer() => {
+                            Ok(Some(BigRational::from_integer(a.numer().lcm(b.numer()))))
+                        }
+                        "mod" | "Mod" if a.is_integer() && b.is_integer() => {
+                            if b.is_zero() {
+                                Err(AlgebraError::DivisionByZero {
+                                    domain: "Integers".into(),
+                                })
+                            } else {
+                                let rem = a.numer().mod_floor(b.numer());
+                                Ok(Some(BigRational::from_integer(rem)))
+                            }
+                        }
+                        "binomial" if a.is_integer() && b.is_integer() => {
+                            if let (Some(n), Some(k)) = (a.numer().to_usize(), b.numer().to_usize())
+                                && k <= n
+                                && n <= 2000
+                            {
+                                let k = k.min(n - k);
+                                let mut num = BigInt::from(1u8);
+                                let mut den = BigInt::from(1u8);
+                                for i in 0..k {
+                                    num *= n - i;
+                                    den *= i + 1;
+                                }
+                                Ok(Some(BigRational::from_integer(num / den)))
+                            } else {
+                                Ok(None)
+                            }
+                        }
+                        "log" | "log_base" => {
+                            use num_traits::One as _;
+                            if a.is_one() && !b.is_zero() && !b.is_one() {
+                                return Ok(Some(BigRational::zero()));
+                            }
+                            if !a.is_positive() || !b.is_positive() || b.is_one() {
+                                return Ok(None);
+                            }
+                            // Check if a = b^k or a = b^(-k) for small integer k
+                            let inv = a < BigRational::one();
+                            let target = if inv { a.recip() } else { a.clone() };
+                            let step = if b < BigRational::one() {
+                                b.recip()
+                            } else {
+                                b.clone()
+                            };
+                            let flip = b < BigRational::one();
+                            let mut cur = BigRational::one();
+                            for k in 0i64..=128 {
+                                if cur == target {
+                                    let exp = match (inv, flip) {
+                                        (false, false) | (true, true) => k,
+                                        _ => -k,
+                                    };
+                                    return Ok(Some(BigRational::from_integer(BigInt::from(exp))));
+                                }
+                                if cur > target || cur.numer().bits() > 4096 {
+                                    break;
+                                }
+                                cur *= &step;
+                            }
+                            Ok(None)
+                        }
+                        _ => Ok(None),
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            ExprKind::Relational { rhs, .. } => eval_node(g, *rhs, bindings),
+            _ => Ok(None),
+        }
+    }
+
+    eval_node(graph, id, bindings)
+}
+
+fn complex_powi(mut re: f64, mut im: f64, mut n: i32) -> (f64, f64) {
+    let mut acc_re = 1.0;
+    let mut acc_im = 0.0;
+    while n > 0 {
+        if n & 1 == 1 {
+            let nr = acc_re * re - acc_im * im;
+            let ni = acc_re * im + acc_im * re;
+            acc_re = nr;
+            acc_im = ni;
+        }
+        n >>= 1;
+        if n > 0 {
+            let nr = re * re - im * im;
+            let ni = 2.0 * re * im;
+            re = nr;
+            im = ni;
+        }
+    }
+    (acc_re, acc_im)
+}
+
+fn big_value_div(num: BigValue, den: BigValue) -> AlgebraResult<BigValue> {
+    match (num, den) {
+        (BigValue::Real(a), BigValue::Real(b)) => {
+            if b == 0.0 {
+                Err(AlgebraError::DivisionByZero {
+                    domain: "Real".into(),
+                })
+            } else {
+                Ok(BigValue::Real(a / b))
+            }
+        }
+        (a, b) => {
+            let (ar, ai) = a.as_complex();
+            let (br, bi) = b.as_complex();
+            let d2 = br * br + bi * bi;
+            if d2 == 0.0 {
+                return Err(AlgebraError::DivisionByZero {
+                    domain: "Complex".into(),
+                });
+            }
+            Ok(BigValue::from_complex(
+                (ar * br + ai * bi) / d2,
+                (ai * br - ar * bi) / d2,
+            ))
+        }
+    }
+}
+
+fn eval_unary_fn(
+    fn_name: &str,
+    arg_val: BigValue,
+    default_sel: &BranchSelection,
+) -> AlgebraResult<BigValue> {
+    match (fn_name, &arg_val) {
+        ("sin", BigValue::Real(r)) => Ok(BigValue::Real(r.sin())),
+        ("sin", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.sin() * im.cosh(),
+            re.cos() * im.sinh(),
+        )),
+        ("cos", BigValue::Real(r)) => Ok(BigValue::Real(r.cos())),
+        ("cos", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.cos() * im.cosh(),
+            -re.sin() * im.sinh(),
+        )),
+        ("tan", BigValue::Real(r)) => Ok(BigValue::Real(r.tan())),
+        ("tan", BigValue::Complex(_, _)) => {
+            let s = eval_unary_fn("sin", arg_val.clone(), default_sel)?;
+            let c = eval_unary_fn("cos", arg_val, default_sel)?;
+            big_value_div(s, c)
+        }
+        ("sec" | "csc" | "sech" | "csch", _) => {
+            let base = match fn_name {
+                "sec" => "cos",
+                "csc" => "sin",
+                "sech" => "cosh",
+                "csch" => "sinh",
+                _ => unreachable!(),
+            };
+            let den = eval_unary_fn(base, arg_val, default_sel)?;
+            big_value_div(BigValue::Real(1.0), den)
+        }
+        ("cot", _) => {
+            let c = eval_unary_fn("cos", arg_val.clone(), default_sel)?;
+            let s = eval_unary_fn("sin", arg_val, default_sel)?;
+            big_value_div(c, s)
+        }
+        ("sinh", BigValue::Real(r)) => Ok(BigValue::Real(r.sinh())),
+        ("sinh", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.sinh() * im.cos(),
+            re.cosh() * im.sin(),
+        )),
+        ("cosh", BigValue::Real(r)) => Ok(BigValue::Real(r.cosh())),
+        ("cosh", BigValue::Complex(re, im)) => Ok(BigValue::from_complex(
+            re.cosh() * im.cos(),
+            re.sinh() * im.sin(),
+        )),
+        ("tanh", BigValue::Real(r)) => Ok(BigValue::Real(r.tanh())),
+        ("tanh", BigValue::Complex(_, _)) => {
+            let s = eval_unary_fn("sinh", arg_val.clone(), default_sel)?;
+            let c = eval_unary_fn("cosh", arg_val, default_sel)?;
+            big_value_div(s, c)
+        }
+        ("coth", _) => {
+            let c = eval_unary_fn("cosh", arg_val.clone(), default_sel)?;
+            let s = eval_unary_fn("sinh", arg_val, default_sel)?;
+            big_value_div(c, s)
+        }
+        ("exp", BigValue::Real(r)) => Ok(BigValue::Real(r.exp())),
+        ("exp", BigValue::Complex(re, im)) => {
+            let mag = re.exp();
+            Ok(BigValue::from_complex(mag * im.cos(), mag * im.sin()))
+        }
+        ("ln" | "log", _) => {
+            let (re, im) = arg_val.as_complex();
+            if re > 0.0 && im == 0.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.ln()))
+            } else {
+                let mv = BranchCutManager::eval(BranchCutFunctionKind::Log, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("sqrt", _) => {
+            let (re, im) = arg_val.as_complex();
+            if re >= 0.0 && im == 0.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.sqrt()))
+            } else {
+                let mv = BranchCutManager::eval(BranchCutFunctionKind::Sqrt, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("asin" | "arcsin", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && re.abs() <= 1.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.asin()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcSin, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("acos" | "arccos", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && re.abs() <= 1.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.acos()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcCos, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("atan" | "arctan", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.atan()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcTan, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("asinh" | "arcsinh", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.asinh()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcSinh, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("acosh" | "arccosh", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && re >= 1.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.acosh()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcCosh, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("atanh" | "arctanh", _) => {
+            let (re, im) = arg_val.as_complex();
+            if im == 0.0 && re.abs() < 1.0 && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(re.atanh()))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::ArcTanh, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("lambert_w" | "W" | "LambertW", _) => {
+            let (re, im) = arg_val.as_complex();
+            let inv_e = -(-1.0f64).exp();
+            if im == 0.0 && re >= inv_e && *default_sel == BranchSelection::Principal {
+                Ok(BigValue::Real(eval_lambert_w(re)))
+            } else {
+                let mv =
+                    BranchCutManager::eval(BranchCutFunctionKind::LambertW, re, im, default_sel)?;
+                let (r, i) = mv.primary_value();
+                Ok(BigValue::from_complex(r, i))
+            }
+        }
+        ("abs" | "Abs", BigValue::Real(r)) => Ok(BigValue::Real(r.abs())),
+        ("abs" | "Abs", BigValue::Complex(r, i)) => Ok(BigValue::Real(r.hypot(*i))),
+        ("sign" | "sgn" | "signum", BigValue::Real(r)) => Ok(BigValue::Real(if *r > 0.0 {
+            1.0
+        } else if *r < 0.0 {
+            -1.0
+        } else {
+            0.0
+        })),
+        ("heaviside" | "Heaviside" | "step", BigValue::Real(r)) => {
+            Ok(BigValue::Real(if *r > 0.0 {
+                1.0
+            } else if *r < 0.0 {
+                0.0
+            } else {
+                0.5
+            }))
+        }
+        ("re" | "real" | "Re", BigValue::Real(r)) => Ok(BigValue::Real(*r)),
+        ("re" | "real" | "Re", BigValue::Complex(r, _)) => Ok(BigValue::Real(*r)),
+        ("im" | "imag" | "Im", BigValue::Real(_)) => Ok(BigValue::Real(0.0)),
+        ("im" | "imag" | "Im", BigValue::Complex(_, i)) => Ok(BigValue::Real(*i)),
+        ("arg" | "phase", _) => {
+            let (re, im) = arg_val.as_complex();
+            Ok(BigValue::Real(im.atan2(re)))
+        }
+        ("conj" | "conjugate", BigValue::Real(r)) => Ok(BigValue::Real(*r)),
+        ("conj" | "conjugate", BigValue::Complex(r, i)) => Ok(BigValue::from_complex(*r, -*i)),
+        ("BringRadical" | "BR", BigValue::Real(r)) => {
+            Ok(BigValue::Real(crate::poly::roots::BringRadical::eval(*r)))
+        }
+        ("gamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_gamma(*r))),
+        ("log_gamma" | "lngamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_log_gamma(*r))),
+        ("digamma" | "psi", BigValue::Real(r)) => Ok(BigValue::Real(eval_digamma(*r))),
+        ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(eval_zeta(*r))),
+        ("erf", BigValue::Real(r)) => Ok(BigValue::Real(eval_erf(*r))),
+        ("erfc", BigValue::Real(r)) => Ok(BigValue::Real(eval_erfc(*r))),
+        ("si" | "Si", BigValue::Real(r)) => Ok(BigValue::Real(eval_si(*r))),
+        ("ci" | "Ci", BigValue::Real(r)) => Ok(BigValue::Real(eval_ci(*r))),
+        ("airy_ai" | "Ai", BigValue::Real(r)) => Ok(BigValue::Real(eval_airy_ai(*r))),
+        ("floor", BigValue::Real(r)) => Ok(BigValue::Real(r.floor())),
+        ("ceil", BigValue::Real(r)) => Ok(BigValue::Real(r.ceil())),
+        ("round", BigValue::Real(r)) => Ok(BigValue::Real(r.round())),
+        ("factorial", BigValue::Real(r)) => Ok(BigValue::Real(eval_gamma(*r + 1.0))),
+        _ => Err(AlgebraError::EvaluationError(format!(
+            "Unsupported function '{}' in numerical evaluation",
+            fn_name
+        ))),
+    }
+}
+
+fn eval_binary_fn(
+    graph: &ExprGraph,
+    fn_name: &str,
+    arg0: ExprId,
+    arg1: ExprId,
+    ctx: &EvalContext,
+    default_sel: &BranchSelection,
+) -> AlgebraResult<BigValue> {
+    match fn_name {
+        "uncertain" | "measurement" => return graph.evalf(arg0, ctx),
+        "interval" => {
+            let lo = graph.evalf(arg0, ctx)?.to_f64();
+            let hi = graph.evalf(arg1, ctx)?.to_f64();
+            return Ok(BigValue::Real(0.5 * (lo + hi)));
+        }
+        "lambert_w" | "LambertW" | "W" => {
+            let k = graph.evalf(arg0, ctx)?.to_f64().round() as i64;
+            let (zr, zi) = graph.evalf(arg1, ctx)?.as_complex();
+            let mv = BranchCutManager::eval(
+                BranchCutFunctionKind::LambertW,
+                zr,
+                zi,
+                &BranchSelection::Sheet(k),
+            )?;
+            let (r, i) = mv.primary_value();
+            return Ok(BigValue::from_complex(r, i));
+        }
+        "ln" | "log_branch" => {
+            let (zr, zi) = graph.evalf(arg0, ctx)?.as_complex();
+            let k = graph.evalf(arg1, ctx)?.to_f64().round() as i64;
+            let mv = BranchCutManager::eval(
+                BranchCutFunctionKind::Log,
+                zr,
+                zi,
+                &BranchSelection::Sheet(k),
+            )?;
+            let (r, i) = mv.primary_value();
+            return Ok(BigValue::from_complex(r, i));
+        }
+        "sqrt" => {
+            let (zr, zi) = graph.evalf(arg0, ctx)?.as_complex();
+            let k = graph.evalf(arg1, ctx)?.to_f64().round() as i64;
+            let mv = BranchCutManager::eval(
+                BranchCutFunctionKind::Sqrt,
+                zr,
+                zi,
+                &BranchSelection::Sheet(k),
+            )?;
+            let (r, i) = mv.primary_value();
+            return Ok(BigValue::from_complex(r, i));
+        }
+        "root" => {
+            let (zr, zi) = graph.evalf(arg0, ctx)?.as_complex();
+            let n = graph.evalf(arg1, ctx)?.to_f64().round() as i64;
+            if n <= 0 {
+                return Err(AlgebraError::DivisionByZero {
+                    domain: "Complex Root".into(),
+                });
+            }
+            let mv =
+                BranchCutManager::eval(BranchCutFunctionKind::Root(n as u32), zr, zi, default_sel)?;
+            let (r, i) = mv.primary_value();
+            return Ok(BigValue::from_complex(r, i));
+        }
+        "asin" | "arcsin" | "acos" | "arccos" | "atan" | "arctan" | "asinh" | "arcsinh"
+        | "acosh" | "arccosh" | "atanh" | "arctanh" => {
+            let (zr, zi) = graph.evalf(arg0, ctx)?.as_complex();
+            let k = graph.evalf(arg1, ctx)?.to_f64().round() as i64;
+            let kind = match fn_name {
+                "asin" | "arcsin" => BranchCutFunctionKind::ArcSin,
+                "acos" | "arccos" => BranchCutFunctionKind::ArcCos,
+                "atan" | "arctan" => BranchCutFunctionKind::ArcTan,
+                "asinh" | "arcsinh" => BranchCutFunctionKind::ArcSinh,
+                "acosh" | "arccosh" => BranchCutFunctionKind::ArcCosh,
+                _ => BranchCutFunctionKind::ArcTanh,
+            };
+            let mv = BranchCutManager::eval(kind, zr, zi, &BranchSelection::Sheet(k))?;
+            let (r, i) = mv.primary_value();
+            return Ok(BigValue::from_complex(r, i));
+        }
+        _ => {}
+    }
+
+    let a1 = graph.evalf(arg0, ctx)?.to_f64();
+    let a2 = graph.evalf(arg1, ctx)?.to_f64();
+    match fn_name {
+        "log" | "log_base" => Ok(BigValue::Real(a1.ln() / a2.ln())),
+        "mod" | "Mod" => {
+            if a2 == 0.0 {
+                Err(AlgebraError::DivisionByZero {
+                    domain: "Reals".into(),
+                })
+            } else {
+                Ok(BigValue::Real(a1.rem_euclid(a2)))
+            }
+        }
+        "atan2" => Ok(BigValue::Real(a1.atan2(a2))),
+        "besselj" | "bessel_j" => Ok(BigValue::Real(eval_bessel_j(a1.round() as i64, a2))),
+        "beta" | "Beta" => Ok(BigValue::Real(eval_beta(a1, a2))),
+        "bessel_y" | "bessely" => Ok(BigValue::Real(eval_bessel_y(a1.round() as i64, a2))),
+        "bessel_i" | "besseli" => Ok(BigValue::Real(eval_bessel_i(a1.round() as i64, a2))),
+        "bessel_k" | "besselk" => Ok(BigValue::Real(eval_bessel_k(a1.round() as i64, a2))),
+        _ => Err(AlgebraError::EvaluationError(format!(
+            "Unsupported binary function '{}' in numerical evaluation",
+            fn_name
+        ))),
+    }
+}
+
+fn eval_ternary_fn(
+    graph: &ExprGraph,
+    fn_name: &str,
+    arg0: ExprId,
+    arg1: ExprId,
+    arg2: ExprId,
+    ctx: &EvalContext,
+) -> AlgebraResult<BigValue> {
+    if fn_name == "root" {
+        let (zr, zi) = graph.evalf(arg0, ctx)?.as_complex();
+        let n = graph.evalf(arg1, ctx)?.to_f64().round() as i64;
+        let k = graph.evalf(arg2, ctx)?.to_f64().round() as i64;
+        if n <= 0 {
+            return Err(AlgebraError::DivisionByZero {
+                domain: "Complex Root".into(),
+            });
+        }
+        let mv = BranchCutManager::eval(
+            BranchCutFunctionKind::Root(n as u32),
+            zr,
+            zi,
+            &BranchSelection::Sheet(k),
+        )?;
+        let (r, i) = mv.primary_value();
+        return Ok(BigValue::from_complex(r, i));
+    }
+    Err(AlgebraError::EvaluationError(format!(
+        "Unsupported ternary function '{}' in numerical evaluation",
+        fn_name
+    )))
+}
+
+/// Evaluate a real expression DAG under rigorous interval arithmetic `[inf, sup]`.
+pub fn eval_interval(
+    graph: &ExprGraph,
+    id: ExprId,
+    env: &HashMap<String, RealInterval>,
+) -> AlgebraResult<RealInterval> {
+    let node = graph.get(id);
+    match &node.kind {
+        ExprKind::Number(n) => match n {
+            Number::Constant(Constant::Pi) => Ok(RealInterval::point(consts::PI)),
+            Number::Constant(Constant::E) => Ok(RealInterval::point(consts::E)),
+            Number::Constant(Constant::EulerGamma) => Ok(RealInterval::point(0.5772156649015329)),
+            Number::Constant(Constant::GoldenRatio) => Ok(RealInterval::point(1.618033988749895)),
+            _ => n.as_f64().map(RealInterval::point).ok_or_else(|| {
+                AlgebraError::EvaluationError("Non-real constant in interval evaluation".into())
+            }),
+        },
+        ExprKind::Symbol(sym) => {
+            let name = graph.symbols.resolve(*sym).unwrap_or_default();
+            if let Some(&iv) = env.get(&name) {
+                Ok(iv)
+            } else {
+                match name.as_str() {
+                    "pi" | "π" | "Pi" | "PI" => Ok(RealInterval::point(consts::PI)),
+                    "tau" | "τ" => Ok(RealInterval::point(2.0 * consts::PI)),
+                    "e" | "E" => Ok(RealInterval::point(consts::E)),
+                    _ => Err(AlgebraError::EvaluationError(format!(
+                        "Unbound symbol '{}' in interval evaluation",
+                        name
+                    ))),
+                }
+            }
+        }
+        ExprKind::Add(terms) => {
+            let mut acc = RealInterval::point(0.0);
+            for &t in terms {
+                acc = acc + eval_interval(graph, t, env)?;
+            }
+            Ok(acc)
+        }
+        ExprKind::Mul(factors) => {
+            let mut acc = RealInterval::point(1.0);
+            for &f in factors {
+                acc = acc * eval_interval(graph, f, env)?;
+            }
+            Ok(acc)
+        }
+        ExprKind::Sub(a, b) => Ok(eval_interval(graph, *a, env)? - eval_interval(graph, *b, env)?),
+        ExprKind::Div(a, b) => {
+            let num = eval_interval(graph, *a, env)?;
+            let den = eval_interval(graph, *b, env)?;
+            num.div(&den).ok_or_else(|| AlgebraError::DivisionByZero {
+                domain: "RealInterval contains zero".into(),
+            })
+        }
+        ExprKind::Neg(a) => Ok(eval_interval(graph, *a, env)?.neg()),
+        ExprKind::Pow(b, e) => {
+            let bv = eval_interval(graph, *b, env)?;
+            let ev = eval_interval(graph, *e, env)?;
+            bv.pow_interval(&ev)
+                .ok_or_else(|| AlgebraError::EvaluationError("Interval power domain error".into()))
+        }
+        ExprKind::Function { name, args } => {
+            let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+            if args.len() == 2 && (fn_name == "uncertain" || fn_name == "measurement") {
+                let v = eval_interval(graph, args[0], env)?;
+                let u = eval_interval(graph, args[1], env)?.abs();
+                return Ok(RealInterval::new(v.inf - u.sup, v.sup + u.sup));
+            }
+            if args.len() == 2 && fn_name == "interval" {
+                let lo = eval_interval(graph, args[0], env)?;
+                let hi = eval_interval(graph, args[1], env)?;
+                return Ok(RealInterval::new(lo.inf.min(hi.inf), lo.sup.max(hi.sup)));
+            }
+            if args.len() == 1 {
+                let a = eval_interval(graph, args[0], env)?;
+                match fn_name.as_str() {
+                    "abs" | "Abs" => Ok(a.abs()),
+                    "sqrt" => a.sqrt().ok_or_else(|| {
+                        AlgebraError::EvaluationError("Negative domain for interval sqrt".into())
+                    }),
+                    "exp" => Ok(a.exp()),
+                    "ln" | "log" => a.ln().ok_or_else(|| {
+                        AlgebraError::EvaluationError("Non-positive domain for interval ln".into())
+                    }),
+                    "sin" => Ok(a.sin()),
+                    "cos" => Ok(a.cos()),
+                    "tan" => a.tan().ok_or_else(|| {
+                        AlgebraError::EvaluationError("Pole in interval tan".into())
+                    }),
+                    "asin" | "arcsin" => a.asin().ok_or_else(|| {
+                        AlgebraError::EvaluationError("Out-of-domain interval asin".into())
+                    }),
+                    "acos" | "arccos" => a.acos().ok_or_else(|| {
+                        AlgebraError::EvaluationError("Out-of-domain interval acos".into())
+                    }),
+                    "atan" | "arctan" => Ok(a.atan()),
+                    "sinh" => Ok(a.sinh()),
+                    "cosh" => Ok(a.cosh()),
+                    "tanh" => Ok(a.tanh()),
+                    _ => Err(AlgebraError::EvaluationError(format!(
+                        "Unsupported interval function '{}'",
+                        fn_name
+                    ))),
+                }
+            } else {
+                Err(AlgebraError::EvaluationError(format!(
+                    "Unsupported interval function '{}'",
+                    fn_name
+                )))
+            }
+        }
+        ExprKind::Relational { rhs, .. } => eval_interval(graph, *rhs, env),
+        _ => Err(AlgebraError::EvaluationError(
+            "Unsupported node in interval evaluation".into(),
+        )),
+    }
+}
+
+/// Returns `true` if the expression DAG contains any `uncertain`, `measurement`, or `interval` nodes.
+pub fn expr_has_uncertainty_nodes(graph: &ExprGraph, id: ExprId) -> bool {
+    match &graph.get(id).kind {
+        ExprKind::Function { name, args } => {
+            let n = graph.symbols.resolve(*name).unwrap_or_default();
+            if matches!(n.as_str(), "uncertain" | "measurement" | "interval") {
+                return true;
+            }
+            args.iter().any(|&a| expr_has_uncertainty_nodes(graph, a))
+        }
+        ExprKind::Add(xs) | ExprKind::Mul(xs) => {
+            xs.iter().any(|&x| expr_has_uncertainty_nodes(graph, x))
+        }
+        ExprKind::Sub(a, b)
+        | ExprKind::Div(a, b)
+        | ExprKind::Pow(a, b)
+        | ExprKind::Relational { lhs: a, rhs: b, .. } => {
+            expr_has_uncertainty_nodes(graph, *a) || expr_has_uncertainty_nodes(graph, *b)
+        }
+        ExprKind::Neg(a) => expr_has_uncertainty_nodes(graph, *a),
+        _ => false,
+    }
+}
+
+/// Evaluate a real expression DAG with 1st-order correlated Gaussian uncertainty propagation (GUM)
+/// paired with rigorous interval enclosure bounds.
+///
+/// Named parameter uncertainties track correlation automatically (`a - a` gives `0 ± 0`), while each
+/// inline `uncertain(v, u)` or `interval(lo, hi)` literal is treated as an independent source.
+pub fn eval_uncertain(
+    graph: &ExprGraph,
+    id: ExprId,
+    ctx: &EvalContext,
+) -> AlgebraResult<UncertainValue> {
+    use crate::calculus::SymbolicCalculus;
+
+    let mut base_bindings = ctx.bindings.clone();
+    let mut base_uncertainties = ctx.uncertainties.clone();
+    let mut interval_env: HashMap<String, RealInterval> = ctx
+        .bindings
+        .iter()
+        .map(|(k, &v)| {
+            let iv = ctx.intervals.get(k).copied().unwrap_or_else(|| {
+                let s = ctx.uncertainties.get(k).copied().unwrap_or(0.0);
+                RealInterval::from_center_uncertainty(v, s)
+            });
+            (k.clone(), iv)
+        })
+        .collect();
+    for (k, &iv) in &ctx.intervals {
+        base_bindings.entry(k.clone()).or_insert_with(|| iv.mid());
+        base_uncertainties
+            .entry(k.clone())
+            .or_insert_with(|| iv.rad());
+        interval_env.entry(k.clone()).or_insert(iv);
+    }
+
+    // Desugar inline `uncertain(v, e)` / `measurement(v, e)` / `interval(lo, hi)` into fresh
+    // independent parameter symbols `__u_0`, `__u_1`, ... so symbolic derivatives handle everything uniformly.
+    fn desugar(
+        graph: &ExprGraph,
+        e: ExprId,
+        base_ctx: &EvalContext,
+        bindings: &mut HashMap<String, f64>,
+        uncertainties: &mut HashMap<String, f64>,
+        counter: &mut usize,
+    ) -> AlgebraResult<ExprId> {
+        let node = graph.get(e);
+        match &node.kind {
+            ExprKind::Function { name, args } => {
+                let fn_name = graph.symbols.resolve(*name).unwrap_or_default();
+                if args.len() == 2 && (fn_name == "uncertain" || fn_name == "measurement") {
+                    let v = graph.evalf(args[0], base_ctx)?.to_f64();
+                    let u = graph.evalf(args[1], base_ctx)?.to_f64().abs();
+                    let sym_name = format!("__u_{}", *counter);
+                    *counter += 1;
+                    bindings.insert(sym_name.clone(), v);
+                    uncertainties.insert(sym_name.clone(), u);
+                    return Ok(graph.symbol(&sym_name));
+                }
+                if args.len() == 2 && fn_name == "interval" {
+                    let lo = graph.evalf(args[0], base_ctx)?.to_f64();
+                    let hi = graph.evalf(args[1], base_ctx)?.to_f64();
+                    let iv = RealInterval::new(lo, hi);
+                    let sym_name = format!("__u_{}", *counter);
+                    *counter += 1;
+                    bindings.insert(sym_name.clone(), iv.mid());
+                    uncertainties.insert(sym_name.clone(), iv.rad());
+                    return Ok(graph.symbol(&sym_name));
+                }
+                let mut new_args = Vec::with_capacity(args.len());
+                for &a in args {
+                    new_args.push(desugar(
+                        graph,
+                        a,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
+                }
+                Ok(graph.function(&fn_name, new_args))
+            }
+            ExprKind::Add(terms) => {
+                let mut new_terms = Vec::with_capacity(terms.len());
+                for &t in terms {
+                    new_terms.push(desugar(
+                        graph,
+                        t,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
+                }
+                Ok(graph.add(new_terms))
+            }
+            ExprKind::Mul(factors) => {
+                let mut new_factors = Vec::with_capacity(factors.len());
+                for &f in factors {
+                    new_factors.push(desugar(
+                        graph,
+                        f,
+                        base_ctx,
+                        bindings,
+                        uncertainties,
+                        counter,
+                    )?);
+                }
+                Ok(graph.mul(new_factors))
+            }
+            ExprKind::Sub(a, b) => {
+                let na = desugar(graph, *a, base_ctx, bindings, uncertainties, counter)?;
+                let nb = desugar(graph, *b, base_ctx, bindings, uncertainties, counter)?;
+                Ok(graph.sub(na, nb))
+            }
+            ExprKind::Div(a, b) => {
+                let na = desugar(graph, *a, base_ctx, bindings, uncertainties, counter)?;
+                let nb = desugar(graph, *b, base_ctx, bindings, uncertainties, counter)?;
+                Ok(graph.div(na, nb))
+            }
+            ExprKind::Neg(a) => {
+                let na = desugar(graph, *a, base_ctx, bindings, uncertainties, counter)?;
+                Ok(graph.neg(na))
+            }
+            ExprKind::Pow(a, b) => {
+                let na = desugar(graph, *a, base_ctx, bindings, uncertainties, counter)?;
+                let nb = desugar(graph, *b, base_ctx, bindings, uncertainties, counter)?;
+                Ok(graph.pow(na, nb))
+            }
+            ExprKind::Relational { rhs, .. } => {
+                desugar(graph, *rhs, base_ctx, bindings, uncertainties, counter)
+            }
+            _ => Ok(e),
+        }
+    }
+
+    let seed_ctx = EvalContext::with_bindings(ctx.precision_digits, base_bindings.clone())
+        .with_branch_sheet(ctx.branch_sheet);
+    let mut counter = 0usize;
+    let desugared = desugar(
+        graph,
+        id,
+        &seed_ctx,
+        &mut base_bindings,
+        &mut base_uncertainties,
+        &mut counter,
+    )?;
+
+    let eval_ctx = EvalContext::with_bindings(ctx.precision_digits, base_bindings.clone())
+        .with_branch_sheet(ctx.branch_sheet);
+    let nominal = match graph.evalf(desugared, &eval_ctx)? {
+        BigValue::Real(r) => r,
+        BigValue::Complex(_, _) => {
+            return Err(AlgebraError::EvaluationError(
+                "Uncertainty propagation expects real-valued expression at nominal point".into(),
+            ));
+        }
+    };
+
+    let mut variance_sum = 0.0f64;
+    for (sym_name, &sigma_i) in &base_uncertainties {
+        if sigma_i <= 0.0 {
+            continue;
+        }
+        if let Some(sym_id) = graph.symbols.get(sym_name)
+            && graph.has_symbol(desugared, sym_id)
+        {
+            let deriv_expr = graph.diff(desugared, sym_id);
+            let deriv = match graph.evalf(deriv_expr, &eval_ctx) {
+                Ok(BigValue::Real(d)) if d.is_finite() => d,
+                _ => {
+                    // Central finite-difference fallback for special functions without closed deriv rule
+                    let x0 = base_bindings.get(sym_name).copied().unwrap_or(0.0);
+                    let h = (1e-6 * x0.abs().max(1.0)).min(sigma_i * 0.1).max(1e-8);
+                    let mut up_b = base_bindings.clone();
+                    up_b.insert(sym_name.clone(), x0 + h);
+                    let mut dn_b = base_bindings.clone();
+                    dn_b.insert(sym_name.clone(), x0 - h);
+                    let f_up = graph
+                        .evalf(
+                            desugared,
+                            &EvalContext::with_bindings(ctx.precision_digits, up_b),
+                        )
+                        .map(|v| v.to_f64())
+                        .unwrap_or(nominal);
+                    let f_dn = graph
+                        .evalf(
+                            desugared,
+                            &EvalContext::with_bindings(ctx.precision_digits, dn_b),
+                        )
+                        .map(|v| v.to_f64())
+                        .unwrap_or(nominal);
+                    (f_up - f_dn) / (2.0 * h)
+                }
+            };
+            let contrib = deriv * sigma_i;
+            variance_sum += contrib * contrib;
+        }
+    }
+
+    let combined_sigma = variance_sum.sqrt();
+    let interval = eval_interval(graph, id, &interval_env)
+        .unwrap_or_else(|_| RealInterval::from_center_uncertainty(nominal, combined_sigma));
+
+    Ok(UncertainValue {
+        mean: nominal,
+        std_dev: combined_sigma,
+        interval,
+    })
 }

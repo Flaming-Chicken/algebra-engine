@@ -1,7 +1,7 @@
 //! # JSON Request & Response Engine for URAE
 //!
 //! Provides structured JSON/TOML request and response payloads supporting nested LaTeX,
-//! SymPy, raw mathematical formulas, CLI commands, parameter bindings, code generation,
+//! Python `**` exponent notation, raw mathematical formulas, CLI commands, parameter bindings, code generation,
 //! formal proof trace exports, and AI copilot co-reasoning explanations.
 
 use algebra_advanced::agent::{AiConfig, AlgebraAgentInterface};
@@ -9,7 +9,7 @@ use algebra_advanced::codegen::{CodeGenerator, TargetLanguage};
 use algebra_advanced::proof::{ProofTrace, UnificationEngine};
 use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
 use algebra_core::parser::ExprParser;
-use algebra_core::{ExprGraph, ExprKind};
+use algebra_core::{ExprGraph, ExprId, ExprKind};
 use algebra_engine::calculus::SymbolicCalculus;
 use algebra_engine::numeric::{EvalContext, NumericalEval};
 use algebra_engine::simplify::Simplifier;
@@ -26,6 +26,12 @@ pub struct UraeJsonRequest {
     /// Optional parameter variable bindings e.g. {"a": 2.5, "c": -3.0}
     #[serde(default)]
     pub bindings: HashMap<String, f64>,
+    #[serde(default)]
+    pub uncertainties: HashMap<String, f64>,
+    #[serde(default)]
+    pub intervals: HashMap<String, (f64, f64)>,
+    #[serde(default)]
+    pub branch_sheet: Option<i64>,
 
     /// Target variable for differentiation or solving (defaults to "x")
     #[serde(default)]
@@ -79,99 +85,193 @@ pub struct UraeJsonResponse {
     pub ast_search_depth: Option<usize>,
     #[serde(default)]
     pub neural_embedding: Option<Vec<f32>>,
+    /// Propagated 1-sigma uncertainty when `eval_numerical` is requested with uncertain inputs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eval_uncertainty: Option<f64>,
+    /// Propagated certified interval `[lo, hi]` when `eval_numerical` is requested with uncertain inputs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eval_interval: Option<(f64, f64)>,
+    /// Enumerated Riemann sheet / multivalued branch values (for `branches` / `branch_cut` queries).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_values: Option<Vec<String>>,
     pub error_msg: Option<String>,
+}
+
+/// Return the first free `SymbolId` encountered in pre-order traversal of `root`.
+fn first_free_symbol(graph: &ExprGraph, root: ExprId) -> Option<algebra_core::SymbolId> {
+    let mut stack = vec![root];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Symbol(sym) => return Some(*sym),
+            _ => {
+                let children = node.children();
+                for &child in children.iter().rev() {
+                    stack.push(child);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Process a single `UraeJsonRequest` struct against `ExprGraph`.
 pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResponse {
     let raw_input = req.input.trim();
-    let target_var_name = req.target_variable.as_deref().unwrap_or("x");
-    let target_sym = graph.symbols.get_or_intern(target_var_name);
 
     // Extract physical unit if bracketed e.g. "g = 9.81 [m/s^2]" or "\frac{x}{2} [m]"
+    // Do NOT misinterpret matrix brackets like `[[1,2],[3,4]]` or `det [[1,2],[3,4]]`.
     let mut unit_opt = None;
     let mut text_clean = raw_input;
-    if let Some(start_b) = raw_input.find('[') {
-        if let Some(end_b) = raw_input.find(']') {
-            if end_b > start_b {
-                unit_opt = Some(raw_input[start_b + 1..end_b].to_string());
-                text_clean = raw_input[..start_b].trim();
-            }
+    if raw_input.ends_with(']')
+        && !raw_input.starts_with('[')
+        && let Some(start_b) = raw_input.rfind('[')
+    {
+        let inner = &raw_input[start_b + 1..raw_input.len() - 1];
+        let before = &raw_input[..start_b];
+        if !before.contains('[')
+            && !inner.contains(',')
+            && !inner.contains(';')
+            && !inner.contains('[')
+            && inner.chars().any(|c| c.is_ascii_alphabetic())
+        {
+            unit_opt = Some(inner.to_string());
+            text_clean = before.trim();
         }
     }
 
-    // Check CLI command prefixes e.g. "diff ", "integrate ", "solve ", "simplify ", "eval "
-    if text_clean.starts_with("diff ")
-        || text_clean.starts_with("integrate ")
-        || text_clean.starts_with("solve ")
-        || text_clean.starts_with("solveset ")
-        || text_clean.starts_with("simplify ")
-        || text_clean.starts_with("eval ")
-        || text_clean.starts_with("agent ")
+    // Route CAS / CLI commands through process_input_with_full_context
+    const CLI_ONLY_PREFIXES: &[&str] = &[
+        "agent ",
+        "ask ",
+        "embed ",
+        "similarity ",
+        "embed_sim ",
+        "proof_search ",
+        "proof-depth ",
+        "proof_depth ",
+    ];
+    let parsed_op = algebra_core::parse_operation(text_clean);
+    let is_cli_op = !matches!(
+        parsed_op,
+        algebra_core::MathOperation::Expression { .. }
+            | algebra_core::MathOperation::Declaration { .. }
+            | algebra_core::MathOperation::UncertainDeclaration { .. }
+    );
+    if is_cli_op
+        || CLI_ONLY_PREFIXES.iter().any(|p| text_clean.starts_with(p))
         || text_clean == "help"
         || text_clean == "vars"
+        || text_clean == "params"
     {
         let mut ai_cfg = req.ai_config.clone().unwrap_or_default();
-        let summary_vec: Vec<_> = req
-            .bindings
+        let mut summary_vec: Vec<(String, String, f64, String)> = Vec::new();
+        for (k, &v) in &req.bindings {
+            let extra = if let Some(&u) = req.uncertainties.get(k) {
+                format!("± {:.6}", u)
+            } else {
+                String::new()
+            };
+            summary_vec.push((k.clone(), "Parameter".to_string(), v, extra));
+        }
+
+        let interval_map: HashMap<String, algebra_core::RealInterval> = req
+            .intervals
             .iter()
-            .map(|(k, &v)| (k.clone(), "Parameter".to_string(), v, String::new()))
+            .map(|(k, &(lo, hi))| (k.clone(), algebra_core::RealInterval::new(lo, hi)))
             .collect();
 
-        match crate::process_input_with_context(
+        let exec_res = crate::execute_input_with_full_context(
             graph,
             &LatexFormatter,
             text_clean,
             &mut ai_cfg,
             Some(&req.bindings),
+            Some(&req.uncertainties),
+            Some(&interval_map),
+            req.branch_sheet,
             Some(&summary_vec),
-        ) {
-            Ok(cli_out) => {
-                return UraeJsonResponse {
-                    success: true,
-                    input_raw: raw_input.to_string(),
-                    output_latex: cli_out.clone(),
-                    output_unicode: cli_out,
-                    substituted_latex: None,
-                    derivative_latex: None,
-                    integral_latex: None,
-                    solutions: None,
-                    eval_result: None,
-                    domain_info: Some("CLI Command Processed".to_string()),
-                    physical_unit: unit_opt,
-                    rust_code: None,
-                    python_code: None,
-                    lean4_proof: None,
-                    coq_proof: None,
-                    ai_explanation: None,
-                    ast_search_depth: None,
-                    neural_embedding: None,
-                    error_msg: None,
-                };
-            }
-            Err(err) => {
-                return UraeJsonResponse {
-                    success: false,
-                    input_raw: raw_input.to_string(),
-                    output_latex: String::new(),
-                    output_unicode: String::new(),
-                    substituted_latex: None,
-                    derivative_latex: None,
-                    integral_latex: None,
-                    solutions: None,
-                    eval_result: None,
-                    domain_info: None,
-                    physical_unit: unit_opt,
-                    rust_code: None,
-                    python_code: None,
-                    lean4_proof: None,
-                    coq_proof: None,
-                    ai_explanation: None,
-                    ast_search_depth: None,
-                    neural_embedding: None,
-                    error_msg: Some(err),
-                };
-            }
+        );
+        if !exec_res.is_error {
+            let cli_out = exec_res.output_text.clone();
+            let branch_values = if text_clean.starts_with("branches") {
+                let body = cli_out
+                    .strip_prefix("Branches:")
+                    .unwrap_or(&cli_out)
+                    .trim()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']');
+                let vals: Vec<String> = body
+                    .split(", k=")
+                    .enumerate()
+                    .map(|(idx, part)| {
+                        if idx == 0 {
+                            part.trim().to_string()
+                        } else {
+                            format!("k={}", part.trim())
+                        }
+                    })
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                if vals.is_empty() { None } else { Some(vals) }
+            } else {
+                None
+            };
+            return UraeJsonResponse {
+                success: true,
+                input_raw: raw_input.to_string(),
+                output_latex: exec_res.output_latex,
+                output_unicode: exec_res.output_text,
+                substituted_latex: None,
+                derivative_latex: None,
+                integral_latex: None,
+                solutions: None,
+                eval_result: None,
+                domain_info: exec_res
+                    .domain_info
+                    .or_else(|| Some("CLI Command Processed".to_string())),
+                physical_unit: unit_opt,
+                rust_code: None,
+                python_code: None,
+                lean4_proof: None,
+                coq_proof: None,
+                ai_explanation: None,
+                ast_search_depth: None,
+                neural_embedding: None,
+                eval_uncertainty: None,
+                eval_interval: None,
+                branch_values,
+                error_msg: None,
+            };
+        } else {
+            return UraeJsonResponse {
+                success: false,
+                input_raw: raw_input.to_string(),
+                output_latex: String::new(),
+                output_unicode: String::new(),
+                substituted_latex: None,
+                derivative_latex: None,
+                integral_latex: None,
+                solutions: None,
+                eval_result: None,
+                domain_info: None,
+                physical_unit: unit_opt,
+                rust_code: None,
+                python_code: None,
+                lean4_proof: None,
+                coq_proof: None,
+                ai_explanation: None,
+                ast_search_depth: None,
+                neural_embedding: None,
+                eval_uncertainty: None,
+                eval_interval: None,
+                branch_values: None,
+                error_msg: Some(exec_res.error_msg.unwrap_or(exec_res.output_text)),
+            };
         }
     }
 
@@ -199,6 +299,9 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
                 ai_explanation: None,
                 ast_search_depth: None,
                 neural_embedding: None,
+                eval_uncertainty: None,
+                eval_interval: None,
+                branch_values: None,
                 error_msg: Some(err.to_string()),
             };
         }
@@ -210,6 +313,12 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
     let target_expr = match &graph.get(expr_id).kind {
         ExprKind::Relational { rhs, .. } => *rhs,
         _ => expr_id,
+    };
+
+    let target_sym = match req.target_variable.as_deref() {
+        Some(v) => graph.symbols.get_or_intern(v),
+        None => first_free_symbol(graph, target_expr)
+            .unwrap_or_else(|| graph.symbols.get_or_intern("x")),
     };
 
     let domain_info = Some(format!("{}", graph.get(target_expr).domain));
@@ -229,20 +338,58 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         }
     }
 
-    // Derivative
-    let diff_id = graph.diff(target_expr, target_sym);
-    let derivative_latex = LatexFormatter.format(graph, diff_id).ok();
+    // Derivative (only compute when explicitly requested)
+    let derivative_latex = if req.compute_derivative {
+        let diff_id = graph.diff(target_expr, target_sym);
+        let simp_diff = Simplifier::simplify(graph, diff_id).unwrap_or(diff_id);
+        LatexFormatter.format(graph, simp_diff).ok()
+    } else {
+        None
+    };
 
     // Integral
+    let mut integral_error = None;
     let integral_latex = if req.compute_integral {
-        if let Ok(int_id) = graph.integrate(target_expr, target_sym) {
-            LatexFormatter.format(graph, int_id).ok()
-        } else {
-            None
+        match graph.integrate(target_expr, target_sym) {
+            Ok(int_id) => {
+                let simp_int = Simplifier::simplify(graph, int_id).unwrap_or(int_id);
+                LatexFormatter.format(graph, simp_int).ok()
+            }
+            Err(e) => {
+                integral_error = Some(e.to_string());
+                None
+            }
         }
     } else {
         None
     };
+
+    if let Some(err) = integral_error {
+        return UraeJsonResponse {
+            success: false,
+            input_raw: raw_input.to_string(),
+            output_latex: latex_out,
+            output_unicode: unicode_out,
+            substituted_latex,
+            derivative_latex,
+            integral_latex: None,
+            solutions: None,
+            eval_result: None,
+            domain_info,
+            physical_unit: unit_opt,
+            rust_code: None,
+            python_code: None,
+            lean4_proof: None,
+            coq_proof: None,
+            ai_explanation: None,
+            ast_search_depth: None,
+            neural_embedding: None,
+            eval_uncertainty: None,
+            eval_interval: None,
+            branch_values: None,
+            error_msg: Some(err),
+        };
+    }
 
     // Solutions for equations or if solve_equation is true
     let solutions =
@@ -260,13 +407,44 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
             None
         };
 
-    // Numerical evaluation
-    let eval_result = if req.eval_numerical || !req.bindings.is_empty() {
-        let eval_ctx = EvalContext::with_bindings(53, req.bindings.clone());
-        graph.evalf(expr_id, &eval_ctx).ok().map(|v| v.to_f64())
-    } else {
-        None
-    };
+    // Numerical evaluation (with GUM + interval propagation when uncertainties or intervals exist)
+    let has_uncert = !req.uncertainties.is_empty()
+        || !req.intervals.is_empty()
+        || algebra_engine::numeric::expr_has_uncertainty_nodes(graph, expr_id);
+    let (eval_result, eval_uncertainty, eval_interval) =
+        if req.eval_numerical || !req.bindings.is_empty() || has_uncert {
+            let eval_ctx = EvalContext::with_bindings(53, req.bindings.clone())
+                .with_uncertainties(req.uncertainties.clone())
+                .with_intervals(
+                    req.intervals
+                        .iter()
+                        .map(|(k, &(lo, hi))| (k.clone(), algebra_core::RealInterval::new(lo, hi)))
+                        .collect(),
+                )
+                .with_branch_sheet(req.branch_sheet);
+            if has_uncert {
+                match algebra_engine::numeric::eval_uncertain(graph, expr_id, &eval_ctx) {
+                    Ok(uv) => (
+                        Some(uv.mean),
+                        Some(uv.std_dev),
+                        Some((uv.interval.inf, uv.interval.sup)),
+                    ),
+                    Err(_) => (
+                        graph.evalf(expr_id, &eval_ctx).ok().map(|v| v.to_f64()),
+                        None,
+                        None,
+                    ),
+                }
+            } else {
+                (
+                    graph.evalf(expr_id, &eval_ctx).ok().map(|v| v.to_f64()),
+                    None,
+                    None,
+                )
+            }
+        } else {
+            (None, None, None)
+        };
 
     // Code generation
     let (rust_code, python_code) = if req.generate_code {
@@ -340,6 +518,9 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         ai_explanation,
         ast_search_depth,
         neural_embedding,
+        eval_uncertainty,
+        eval_interval,
+        branch_values: None,
         error_msg: None,
     }
 }
@@ -362,6 +543,9 @@ pub fn process_json_request(graph: &ExprGraph, json_req_str: &str) -> String {
             let req = UraeJsonRequest {
                 input: json_req_str.to_string(),
                 bindings: HashMap::new(),
+                uncertainties: HashMap::new(),
+                intervals: HashMap::new(),
+                branch_sheet: None,
                 target_variable: None,
                 compute_derivative: false,
                 compute_integral: false,

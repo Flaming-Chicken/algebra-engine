@@ -377,3 +377,209 @@ impl ProofCertificate {
         )
     }
 }
+
+/// Internal SMT/interval satisfiability check result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmtCheckStatus {
+    Sat,
+    Unsat,
+    Unknown,
+}
+
+impl SmtExpr {
+    fn eval_interval(
+        &self,
+        env: &std::collections::HashMap<String, (f64, f64)>,
+    ) -> Option<(f64, f64)> {
+        match self {
+            SmtExpr::Int(i) => Some((*i as f64, *i as f64)),
+            SmtExpr::Real(r) => Some((*r, *r)),
+            SmtExpr::Var(name) => env.get(name).copied(),
+            SmtExpr::Add(args) => {
+                let mut acc = (0.0, 0.0);
+                for a in args {
+                    let iv = a.eval_interval(env)?;
+                    acc = (acc.0 + iv.0, acc.1 + iv.1);
+                }
+                Some(acc)
+            }
+            SmtExpr::Sub(a, b) => {
+                let ia = a.eval_interval(env)?;
+                let ib = b.eval_interval(env)?;
+                Some((ia.0 - ib.1, ia.1 - ib.0))
+            }
+            SmtExpr::Neg(a) => {
+                let ia = a.eval_interval(env)?;
+                Some((-ia.1, -ia.0))
+            }
+            SmtExpr::Mul(args) => {
+                if args.len() == 2 && args[0].to_smtlib2() == args[1].to_smtlib2() {
+                    let iv = args[0].eval_interval(env)?;
+                    let sq = Self::interval_even_pow(iv, 2);
+                    return Some(sq);
+                }
+                let mut acc = (1.0, 1.0);
+                for a in args {
+                    let iv = a.eval_interval(env)?;
+                    let p = [acc.0 * iv.0, acc.0 * iv.1, acc.1 * iv.0, acc.1 * iv.1];
+                    acc = (
+                        p.iter().copied().fold(f64::INFINITY, f64::min),
+                        p.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                    );
+                }
+                Some(acc)
+            }
+            SmtExpr::Pow(base, exp) => {
+                let ib = base.eval_interval(env)?;
+                if let SmtExpr::Int(k) = exp.as_ref() {
+                    if *k >= 0 && *k <= 16 {
+                        if *k % 2 == 0 {
+                            return Some(Self::interval_even_pow(ib, *k as i32));
+                        } else {
+                            return Some((ib.0.powi(*k as i32), ib.1.powi(*k as i32)));
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn interval_even_pow(iv: (f64, f64), k: i32) -> (f64, f64) {
+        if k == 0 {
+            return (1.0, 1.0);
+        }
+        let a = iv.0.powi(k);
+        let b = iv.1.powi(k);
+        if iv.0 <= 0.0 && iv.1 >= 0.0 {
+            (0.0, a.max(b))
+        } else {
+            (a.min(b), a.max(b))
+        }
+    }
+
+    fn check_assertion_interval(
+        &self,
+        env: &std::collections::HashMap<String, (f64, f64)>,
+    ) -> SmtCheckStatus {
+        match self {
+            SmtExpr::Bool(true) => SmtCheckStatus::Sat,
+            SmtExpr::Bool(false) => SmtCheckStatus::Unsat,
+            SmtExpr::And(parts) => {
+                let mut all_sat = true;
+                for p in parts {
+                    match p.check_assertion_interval(env) {
+                        SmtCheckStatus::Unsat => return SmtCheckStatus::Unsat,
+                        SmtCheckStatus::Unknown => all_sat = false,
+                        SmtCheckStatus::Sat => {}
+                    }
+                }
+                if all_sat {
+                    SmtCheckStatus::Sat
+                } else {
+                    SmtCheckStatus::Unknown
+                }
+            }
+            SmtExpr::Or(parts) => {
+                let mut any_unknown = false;
+                for p in parts {
+                    match p.check_assertion_interval(env) {
+                        SmtCheckStatus::Sat => return SmtCheckStatus::Sat,
+                        SmtCheckStatus::Unknown => any_unknown = true,
+                        SmtCheckStatus::Unsat => {}
+                    }
+                }
+                if any_unknown {
+                    SmtCheckStatus::Unknown
+                } else {
+                    SmtCheckStatus::Unsat
+                }
+            }
+            SmtExpr::Lt(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
+                (Some(ia), Some(ib)) => {
+                    if ia.1 < ib.0 {
+                        SmtCheckStatus::Sat
+                    } else if ia.0 >= ib.1 {
+                        SmtCheckStatus::Unsat
+                    } else {
+                        SmtCheckStatus::Unknown
+                    }
+                }
+                _ => SmtCheckStatus::Unknown,
+            },
+            SmtExpr::Le(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
+                (Some(ia), Some(ib)) => {
+                    if ia.1 <= ib.0 {
+                        SmtCheckStatus::Sat
+                    } else if ia.0 > ib.1 {
+                        SmtCheckStatus::Unsat
+                    } else {
+                        SmtCheckStatus::Unknown
+                    }
+                }
+                _ => SmtCheckStatus::Unknown,
+            },
+            SmtExpr::Gt(a, b) => SmtExpr::Lt(b.clone(), a.clone()).check_assertion_interval(env),
+            SmtExpr::Ge(a, b) => SmtExpr::Le(b.clone(), a.clone()).check_assertion_interval(env),
+            SmtExpr::Eq(a, b) => match (a.eval_interval(env), b.eval_interval(env)) {
+                (Some(ia), Some(ib)) => {
+                    if ia.1 < ib.0 || ib.1 < ia.0 {
+                        SmtCheckStatus::Unsat
+                    } else if ia.0 == ia.1 && ib.0 == ib.1 && (ia.0 - ib.0).abs() < 1e-12 {
+                        SmtCheckStatus::Sat
+                    } else {
+                        SmtCheckStatus::Unknown
+                    }
+                }
+                _ => SmtCheckStatus::Unknown,
+            },
+            _ => SmtCheckStatus::Unknown,
+        }
+    }
+}
+
+impl SmtProblem {
+    /// Run internal interval-arithmetic satisfiability & contradiction guard
+    /// over bounded variable intervals `(name, min, max)` without external solvers.
+    pub fn check_interval_satisfiability(&self, bounds: &[(&str, f64, f64)]) -> SmtCheckStatus {
+        let mut env = std::collections::HashMap::new();
+        for &(name, lo, hi) in bounds {
+            env.insert(name.to_string(), (lo, hi));
+        }
+        let mut all_sat = true;
+        for assertion in &self.assertions {
+            match assertion.check_assertion_interval(&env) {
+                SmtCheckStatus::Unsat => return SmtCheckStatus::Unsat,
+                SmtCheckStatus::Unknown => all_sat = false,
+                SmtCheckStatus::Sat => {}
+            }
+        }
+        if all_sat {
+            SmtCheckStatus::Sat
+        } else {
+            SmtCheckStatus::Unknown
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smt_internal_interval_guard() {
+        let mut prob = SmtProblem::with_logic(SmtLogic::QfNra);
+        prob.add_var("x", SmtSort::Real);
+        // Assert x^2 + 1 < 0, which is impossible for x in [-10, 10]
+        let x = SmtExpr::Var("x".to_string());
+        let x_sq = SmtExpr::Mul(vec![x.clone(), x]);
+        let lhs = SmtExpr::Add(vec![x_sq, SmtExpr::Int(1)]);
+        prob.assert(SmtExpr::Lt(Box::new(lhs), Box::new(SmtExpr::Int(0))));
+
+        assert_eq!(
+            prob.check_interval_satisfiability(&[("x", -10.0, 10.0)]),
+            SmtCheckStatus::Unsat
+        );
+    }
+}

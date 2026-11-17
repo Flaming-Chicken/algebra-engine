@@ -140,3 +140,23 @@ fn test_cocycle_wedge_and_associator() {
     let assoc_oct = CocycleEngine::associator(&oct1, &oct2, &oct4);
     assert!(!assoc_oct.is_zero(), "Octonion associator must be non-zero");
 }
+
+#[test]
+fn test_butler_portugal_rank_8_symmetric_and_antisymmetric() {
+    use cat_numbers::butler_portugal::TensorSymmetryN;
+
+    let sym8 = TensorSymmetryN::symmetric(8);
+    let res_sym = ButlerPortugal::canonicalize_n(&[7, 5, 3, 1, 6, 4, 2, 0], &sym8, &[]);
+    assert_eq!(res_sym.sign, 1);
+    assert_eq!(res_sym.indices, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+
+    let anti8 = TensorSymmetryN::antisymmetric(8);
+    // Repeated index -> immediate 0 short-circuit
+    let res_zero = ButlerPortugal::canonicalize_n(&[0, 1, 2, 3, 4, 5, 6, 6], &anti8, &[]);
+    assert_eq!(res_zero.sign, 0);
+
+    // Odd transposition on rank-8 antisymmetric tensor
+    let res_odd = ButlerPortugal::canonicalize_n(&[1, 0, 2, 3, 4, 5, 6, 7], &anti8, &[]);
+    assert_eq!(res_odd.sign, -1);
+    assert_eq!(res_odd.indices, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+}

@@ -38,6 +38,7 @@ pub use algebra_engine::{
         ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer,
         ZeroType,
     },
+    api::{ConstPoly, ConstRational, Expr, IntoExpr, NumMat, Sym, SymMat, parse_expr, sym},
     autodiff::{Dual, ForwardGradient, HyperDual, TapeFreeVjp},
     branch::{
         BranchCutFunctionKind, BranchCutGeometry, BranchCutManager, BranchSelection,
@@ -107,6 +108,7 @@ pub use algebra_engine::{
     },
     qft::{DiracGamma, PassarinoVeltman, SpinorHelicity, WeylSpinor, WickContraction},
     quantum_circuit::{Complex64, QuantumCircuit, QuantumGate},
+    query::{QueryEngine, QueryResponse, ResultPod},
     risch::{DifferentialFieldTower, ExtensionKind, HermiteReductionResult, RischIntegrator},
     series::SymbolicSeries,
     session::{SymbolSessionMeta, UraeSession},
@@ -119,6 +121,10 @@ pub use algebra_engine::{
     solver::{SolveOutcome, SymbolicSolver},
     sparse::CsrMatrix,
     special::SpecialFunctions,
+    stream::{
+        BatchSummary, ComputeFuture, StreamMode, StreamProcessor, StreamRequest, StreamResponse,
+        execute_async, execute_batch_async, query_async,
+    },
     symplectic::{
         HamiltonianSystemND, HarmonicOscillator, KeplerOrbit2D, PhaseState, SymplecticIntegrator,
         SymplecticOrder, SymplecticTrajectory,
@@ -139,6 +145,10 @@ pub use algebra_engine::{
     weyl_dmodules::{
         AlmkvistZeilberger, WeylDOperator, WeylGrobnerBasis, WeylMonomial, WeylTerm,
         ZeilbergerAlgorithm, ZeilbergerResult,
+    },
+    workbench::{
+        ContourSegment, DifferentialSystemAnalysis, DifferentialSystemSpec, EquationSystemAnalysis,
+        EquationSystemSpec, QuiverArrow, WorkbenchEngine, WorkbenchPresets,
     },
 };
 

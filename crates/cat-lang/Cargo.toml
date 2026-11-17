@@ -13,6 +13,8 @@ workspace = true
 
 [dependencies]
 cat-core = { workspace = true }
+cat-bridge = { workspace = true }
+algebra-core = { workspace = true }
 smallvec = { workspace = true }
 ahash = { workspace = true }
 serde = { workspace = true }

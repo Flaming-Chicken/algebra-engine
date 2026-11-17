@@ -6,6 +6,13 @@
 //! - Greatest Common Divisor (Extended Euclidean Algorithm)
 //! - Legendre and Jacobi Symbols $(a/p)$
 //! - Modular Exponentiation & Inverses
+//! - Elliptic Curve Method (Lenstra), Pollard Rho, & Tonelli-Shanks Quadratic Residues
+//!
+//! ## References
+//! - Rabin, M. O. (1980). Probabilistic algorithm for testing primality. *J. Number Theory*, 12(1), 128–138.
+//! - Pollard, J. M. (1975). A Monte Carlo method for factorization. *BIT Numer. Math.*, 15(3), 331–334.
+//! - Lenstra, H. W., Jr. (1987). Factoring integers with elliptic curves. *Annals of Mathematics*, 126(3), 649–673.
+//! - Cohen, H. (1993). *A Course in Computational Algebraic Number Theory*. Springer.
 
 use algebra_core::traits::ValuationProvider;
 use num_bigint::BigUint;
@@ -119,23 +126,74 @@ pub fn extended_gcd(a: i64, b: i64) -> (i64, i64, i64) {
     }
 }
 
-/// Deterministic primality check for $n < 2^{64}$.
+fn mul_mod_u64(a: u64, b: u64, m: u64) -> u64 {
+    ((a as u128 * b as u128) % m as u128) as u64
+}
+
+fn pow_mod_u64(mut base: u64, mut exp: u64, m: u64) -> u64 {
+    if m == 1 {
+        return 0;
+    }
+    let mut res = 1u64;
+    base %= m;
+    while exp > 0 {
+        if exp & 1 == 1 {
+            res = mul_mod_u64(res, base, m);
+        }
+        base = mul_mod_u64(base, base, m);
+        exp >>= 1;
+    }
+    res
+}
+
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+/// Deterministic primality check for all $n < 2^{64}$ via 7-base Miller-Rabin.
 pub fn is_prime(n: u64) -> bool {
     if n < 2 {
         return false;
     }
-    if n == 2 || n == 3 || n == 5 {
-        return true;
-    }
-    if n.is_multiple_of(2) || n.is_multiple_of(3) || n.is_multiple_of(5) {
-        return false;
-    }
-    let mut d = 7;
-    while d * d <= n {
-        if n.is_multiple_of(d) {
+    const SMALL_PRIMES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+    for &p in &SMALL_PRIMES {
+        if n == p {
+            return true;
+        }
+        if n.is_multiple_of(p) {
             return false;
         }
-        d += 2;
+    }
+    // For n < 37^2 = 1369, divisibility by SMALL_PRIMES already decides primality.
+    if n < 1369 {
+        return true;
+    }
+    let mut d = n - 1;
+    let s = d.trailing_zeros();
+    d >>= s;
+    // Deterministic witness set valid for all n < 2^64 (Sinclair 2011).
+    const BASES: [u64; 7] = [2, 325, 9375, 28178, 450775, 9780504, 1795265022];
+    'witness: for &a in &BASES {
+        let a = a % n;
+        if a == 0 {
+            continue;
+        }
+        let mut x = pow_mod_u64(a, d, n);
+        if x == 1 || x == n - 1 {
+            continue;
+        }
+        for _ in 1..s {
+            x = mul_mod_u64(x, x, n);
+            if x == n - 1 {
+                continue 'witness;
+            }
+        }
+        return false;
     }
     true
 }
@@ -293,37 +351,381 @@ pub struct PrimeDecompositionResult {
     pub classification_summary: Vec<String>,
 }
 
-/// Factor a non-negative integer into its prime components $(p_i, e_i)$.
-pub fn integer_prime_factors(mut n: u64) -> Vec<(u64, u32)> {
-    let mut factors = Vec::new();
-    if n < 2 {
-        return factors;
+fn pollard_rho_u64(n: u64) -> u64 {
+    if n.is_multiple_of(2) {
+        return 2;
     }
-    let mut count = 0;
-    while n.is_multiple_of(2) {
-        count += 1;
-        n /= 2;
-    }
-    if count > 0 {
-        factors.push((2, count));
-    }
-
-    let mut d = 3;
-    while d * d <= n {
-        let mut d_count = 0;
-        while n.is_multiple_of(d) {
-            d_count += 1;
-            n /= d;
+    for c_init in [1u64, 3, 5, 7, 11, 13, 17, 19, 23, 29] {
+        let mut x = 2u64 % n;
+        let mut y = x;
+        let mut d = 1u64;
+        let f = |v: u64| -> u64 {
+            let sq = mul_mod_u64(v, v, n);
+            let sum = sq
+                .checked_add(c_init % n)
+                .unwrap_or_else(|| ((sq as u128 + (c_init % n) as u128) % n as u128) as u64);
+            sum % n
+        };
+        // Brent-style cycle detection with batched gcd for speed
+        let mut q = 1u64;
+        let mut r = 1u64;
+        let mut ys = x;
+        while d == 1 {
+            x = y;
+            for _ in 0..r {
+                y = f(y);
+            }
+            let mut k = 0u64;
+            while k < r && d == 1 {
+                ys = y;
+                let lim = (r - k).min(128);
+                for _ in 0..lim {
+                    y = f(y);
+                    let diff = x.abs_diff(y);
+                    q = mul_mod_u64(q, diff, n);
+                }
+                d = gcd_u64(q, n);
+                k += lim;
+            }
+            r <<= 1;
         }
-        if d_count > 0 {
-            factors.push((d, d_count));
+        if d == n {
+            loop {
+                ys = f(ys);
+                d = gcd_u64(x.abs_diff(ys), n);
+                if d > 1 {
+                    break;
+                }
+            }
+        }
+        if d > 1 && d < n {
+            return d;
+        }
+    }
+    // Fallback small odd divisor
+    let mut d = 3u64;
+    while d <= n / d {
+        if n.is_multiple_of(d) {
+            return d;
         }
         d += 2;
     }
-    if n > 1 {
-        factors.push((n, 1));
+    n
+}
+
+fn factor_u64_recursive(n: u64, counts: &mut BTreeMap<u64, u32>) {
+    if n <= 1 {
+        return;
     }
-    factors
+    if is_prime(n) {
+        *counts.entry(n).or_insert(0) += 1;
+        return;
+    }
+    let d = pollard_rho_u64(n);
+    if d == n {
+        *counts.entry(n).or_insert(0) += 1;
+    } else {
+        factor_u64_recursive(d, counts);
+        factor_u64_recursive(n / d, counts);
+    }
+}
+
+/// Factor a non-negative integer into its prime components $(p_i, e_i)$
+/// using wheel/small-prime trial division + Miller-Rabin + Brent Pollard rho.
+pub fn integer_prime_factors(mut n: u64) -> Vec<(u64, u32)> {
+    let mut counts: BTreeMap<u64, u32> = BTreeMap::new();
+    if n < 2 {
+        return Vec::new();
+    }
+    for p in [2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47] {
+        let mut e = 0u32;
+        while n.is_multiple_of(p) {
+            e += 1;
+            n /= p;
+        }
+        if e > 0 {
+            counts.insert(p, e);
+        }
+    }
+    if n > 1 {
+        factor_u64_recursive(n, &mut counts);
+    }
+    counts.into_iter().collect()
+}
+
+/// Arbitrary-precision Extended Euclidean Algorithm $a \cdot x + b \cdot y = \gcd(a, b)$.
+pub fn extended_gcd_big(
+    a: &num_bigint::BigInt,
+    b: &num_bigint::BigInt,
+) -> (num_bigint::BigInt, num_bigint::BigInt, num_bigint::BigInt) {
+    use num_bigint::BigInt;
+    use num_traits::{Signed as _, Zero as _};
+    let mut old_r = a.clone();
+    let mut r = b.clone();
+    let mut old_s = BigInt::from(1u8);
+    let mut s = BigInt::zero();
+    let mut old_t = BigInt::zero();
+    let mut t = BigInt::from(1u8);
+    while !r.is_zero() {
+        let q = &old_r / &r;
+        let next_r = &old_r - &q * &r;
+        old_r = r;
+        r = next_r;
+        let next_s = &old_s - &q * &s;
+        old_s = s;
+        s = next_s;
+        let next_t = &old_t - &q * &t;
+        old_t = t;
+        t = next_t;
+    }
+    if old_r.is_negative() {
+        (-old_r, -old_s, -old_t)
+    } else {
+        (old_r, old_s, old_t)
+    }
+}
+
+/// Arbitrary-precision probable primality check via Miller-Rabin (exact for $n < 2^{64}$).
+pub fn is_prime_big(n: &BigUint) -> bool {
+    use num_traits::{ToPrimitive as _, Zero as _};
+    if let Some(u) = n.to_u64() {
+        return is_prime(u);
+    }
+    if n.is_zero() || n.is_one() {
+        return false;
+    }
+    for &p in &[2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47] {
+        let bp = BigUint::from(p);
+        if (n % &bp).is_zero() {
+            return n == &bp;
+        }
+    }
+    let one = BigUint::from(1u8);
+    let n_minus_1 = n - &one;
+    let s = n_minus_1.trailing_zeros().unwrap_or(0);
+    let d = &n_minus_1 >> s;
+    const BASES: [u64; 18] = [
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61,
+    ];
+    'witness: for &base in &BASES {
+        let a = BigUint::from(base) % n;
+        if a.is_zero() {
+            continue;
+        }
+        let mut x = a.modpow(&d, n);
+        if x == one || x == n_minus_1 {
+            continue;
+        }
+        for _ in 1..s {
+            x = (&x * &x) % n;
+            if x == n_minus_1 {
+                continue 'witness;
+            }
+        }
+        return false;
+    }
+    true
+}
+
+fn gcd_biguint(mut a: BigUint, mut b: BigUint) -> BigUint {
+    use num_traits::Zero as _;
+    while !b.is_zero() {
+        let t = &a % &b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+fn pollard_rho_big(n: &BigUint) -> BigUint {
+    use num_traits::{ToPrimitive as _, Zero as _};
+    if let Some(u) = n.to_u64() {
+        return BigUint::from(pollard_rho_u64(u));
+    }
+    let two = BigUint::from(2u8);
+    if (n % &two).is_zero() {
+        return two;
+    }
+    let one = BigUint::from(1u8);
+    for c_init in [1u64, 3, 5, 7, 11, 13, 17, 19, 23, 29] {
+        let c = BigUint::from(c_init) % n;
+        let mut x = two.clone() % n;
+        let mut y = x.clone();
+        let mut d = one.clone();
+        let mut q = one.clone();
+        let mut r = 1usize;
+        let mut ys = x.clone();
+        let step = |v: &BigUint| -> BigUint { ((v * v) + &c) % n };
+        while d == one {
+            x = y.clone();
+            for _ in 0..r {
+                y = step(&y);
+            }
+            let mut k = 0usize;
+            while k < r && d == one {
+                ys = y.clone();
+                let lim = (r - k).min(64);
+                for _ in 0..lim {
+                    y = step(&y);
+                    let diff = if x >= y { &x - &y } else { &y - &x };
+                    q = (&q * &diff) % n;
+                }
+                d = gcd_biguint(q.clone(), n.clone());
+                k += lim;
+            }
+            r <<= 1;
+            if r > (1 << 22) {
+                break;
+            }
+        }
+        if &d == n {
+            for _ in 0..10000 {
+                ys = step(&ys);
+                let diff = if x >= ys { &x - &ys } else { &ys - &x };
+                d = gcd_biguint(diff, n.clone());
+                if d > one {
+                    break;
+                }
+            }
+        }
+        if d > one && &d < n {
+            return d;
+        }
+    }
+    n.clone()
+}
+
+fn factor_big_recursive(n: BigUint, counts: &mut BTreeMap<BigUint, u32>) {
+    use num_traits::ToPrimitive as _;
+    let one = BigUint::from(1u8);
+    if n <= one {
+        return;
+    }
+    if let Some(u) = n.to_u64() {
+        for (p, e) in integer_prime_factors(u) {
+            *counts.entry(BigUint::from(p)).or_insert(0) += e;
+        }
+        return;
+    }
+    if is_prime_big(&n) {
+        *counts.entry(n).or_insert(0) += 1;
+        return;
+    }
+    let d = pollard_rho_big(&n);
+    if d == n {
+        *counts.entry(n).or_insert(0) += 1;
+    } else {
+        let q = &n / &d;
+        factor_big_recursive(d, counts);
+        factor_big_recursive(q, counts);
+    }
+}
+
+/// Factor an arbitrary-precision positive integer into sorted `(factor, exponent)` pairs.
+///
+/// Every factor is prime unless Pollard rho ran out of budget on it, in which
+/// case the unfactored composite is returned as-is; check with [`is_prime_big`].
+pub fn big_prime_factors(n: &BigUint) -> Vec<(BigUint, u32)> {
+    use num_traits::Zero as _;
+    let two = BigUint::from(2u8);
+    if n < &two {
+        return Vec::new();
+    }
+    let mut cur = n.clone();
+    let mut counts: BTreeMap<BigUint, u32> = BTreeMap::new();
+    for p in [
+        2u64, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
+        89, 97,
+    ] {
+        let bp = BigUint::from(p);
+        let mut e = 0u32;
+        while (&cur % &bp).is_zero() {
+            e += 1;
+            cur /= &bp;
+        }
+        if e > 0 {
+            counts.insert(bp, e);
+        }
+    }
+    if cur > BigUint::from(1u8) {
+        factor_big_recursive(cur, &mut counts);
+    }
+    counts.into_iter().collect()
+}
+
+/// Decompose an arbitrary-precision integer in $\mathbb{Z}$ into primes.
+pub fn decompose_bigint(n: &num_bigint::BigInt) -> PrimeDecompositionResult {
+    use num_traits::{Signed as _, ToPrimitive as _, Zero as _};
+    if let Some(small) = n.to_i64() {
+        return decompose_integer(small);
+    }
+    let unit = if n.is_negative() { "-1" } else { "1" };
+    if n.is_zero() {
+        return decompose_integer(0);
+    }
+    let abs_n = n.magnitude();
+    let raw_factors = big_prime_factors(abs_n);
+    let mut factors = Vec::new();
+    let mut summary = Vec::new();
+    let mut eq_parts = Vec::new();
+    let mut latex_parts = Vec::new();
+    if n.is_negative() {
+        eq_parts.push("-1".to_string());
+        latex_parts.push("-1".to_string());
+    }
+    for (p, exp) in raw_factors {
+        let classes = if let Some(u) = p.to_u64() {
+            classify_rational_prime(u)
+        } else {
+            Vec::new()
+        };
+        // Pollard rho can run out of budget on a number Miller-Rabin has
+        // already shown composite. Say so rather than list it as a prime.
+        let unfactored = p.to_u64().is_none() && !is_prime_big(&p);
+        let desc = if unfactored {
+            "Composite: no factor found within the Pollard rho budget".to_string()
+        } else if classes.is_empty() {
+            "Arbitrary-precision probable prime (Miller-Rabin)".to_string()
+        } else {
+            classes
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join("; ")
+        };
+        summary.push(format!("{}^{}: {}", p, exp, desc));
+        let (text_note, latex_note) = if unfactored {
+            (
+                " [composite, not factored]",
+                "\\,\\text{[composite, not factored]}",
+            )
+        } else {
+            ("", "")
+        };
+        if exp == 1 {
+            eq_parts.push(format!("{p}{text_note}"));
+            latex_parts.push(format!("{p}{latex_note}"));
+        } else {
+            eq_parts.push(format!("{p}^{exp}{text_note}"));
+            latex_parts.push(format!("{p}^{{{exp}}}{latex_note}"));
+        }
+        factors.push(PrimeFactor {
+            factor_repr: p.to_string(),
+            exponent: exp as i32,
+            norm_or_val: p.to_f64(),
+            classifications: classes,
+        });
+    }
+    let formatted_equation = format!("{} = {}", n, eq_parts.join(" * "));
+    let latex_equation = format!("{} = {}", n, latex_parts.join(" \\cdot "));
+    PrimeDecompositionResult {
+        number_system: "Integers (ℤ)".to_string(),
+        unit_part: unit.to_string(),
+        factors,
+        formatted_equation,
+        latex_equation,
+        classification_summary: summary,
+    }
 }
 
 /// Find sum of two squares $u^2 + v^2 = p$ for a prime $p \equiv 1 \pmod 4$.
@@ -396,8 +798,9 @@ pub fn classify_rational_prime(p: u64) -> Vec<PrimeClassification> {
     }
 
     // Mersenne prime: p = 2^k - 1
-    let p_plus_1 = p + 1;
-    if p_plus_1.is_power_of_two() {
+    if let Some(p_plus_1) = p.checked_add(1)
+        && p_plus_1.is_power_of_two()
+    {
         let k = p_plus_1.trailing_zeros();
         classes.push(PrimeClassification::Mersenne { k });
     }
@@ -412,7 +815,9 @@ pub fn classify_rational_prime(p: u64) -> Vec<PrimeClassification> {
     }
 
     // Sophie Germain prime: 2p + 1 is prime
-    if is_prime(2 * p + 1) {
+    if let Some(sg) = p.checked_mul(2).and_then(|v| v.checked_add(1))
+        && is_prime(sg)
+    {
         classes.push(PrimeClassification::SophieGermain);
     }
 
@@ -426,10 +831,11 @@ pub fn classify_rational_prime(p: u64) -> Vec<PrimeClassification> {
         classes.push(PrimeClassification::TwinPrime {
             paired: (p - 2) as i64,
         });
-    } else if is_prime(p + 2) {
-        classes.push(PrimeClassification::TwinPrime {
-            paired: (p + 2) as i64,
-        });
+    } else if let Some(tp) = p.checked_add(2)
+        && is_prime(tp)
+        && let Ok(paired) = i64::try_from(tp)
+    {
+        classes.push(PrimeClassification::TwinPrime { paired });
     }
 
     classes
@@ -1573,12 +1979,12 @@ pub fn decompose_universal(
         return Ok(decompose_rational(num, den));
     }
 
-    // 3. Default to integers
-    let n = clean_expr.parse::<i64>().map_err(|_| {
+    // 3. Default to integers (arbitrary-precision BigInt supported)
+    let n = clean_expr.parse::<num_bigint::BigInt>().map_err(|_| {
         format!(
             "Could not parse '{}' as an integer or algebraic number for prime decomposition",
             clean_expr
         )
     })?;
-    Ok(decompose_integer(n))
+    Ok(decompose_bigint(&n))
 }

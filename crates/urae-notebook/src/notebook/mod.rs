@@ -286,6 +286,41 @@ impl NotebookState {
                 ]
                 .join("\n");
             }
+            "fourier_sliders" => {
+                self.session.raw_document_text = [
+                    "# Reactive Fourier Series Sliders",
+                    "// Drag sliders A1, A3, w to see live wave superposition.",
+                    "",
+                    "A1: Parameter = 1.00",
+                    "A3: Parameter = 0.33",
+                    "w: Parameter = 1.00",
+                    "x: Variable",
+                    "{ x in Reals | -6.28 <= x <= 6.28 }",
+                    "f(x) = A1 * sin(w * x) + A3 * sin(3 * w * x)",
+                ]
+                .join("\n");
+                self.session.slider_values.insert("A1".to_string(), 1.0);
+                self.session.slider_values.insert("A3".to_string(), 0.33);
+                self.session.slider_values.insert("w".to_string(), 1.0);
+            }
+            "conic_tangent_locus" => {
+                self.session.raw_document_text = [
+                    "# Reactive Conic & Tangent Locus",
+                    "// Modulate semi-axes a, b and tangent point x0.",
+                    "",
+                    "a: Parameter = 3.00",
+                    "b: Parameter = 2.00",
+                    "x0: Parameter = 1.50",
+                    "x: Variable",
+                    "{ x in Reals | -3 <= x <= 3 }",
+                    "y(x) = b * sqrt(1 - (x / a)^2)",
+                    "d(x^2 / a^2 + y^2 / b^2 - 1) / dx",
+                ]
+                .join("\n");
+                self.session.slider_values.insert("a".to_string(), 3.0);
+                self.session.slider_values.insert("b".to_string(), 2.0);
+                self.session.slider_values.insert("x0".to_string(), 1.5);
+            }
             _ => {
                 self.session.raw_document_text = "# Blank Notepad\nx^2 + 1".to_string();
             }
@@ -1788,17 +1823,15 @@ impl NotebookState {
                     .or_insert_with(|| SymbolMetadata::new(sym_name, 1.0, role));
                 meta.set_role(role);
 
-                // Parse value if present e.g. `a: Parameter = 2.0 [m]`
+                // Parse value if present e.g. `a: Parameter = 2.0 [m]` or `a: Parameter = 2.0 +/- 0.1 [m]`
                 if let Some((_, val_and_unit)) = decl_body.split_once('=') {
-                    let mut val_s = val_and_unit.trim();
-                    if let Some(bracket_idx) = val_s.find('[') {
-                        let unit_s = val_s[bracket_idx..]
-                            .trim_matches(|c| c == '[' || c == ']')
-                            .trim();
-                        meta.unit_str = Some(unit_s.to_string());
-                        val_s = val_s[..bracket_idx].trim();
-                    }
-                    if let Ok(v) = val_s.parse::<f64>() {
+                    if let Some((v, err_opt, u_opt)) =
+                        urae::core::parse_value_uncertainty_and_unit(val_and_unit)
+                    {
+                        if let Some(unit_s) = u_opt {
+                            meta.unit_str = Some(unit_s);
+                        }
+                        meta.uncertainty = err_opt;
                         let active_slider_val = self.session.slider_values.get(sym_name).copied();
 
                         if meta.parsed_text_val != Some(v) {
@@ -1818,7 +1851,7 @@ impl NotebookState {
                 }
             }
 
-            // Check physical unit format e.g. `g = 9.81 [m/s^2]` or `v = 100 [km/h]`
+            // Check physical unit format e.g. `g = 9.81 [m/s^2]` or `a = 5.0 +/- 0.1 [m]`
             let (text_without_unit, unit_opt) = if let Some(bracket_start) = trimmed.find('[') {
                 if let Some(bracket_end) = trimmed.find(']') {
                     if bracket_end > bracket_start {
@@ -1834,12 +1867,14 @@ impl NotebookState {
                 (trimmed, None)
             };
 
-            // Check explicit parameter assignment `param = val`
+            // Check explicit parameter assignment `param = val` or `param = val +/- err`
             if let Some((name, val_str)) = text_without_unit.split_once('=') {
                 let name = name.trim();
                 let val_str = val_str.trim();
                 if !name.contains(':') && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    if let Ok(f) = val_str.parse::<f64>() {
+                    if let Some((f, err_opt, _)) =
+                        urae::core::parse_value_uncertainty_and_unit(val_str)
+                    {
                         active_document_symbols.insert(name.to_string());
                         let active_slider_val = self.session.slider_values.get(name).copied();
                         let meta = self
@@ -1857,6 +1892,7 @@ impl NotebookState {
                             meta.cur_val = meta.clamp(f);
                         }
 
+                        meta.uncertainty = err_opt;
                         if let Some(u) = &unit_opt {
                             meta.unit_str = Some(u.clone());
                         }
@@ -1874,6 +1910,7 @@ impl NotebookState {
         let mut current_scoped_context = urae::MathContext::default();
         let mut line_results_f64: HashMap<usize, f64> = HashMap::new();
         let mut last_evaluated_val: Option<f64> = None;
+        let mut active_branch_sheet: Option<i64> = None;
 
         // 2. Parse and evaluate each line
         for (idx, &line_str) in lines.iter().enumerate() {
@@ -2054,6 +2091,16 @@ impl NotebookState {
                         .as_ref()
                         .map(|m| format!(" = {:.2}", m.cur_val))
                         .unwrap_or_default();
+                    let uncert_latex = meta_info
+                        .as_ref()
+                        .and_then(|m| m.uncertainty)
+                        .map(|u| format!(" \\pm {}", u))
+                        .unwrap_or_default();
+                    let uncert_unicode = meta_info
+                        .as_ref()
+                        .and_then(|m| m.uncertainty)
+                        .map(|u| format!(" ± {}", u))
+                        .unwrap_or_default();
 
                     let line_kind = if role_type == SymbolRole::Parameter && decl.contains('=') {
                         let cur_v = meta_info.as_ref().map(|m| m.cur_val).unwrap_or(0.0);
@@ -2075,19 +2122,19 @@ impl NotebookState {
                         raw_text: line_str.to_string(),
                         kind: line_kind,
                         output_latex: format!(
-                            "\\text{{{}: {:?}}}{}{}",
-                            sym_name, role_type, val_info, unit_suffix
+                            "\\text{{{}: {:?}}}{}{}{}",
+                            sym_name, role_type, val_info, uncert_latex, unit_suffix
                         ),
                         output_unicode: format!(
-                            "{}: {:?}{}{}",
-                            sym_name, role_type, val_info, unit_suffix
+                            "{}: {:?}{}{}{}",
+                            sym_name, role_type, val_info, uncert_unicode, unit_suffix
                         ),
                         simplified_unicode: None,
                         substituted_latex: None,
                         derivative_latex: None,
                         domain_info: Some(format!(
-                            "Declared symbol '{}' as {:?}",
-                            sym_name, role_type
+                            "Declared symbol '{}' as {:?}{}",
+                            sym_name, role_type, uncert_unicode
                         )),
                         error_msg: None,
                         suggested_symbols: Vec::new(),
@@ -2906,6 +2953,7 @@ impl NotebookState {
                         expression,
                         variable,
                         point,
+                        direction,
                     } => {
                         let var_sym = self.graph.symbols.get_or_intern(&variable);
                         let mut expanded = expression.clone();
@@ -2913,10 +2961,28 @@ impl NotebookState {
                             expanded = Self::expand_user_function_call(&expanded, fn_name, fn_rhs);
                         }
                         if let Ok(expr_id) = parser.parse(&expanded) {
-                            let pt_val = point.parse::<f64>().unwrap_or(0.0);
-                            let pt_id = self.graph.float(pt_val);
+                            let pt_id = parser.parse(&point).unwrap_or_else(|_| {
+                                self.graph.float(point.parse::<f64>().unwrap_or(0.0))
+                            });
                             use urae::calculus::SymbolicCalculus;
-                            let lim_res = self.graph.limit(expr_id, var_sym, pt_id);
+                            use urae::engine::limits::{LimitDirection, LimitEngine};
+                            let lim_res = match direction.as_deref() {
+                                Some("+") | Some("right") => LimitEngine::limit_directed(
+                                    &self.graph,
+                                    expr_id,
+                                    var_sym,
+                                    pt_id,
+                                    LimitDirection::FromRight,
+                                ),
+                                Some("-") | Some("left") => LimitEngine::limit_directed(
+                                    &self.graph,
+                                    expr_id,
+                                    var_sym,
+                                    pt_id,
+                                    LimitDirection::FromLeft,
+                                ),
+                                _ => self.graph.limit(expr_id, var_sym, pt_id),
+                            };
                             let (out_unicode, out_latex, err_msg) = match lim_res {
                                 Ok(lim_id) => {
                                     let u = self
@@ -3231,6 +3297,71 @@ impl NotebookState {
                 }
             }
 
+            // Branch cut configuration & multivalued Riemann sheet commands (`branch_cut(...)`, `branches <expr>`, `branch <expr>`)
+            if trimmed.starts_with("branch_cut")
+                || trimmed.starts_with("branches ")
+                || trimmed.starts_with("branches(")
+                || trimmed.starts_with("branch ")
+                || trimmed.starts_with("branch(")
+            {
+                let op = urae::parser::parse_operation(trimmed);
+                if matches!(op, urae::operation::MathOperation::Branch(_)) {
+                    let mut exec_ctx = urae::executor::ExecutionContext::new();
+                    exec_ctx.bindings = self.session.slider_values.clone();
+                    exec_ctx.branch_sheet = active_branch_sheet;
+                    for (name, meta) in &self.session.symbol_metadata {
+                        if let Some(sigma) = meta.uncertainty {
+                            exec_ctx.uncertainties.insert(name.clone(), sigma);
+                        }
+                    }
+                    if let urae::operation::MathOperation::Branch(
+                        urae::operation::BranchOpKind::EvaluateSheet {
+                            expression: None,
+                            sheet,
+                            ..
+                        },
+                    ) = &op
+                    {
+                        active_branch_sheet = Some(*sheet);
+                    }
+                    let res =
+                        urae::executor::OperationExecutor::execute(&self.graph, &op, &exec_ctx);
+                    let out_latex = if res.output_latex.is_empty() {
+                        format!("\\text{{{}}}", res.output_text)
+                    } else {
+                        res.output_latex.clone()
+                    };
+                    let out_unicode = if res.output_unicode.is_empty() {
+                        res.output_text.clone()
+                    } else {
+                        res.output_unicode.clone()
+                    };
+                    parsed_lines.push(ParsedLine {
+                        line_idx: idx,
+                        raw_text: line_str.to_string(),
+                        kind: LineKind::Formula,
+                        output_latex: out_latex,
+                        output_unicode: out_unicode,
+                        simplified_unicode: None,
+                        substituted_latex: None,
+                        derivative_latex: None,
+                        domain_info: Some("Multivalued / Riemann Sheet".to_string()),
+                        error_msg: res.error_msg.clone(),
+                        suggested_symbols: Vec::new(),
+                        is_function: false,
+                        is_surface_3d: false,
+                        custom_mesh_preset: None,
+                        physical_unit: None,
+                        numerical_roots: None,
+                        linearized_estimate: None,
+                        is_pending: false,
+                        eval_time_ms: 0,
+                        scoped_context: current_scoped_context.clone(),
+                    });
+                    continue;
+                }
+            }
+
             // Standard Expression or Equation parsing
             let (expr_body, unit_suffix) = if let Some(bracket_idx) = trimmed.find('[') {
                 let u = trimmed[bracket_idx..]
@@ -3300,31 +3431,77 @@ impl NotebookState {
                         simp_unicode = Some(unicode.clone());
                     }
 
-                    // Parameter substitution
+                    // Parameter substitution & uncertainty/branch evaluation
                     let mut sub_latex = None;
                     let mut eval_val_opt = None;
-                    if !self.session.slider_values.is_empty() {
-                        let mut subbed = expr_id;
-                        for (param, &val) in &self.session.slider_values {
-                            if let Some(sym_id) = self.graph.symbols.get(param) {
-                                let val_node = self.graph.float(val);
-                                subbed = self.graph.substitute(subbed, sym_id, val_node);
+                    let mut formula_domain_info: Option<String> = None;
+                    let has_uncert = self
+                        .session
+                        .symbol_metadata
+                        .values()
+                        .any(|m| m.uncertainty.is_some())
+                        || urae::numeric::expr_has_uncertainty_nodes(&self.graph, expr_id);
+                    if !self.session.slider_values.is_empty()
+                        || has_uncert
+                        || active_branch_sheet.is_some()
+                    {
+                        if !self.session.slider_values.is_empty() {
+                            let mut subbed = expr_id;
+                            for (param, &val) in &self.session.slider_values {
+                                if let Some(sym_id) = self.graph.symbols.get(param) {
+                                    let val_node = self.graph.float(val);
+                                    subbed = self.graph.substitute(subbed, sym_id, val_node);
+                                }
+                            }
+                            if let Ok(sub_fmt) = self.formatter.format(&self.graph, subbed) {
+                                sub_latex = Some(sub_fmt);
                             }
                         }
-                        if let Ok(sub_fmt) = self.formatter.format(&self.graph, subbed) {
-                            sub_latex = Some(sub_fmt);
+
+                        let mut ctx =
+                            EvalContext::with_bindings(53, self.session.slider_values.clone())
+                                .with_branch_sheet(active_branch_sheet);
+                        for (p, meta) in &self.session.symbol_metadata {
+                            if let Some(sigma) = meta.uncertainty {
+                                ctx.uncertainties.insert(p.clone(), sigma);
+                            }
                         }
 
-                        let mut ctx = EvalContext::default();
-                        for (p, &v) in &self.session.slider_values {
-                            ctx.bindings.insert(p.clone(), v);
-                        }
-                        if let Ok(eval_res) = self.graph.evalf(expr_id, &ctx) {
+                        if ctx.has_uncertainty()
+                            || urae::numeric::expr_has_uncertainty_nodes(&self.graph, expr_id)
+                        {
+                            if let Ok(uv) =
+                                urae::numeric::eval_uncertain(&self.graph, expr_id, &ctx)
+                            {
+                                if uv.mean.is_finite() {
+                                    eval_val_opt = Some(uv.mean);
+                                    line_results_f64.insert(idx, uv.mean);
+                                    last_evaluated_val = Some(uv.mean);
+                                    formula_domain_info = Some(format!(
+                                        "{} (interval [{:.4}, {:.4}])",
+                                        uv.format_unicode(),
+                                        uv.interval.inf,
+                                        uv.interval.sup
+                                    ));
+                                    let uv_latex = uv.format_latex();
+                                    sub_latex = Some(match sub_latex {
+                                        Some(s) => format!("{} = {}", s, uv_latex),
+                                        None => uv_latex,
+                                    });
+                                }
+                            }
+                        } else if let Ok(eval_res) = self.graph.evalf(expr_id, &ctx) {
                             let f = eval_res.to_f64();
                             if f.is_finite() {
                                 eval_val_opt = Some(f);
                                 line_results_f64.insert(idx, f);
                                 last_evaluated_val = Some(f);
+                            } else if let urae::numeric::BigValue::Complex(re, im) = eval_res {
+                                formula_domain_info = Some(if im >= 0.0 {
+                                    format!("{:.6} + {:.6}i", re, im)
+                                } else {
+                                    format!("{:.6} - {:.6}i", re, -im)
+                                });
                             }
                         }
                     }
@@ -3333,7 +3510,9 @@ impl NotebookState {
                     let mut out_of_domain_err = None;
                     if let Some((sym_name, val_part)) = clean_expr.split_once('=') {
                         let s_name = sym_name.trim();
-                        if let Ok(val_num) = val_part.trim().parse::<f64>() {
+                        if let Some((val_num, _, _)) =
+                            urae::core::parse_value_uncertainty_and_unit(val_part.trim())
+                        {
                             if let Some(meta) = self.session.symbol_metadata.get(s_name) {
                                 if val_num < meta.min_val || val_num > meta.max_val {
                                     out_of_domain_err = Some(format!(
@@ -3372,7 +3551,7 @@ impl NotebookState {
                         simplified_unicode: simp_unicode,
                         substituted_latex: sub_latex,
                         derivative_latex: deriv_latex,
-                        domain_info: None,
+                        domain_info: formula_domain_info,
                         error_msg: out_of_domain_err,
                         suggested_symbols: Vec::new(),
                         is_function: false,

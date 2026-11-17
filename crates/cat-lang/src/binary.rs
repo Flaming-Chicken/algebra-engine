@@ -3,18 +3,25 @@
 use crate::ast::{CatPadNotebook, CatScriptAst};
 use serde::{Serialize, de::DeserializeOwned};
 
+const CATB_MAGIC: &[u8; 6] = b"CATB\x01\x00";
+
 /// Binary persistence engine for `.catb` format.
 pub struct CatBinary;
 
 impl CatBinary {
-    /// Serialize data to `.catb` bytes.
+    /// Serialize data to `.catb` bytes with versioned `CATB` header.
     pub fn to_bytes<T: Serialize>(val: &T) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(val)
+        let mut payload = serde_json::to_vec(val)?;
+        let mut out = Vec::with_capacity(CATB_MAGIC.len() + payload.len());
+        out.extend_from_slice(CATB_MAGIC);
+        out.append(&mut payload);
+        Ok(out)
     }
 
-    /// Deserialize data from `.catb` bytes.
+    /// Deserialize data from `.catb` bytes (accepts both `CATB`-prefixed and legacy JSON bytes).
     pub fn from_bytes<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_json::Error> {
-        serde_json::from_slice(bytes)
+        let slice = bytes.strip_prefix(CATB_MAGIC).unwrap_or(bytes);
+        serde_json::from_slice(slice)
     }
 
     /// Save CatPad notebook to binary format.

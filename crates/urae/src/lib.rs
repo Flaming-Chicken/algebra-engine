@@ -68,6 +68,7 @@ pub use algebra_core::numbers;
 pub use algebra_core::operation;
 pub use algebra_core::parser;
 
+pub use algebra_engine::api;
 pub use algebra_engine::autodiff;
 pub use algebra_engine::cad;
 pub use algebra_engine::calculus;
@@ -109,6 +110,7 @@ pub use algebra_engine::smt;
 pub use algebra_engine::solver;
 pub use algebra_engine::sparse;
 pub use algebra_engine::special;
+pub use algebra_engine::stream;
 pub use algebra_engine::symplectic;
 pub use algebra_engine::tda;
 pub use algebra_engine::tensor;
@@ -118,6 +120,7 @@ pub use algebra_engine::tropical;
 pub use algebra_engine::urscript_pose;
 pub use algebra_engine::visualizer;
 pub use algebra_engine::weyl_dmodules;
+pub use algebra_engine::workbench;
 
 #[cfg(feature = "advanced")]
 pub use algebra_advanced::{

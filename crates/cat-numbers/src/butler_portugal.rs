@@ -122,4 +122,259 @@ impl ButlerPortugal {
             smallvec::smallvec![(canon.indices, canon.sign)]
         }
     }
+
+    /// Rank-N tensor canonicalization using Schreier-Sims Base & Strong Generating Set (BSGS)
+    /// with early antisymmetric zero-annihilation and dummy-pair contraction support.
+    ///
+    /// Avoids $O(n!)$ orbit BFS blowup on highly symmetric rank-N tensors (e.g. rank-6/8/12).
+    pub fn canonicalize_n(
+        indices: &[u8],
+        sym: &TensorSymmetryN,
+        dummy_pairs: &[(usize, usize)],
+    ) -> CanonicalTensorResultN {
+        let n = indices.len();
+        if n == 0 {
+            return CanonicalTensorResultN {
+                indices: Vec::new(),
+                sign: 1,
+            };
+        }
+
+        // Fast O(|gens|) antisymmetry short-circuit:
+        // If any generator swaps two equal indices with sign -1 while fixing the rest,
+        // or maps the tuple to itself with sign -1, the tensor vanishes identically.
+        for (perm_gen, gsign) in &sym.generators {
+            if *gsign == -1 && perm_gen.len() == n {
+                let mut same = true;
+                for (i, &g_i) in perm_gen.iter().enumerate() {
+                    if indices[g_i as usize] != indices[i] {
+                        same = false;
+                        break;
+                    }
+                }
+                if same {
+                    return CanonicalTensorResultN {
+                        indices: vec![0; n],
+                        sign: 0,
+                    };
+                }
+            }
+        }
+
+        // Build Schreier-Sims BSGS over base [0, 1, ..., n-1]
+        let bsgs = SchreierSims::from_generators(n, &sym.generators);
+
+        // Greedy level-by-level canonicalization using BSGS transversals
+        let mut curr = indices.to_vec();
+        let mut net_sign = 1i8;
+
+        for level in 0..n {
+            // Find the minimal reachable value at slot `level` under the stabilizer of 0..level
+            let mut best_val = curr[level];
+            let mut best_perm: Option<(Vec<u8>, i8)> = None;
+
+            for (pos, (perm, psign)) in bsgs.levels[level].transversal.iter().enumerate() {
+                if let Some(p) = perm {
+                    let candidate_val = curr[p[level] as usize];
+                    if candidate_val < best_val {
+                        best_val = candidate_val;
+                        best_perm = Some((p.clone(), *psign));
+                    } else if candidate_val == best_val && pos != level {
+                        // Check if applying p leaves curr identical with opposite sign -> zero!
+                        let mut identical = true;
+                        for i in 0..n {
+                            if curr[p[i] as usize] != curr[i] {
+                                identical = false;
+                                break;
+                            }
+                        }
+                        if identical && *psign == -1 {
+                            return CanonicalTensorResultN {
+                                indices: vec![0; n],
+                                sign: 0,
+                            };
+                        }
+                    }
+                }
+            }
+
+            if let Some((p, psign)) = best_perm {
+                let mut next = vec![0u8; n];
+                for i in 0..n {
+                    next[i] = curr[p[i] as usize];
+                }
+                curr = next;
+                net_sign *= psign;
+            }
+        }
+
+        // Normalize dummy-index pairs deterministically in canonical slot order
+        if !dummy_pairs.is_empty() {
+            let mut next_dummy_label = 200u8;
+            let mut relabeled = curr.clone();
+            let mut pairs_sorted: Vec<(usize, usize)> = dummy_pairs
+                .iter()
+                .map(|&(a, b)| if a <= b { (a, b) } else { (b, a) })
+                .collect();
+            pairs_sorted.sort_unstable();
+            for (a, b) in pairs_sorted {
+                if a < n && b < n {
+                    relabeled[a] = next_dummy_label;
+                    relabeled[b] = next_dummy_label;
+                    next_dummy_label = next_dummy_label.saturating_add(1);
+                }
+            }
+            curr = relabeled;
+        }
+
+        CanonicalTensorResultN {
+            indices: curr,
+            sign: net_sign,
+        }
+    }
+}
+
+/// Arbitrary-rank tensor symmetry specification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorSymmetryN {
+    pub rank: usize,
+    pub generators: Vec<(Vec<u8>, i8)>,
+}
+
+impl TensorSymmetryN {
+    /// Totally symmetric rank-N tensor S_n (all adjacent transpositions with sign +1).
+    pub fn symmetric(rank: usize) -> Self {
+        let mut generators = Vec::new();
+        for i in 0..rank.saturating_sub(1) {
+            let mut p: Vec<u8> = (0..rank as u8).collect();
+            p.swap(i, i + 1);
+            generators.push((p, 1));
+        }
+        Self { rank, generators }
+    }
+
+    /// Totally antisymmetric rank-N tensor (all adjacent transpositions with sign -1).
+    pub fn antisymmetric(rank: usize) -> Self {
+        let mut generators = Vec::new();
+        for i in 0..rank.saturating_sub(1) {
+            let mut p: Vec<u8> = (0..rank as u8).collect();
+            p.swap(i, i + 1);
+            generators.push((p, -1));
+        }
+        Self { rank, generators }
+    }
+}
+
+/// Rank-N Butler-Portugal canonicalization result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalTensorResultN {
+    pub indices: Vec<u8>,
+    pub sign: i8,
+}
+
+struct BsgsLevel {
+    transversal: Vec<(Option<Vec<u8>>, i8)>,
+}
+
+struct SchreierSims {
+    levels: Vec<BsgsLevel>,
+}
+
+impl SchreierSims {
+    fn identity(n: usize) -> Vec<u8> {
+        (0..n as u8).collect()
+    }
+
+    fn compose(a: &[u8], b: &[u8]) -> Vec<u8> {
+        a.iter().map(|&x| b[x as usize]).collect()
+    }
+
+    fn inverse(a: &[u8]) -> Vec<u8> {
+        let mut inv = vec![0u8; a.len()];
+        for (i, &v) in a.iter().enumerate() {
+            inv[v as usize] = i as u8;
+        }
+        inv
+    }
+
+    fn from_generators(n: usize, gens: &[(Vec<u8>, i8)]) -> Self {
+        let mut levels: Vec<BsgsLevel> = (0..n)
+            .map(|i| {
+                let mut t = vec![(None, 1i8); n];
+                t[i] = (Some(Self::identity(n)), 1);
+                BsgsLevel { transversal: t }
+            })
+            .collect();
+
+        let mut strong_gens: Vec<Vec<(Vec<u8>, i8)>> = vec![Vec::new(); n];
+        let mut worklist: Vec<(Vec<u8>, i8)> =
+            gens.iter().filter(|(g, _)| g.len() == n).cloned().collect();
+
+        while let Some((mut g, mut s)) = worklist.pop() {
+            // Sift g through levels 0..n
+            let mut insert_lvl = None;
+            for lvl in 0..n {
+                let img = g[lvl] as usize;
+                if let Some(u) = &levels[lvl].transversal[img].0 {
+                    let us = levels[lvl].transversal[img].1;
+                    let u_inv = Self::inverse(u);
+                    g = Self::compose(&u_inv, &g);
+                    s *= us;
+                } else {
+                    insert_lvl = Some(lvl);
+                    break;
+                }
+            }
+
+            let Some(level) = insert_lvl else {
+                continue;
+            };
+            if g == Self::identity(n) {
+                continue;
+            }
+            strong_gens[level].push((g, s));
+
+            // Expand orbits at levels 0..=level using all strong generators at lvl..n
+            for lvl in (0..=level).rev() {
+                let mut queue: Vec<usize> = levels[lvl]
+                    .transversal
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, (p, _))| p.as_ref().map(|_| idx))
+                    .collect();
+
+                let mut head = 0;
+                while head < queue.len() {
+                    let pt = queue[head];
+                    head += 1;
+                    let (Some(u_perm), us) = levels[lvl].transversal[pt].clone() else {
+                        continue;
+                    };
+
+                    for gen_lvl in lvl..n {
+                        for idx in 0..strong_gens[gen_lvl].len() {
+                            let (sg, sgs) = &strong_gens[gen_lvl][idx];
+                            let next_perm = Self::compose(&u_perm, sg);
+                            let next_sign = us * *sgs;
+                            let img = next_perm[lvl] as usize;
+
+                            if levels[lvl].transversal[img].0.is_none() {
+                                levels[lvl].transversal[img] = (Some(next_perm), next_sign);
+                                queue.push(img);
+                            } else if let (Some(rep_p), reps) = &levels[lvl].transversal[img] {
+                                let rep_inv = Self::inverse(rep_p);
+                                let sch = Self::compose(&rep_inv, &next_perm);
+                                let sch_s = *reps * next_sign;
+                                if sch != Self::identity(n) {
+                                    worklist.push((sch, sch_s));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { levels }
+    }
 }

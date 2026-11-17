@@ -26,6 +26,7 @@ impl AxiomaticRuleGenerator {
             rewrite!("comm-add-assoc-2"; "(+ ?a (+ ?b ?c))" => "(+ (+ ?a ?b) ?c)"),
             rewrite!("comm-add-zero"; "(+ ?a 0)" => "?a"),
             rewrite!("comm-add-neg"; "(+ ?a (neg ?a))" => "0"),
+            rewrite!("comm-add-neg-2"; "(+ (neg ?a) ?a)" => "0"),
             rewrite!("comm-sub-def"; "(- ?a ?b)" => "(+ ?a (neg ?b))"),
             rewrite!("comm-sub-self"; "(- ?a ?a)" => "0"),
             rewrite!("comm-neg-neg"; "(neg (neg ?a))" => "?a"),
@@ -44,10 +45,18 @@ impl AxiomaticRuleGenerator {
             rewrite!("comm-div-self"; "(/ ?a ?a)" => "1"),
             rewrite!("comm-div-one"; "(/ ?a 1)" => "?a"),
             rewrite!("comm-div-zero"; "(/ 0 ?a)" => "0"),
-            // Exponentiation laws
+            rewrite!("comm-div-mul-cancel-1"; "(/ (* ?a ?b) ?a)" => "?b"),
+            rewrite!("comm-div-mul-cancel-2"; "(/ (* ?b ?a) ?a)" => "?b"),
+            rewrite!("comm-recip-recip"; "(/ 1 (/ 1 ?a))" => "?a"),
+            // Exponentiation & Log/Exp inverse laws
             rewrite!("comm-pow-zero"; "(^ ?a 0)" => "1"),
             rewrite!("comm-pow-one"; "(^ ?a 1)" => "?a"),
             rewrite!("comm-pow-mul"; "(* (^ ?a ?b) (^ ?a ?c))" => "(^ ?a (+ ?b ?c))"),
+            rewrite!("comm-exp-0"; "(fn exp 0)" => "1"),
+            rewrite!("comm-ln-1"; "(fn ln 1)" => "0"),
+            rewrite!("comm-log-1"; "(fn log 1)" => "0"),
+            rewrite!("comm-exp-ln"; "(fn exp (fn ln ?x))" => "?x"),
+            rewrite!("comm-exp-log"; "(fn exp (fn log ?x))" => "?x"),
         ]
     }
 
@@ -73,6 +82,9 @@ impl AxiomaticRuleGenerator {
             rewrite!("nc-mat-id-mul-r"; "(* ?a I)" => "?a"),
             rewrite!("nc-mat-id-mul-l"; "(* I ?a)" => "?a"),
             // Quaternion Hamilton Identities: i^2 = j^2 = k^2 = -1, ij = k, ji = -k
+            rewrite!("quat-i-pow2"; "(^ qi 2)" => "-1"),
+            rewrite!("quat-j-pow2"; "(^ qj 2)" => "-1"),
+            rewrite!("quat-k-pow2"; "(^ qk 2)" => "-1"),
             rewrite!("quat-i-sq"; "(* qi qi)" => "-1"),
             rewrite!("quat-j-sq"; "(* qj qj)" => "-1"),
             rewrite!("quat-k-sq"; "(* qk qk)" => "-1"),
@@ -104,6 +116,10 @@ impl DynamicRuleSelector {
             rules.extend(AxiomaticRuleGenerator::non_commutative_ring_rules());
         } else {
             rules.extend(AxiomaticRuleGenerator::commutative_ring_rules());
+            if !expr_has_imaginary(graph, root) {
+                rules.push(rewrite!("comm-ln-exp"; "(fn ln (fn exp ?x))" => "?x"));
+                rules.push(rewrite!("comm-log-exp"; "(fn log (fn exp ?x))" => "?x"));
+            }
         }
 
         // 2. Trigonometric Identity Cluster
@@ -145,5 +161,20 @@ impl DynamicRuleSelector {
         }
 
         (rules, features)
+    }
+}
+
+fn expr_has_imaginary(graph: &ExprGraph, id: ExprId) -> bool {
+    use algebra_core::{Constant, ExprKind, Number};
+    match &graph.get(id).kind {
+        ExprKind::Number(Number::Constant(Constant::I)) => true,
+        ExprKind::Symbol(s) => matches!(graph.symbols.resolve(*s).as_deref(), Some("i" | "I")),
+        ExprKind::Neg(a) => expr_has_imaginary(graph, *a),
+        ExprKind::Add(xs) | ExprKind::Mul(xs) => xs.iter().any(|&x| expr_has_imaginary(graph, x)),
+        ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
+            expr_has_imaginary(graph, *a) || expr_has_imaginary(graph, *b)
+        }
+        ExprKind::Function { args, .. } => args.iter().any(|&a| expr_has_imaginary(graph, a)),
+        _ => false,
     }
 }

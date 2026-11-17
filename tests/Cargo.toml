@@ -12,6 +12,8 @@ workspace = true
 [dependencies]
 algebra-core = { workspace = true }
 algebra-engine = { workspace = true }
+cat-core = { workspace = true }
+cat-numbers = { workspace = true }
 algebra-advanced = { workspace = true, features = ["agent"] }
 urae = { workspace = true, features = ["advanced", "agent"] }
 urae-cli = { workspace = true }

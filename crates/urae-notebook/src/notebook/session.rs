@@ -45,6 +45,9 @@ pub struct SymbolMetadata {
     pub tensor_shape: Vec<usize>,
     #[serde(default)]
     pub is_constant_locked: bool,
+    /// Optional 1-sigma measurement uncertainty (`± sigma`) for GUM propagation.
+    #[serde(default)]
+    pub uncertainty: Option<f64>,
 }
 
 impl SymbolMetadata {
@@ -64,6 +67,7 @@ impl SymbolMetadata {
             tensor_rank: None,
             tensor_shape: Vec::new(),
             is_constant_locked: role == SymbolRole::Constant,
+            uncertainty: None,
         }
     }
 

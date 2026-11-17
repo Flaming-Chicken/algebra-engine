@@ -1,16 +1,20 @@
-//! # `algebra-special`
+//! # `algebra_engine::special`
 //!
-//! Symbolic special functions suite providing full parity with SymPy (`sympy.functions.special.*`)
-//! and Wolfram Alpha:
+//! Symbolic Special Functions & Distributions Suite:
 //! - Gamma $\Gamma(x)$, Log-Gamma $\ln\Gamma(x)$, Digamma $\psi(x)$, Polygamma $\psi^{(m)}(x)$, Beta $B(a, b)$
 //! - Riemann Zeta $\zeta(s)$, Dirichlet Eta $\eta(s)$
 //! - Error functions $\text{erf}(x), \text{erfc}(x), \text{erfi}(x)$
 //! - Exponential & Logarithmic Integrals $\text{Ei}(x), \text{li}(x), \text{Si}(x), \text{Ci}(x)$
-//! - Lambert W function $W_0(x), W_{-1}(x)$
+//! - Lambert $W$ function $W_0(x), W_{-1}(x)$ (Corless et al., 1996)
 //! - Bessel functions $J_\nu(x), Y_\nu(x), I_\nu(x), K_\nu(x)$, Spherical Bessel $j_n(x)$
 //! - Airy functions $\text{Ai}(x), \text{Bi}(x)$
 //! - Polylogarithms $\text{Li}_s(x)$ & Dilogarithm $\text{Li}_2(x)$
 //! - Distributions: Dirac Delta $\delta(x)$, Heaviside $\Theta(x)$
+//!
+//! ## References
+//! - Olver, F. W. J., et al. (2010). *NIST Handbook of Mathematical Functions* (DLMF). Cambridge University Press.
+//! - Abramowitz, M., & Stegun, I. A. (1964). *Handbook of Mathematical Functions*. NBS.
+//! - Corless, R. M., et al. (1996). On the Lambert $W$ function. *Advances in Computational Mathematics*, 5, 329–359.
 
 pub use crate::weyl_dmodules::{BesselJ, ErrorFunctionErf, HermiteH, HolonomicFunction, LegendreP};
 use algebra_core::{AlgebraResult, ExprGraph, ExprId, ExprKind, Number};

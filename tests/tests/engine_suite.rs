@@ -182,3 +182,21 @@ mod diffeq_classification_tests;
 
 #[path = "engine/control_systems_tests.rs"]
 mod control_systems_tests;
+
+#[path = "engine/reference_oracle_tests.rs"]
+mod reference_oracle_tests;
+
+#[path = "engine/audit_regression_tests.rs"]
+mod audit_regression_tests;
+
+#[path = "engine/audit_followup_tests.rs"]
+mod audit_followup_tests;
+
+#[path = "engine/uncertainty_multivalued_tests.rs"]
+mod uncertainty_multivalued_tests;
+
+#[path = "engine/unification_robustness_tests.rs"]
+mod unification_robustness_tests;
+
+#[path = "engine/api_stream_workbench_tests.rs"]
+mod api_stream_workbench_tests;

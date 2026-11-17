@@ -1,4 +1,4 @@
-//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1, A3, B1-B4, B6).
+//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6).
 //!
 //! Each test asserts the correct behaviour and was written to fail on the code it replaced.
 
@@ -265,4 +265,135 @@ fn cartan_operations_use_the_form_that_was_typed() {
     // Unreadable input is an error, not a canned answer.
     assert!(cartan(wedge("nonsense", "dy")).starts_with("ERROR"));
     assert!(cartan(wedge("dw", "dy")).starts_with("ERROR"));
+}
+
+fn clifford(kind: algebra_core::operation::CliffordOpKind) -> Result<String, String> {
+    use algebra_core::operation::MathOperation;
+    use algebra_engine::executor::{ExecutionContext, OperationExecutor};
+    let g = ExprGraph::new();
+    let res =
+        OperationExecutor::execute(&g, &MathOperation::Clifford(kind), &ExecutionContext::new());
+    if res.is_error {
+        Err(res.error_msg.unwrap_or_default())
+    } else {
+        Ok(res.output_text)
+    }
+}
+
+/// The executor's rotor rotation and vector product must agree with the multivector
+/// implementation in `algebra-advanced` (rotor `cos(t/2) - sin(t/2) e_i e_j`).
+#[test]
+fn clifford_operations_agree_with_the_multivector_implementation() {
+    use algebra_advanced::clifford::{BladeMask, CliffordMultivector, CliffordSignature};
+    use algebra_core::operation::CliffordOpKind::{GeometricProduct, RotorSandwich};
+    let sig = CliffordSignature { p: 3, q: 0, r: 0 };
+
+    let (a, b) = (vec![1.0, 2.0, -0.5], vec![0.5, -1.0, 3.0]);
+    let product = clifford(GeometricProduct {
+        sig_p: 3,
+        sig_q: 0,
+        sig_r: 0,
+        a_coords: a.clone(),
+        b_coords: b.clone(),
+    })
+    .unwrap();
+    let reference = CliffordMultivector::from_vector(&a, sig)
+        .unwrap()
+        .geometric_product(&CliffordMultivector::from_vector(&b, sig).unwrap())
+        .unwrap();
+    let scalar = reference
+        .blades
+        .get(&BladeMask::SCALAR)
+        .copied()
+        .unwrap_or(0.0);
+    assert!(
+        product.contains(&format!("= {scalar} ")),
+        "{product} vs scalar {scalar}"
+    );
+    let e12 = reference.blades.get(&BladeMask(0b011)).copied().unwrap();
+    assert!(
+        product.contains(&format!("{e12} e1e2")),
+        "{product} vs e12 {e12}"
+    );
+
+    for (plane, angle) in [((0, 1), 0.7_f64), ((1, 2), -1.9), ((0, 2), 2.5)] {
+        let v = vec![1.0, 2.0, 3.0];
+        let text = clifford(RotorSandwich {
+            sig_p: 3,
+            sig_q: 0,
+            sig_r: 0,
+            vector: v.clone(),
+            angle_rad: angle,
+            bivector_plane: plane,
+        })
+        .unwrap();
+        let bivector = {
+            let ei = CliffordMultivector::basis_vector(plane.0, sig).unwrap();
+            let ej = CliffordMultivector::basis_vector(plane.1, sig).unwrap();
+            ei.wedge(&ej).unwrap()
+        };
+        let rotor = CliffordMultivector::make_rotor_3d(&bivector, angle).unwrap();
+        let expected = CliffordMultivector::from_vector(&v, sig)
+            .unwrap()
+            .rotor_sandwich(&rotor)
+            .unwrap();
+        let listed = text.split("v' = (").nth(1).unwrap().trim_end_matches(')');
+        let got: Vec<f64> = listed.split(", ").map(|x| x.parse().unwrap()).collect();
+        for (k, g_k) in got.iter().enumerate() {
+            let want = expected
+                .blades
+                .get(&BladeMask::vector(k))
+                .copied()
+                .unwrap_or(0.0);
+            assert!(
+                (g_k - want).abs() < 1e-5,
+                "plane {plane:?} angle {angle}: {text} vs axis {k} = {want}"
+            );
+        }
+    }
+
+    // Wrong sizes and unsupported signatures are errors, not canned text.
+    assert!(
+        clifford(GeometricProduct {
+            sig_p: 3,
+            sig_q: 0,
+            sig_r: 0,
+            a_coords: vec![1.0],
+            b_coords: vec![1.0]
+        })
+        .is_err()
+    );
+    assert!(
+        clifford(RotorSandwich {
+            sig_p: 1,
+            sig_q: 1,
+            sig_r: 0,
+            vector: vec![1.0, 0.0],
+            angle_rad: 1.0,
+            bivector_plane: (0, 1)
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn system_commands_do_what_they_say_or_report_that_they_cannot() {
+    use algebra_core::ExprGraph;
+    use algebra_core::parser::parse_operation;
+    use algebra_engine::executor::{ExecutionContext, OperationExecutor};
+    let run = |cmd: &str| {
+        let g = ExprGraph::new();
+        OperationExecutor::execute(&g, &parse_operation(cmd), &ExecutionContext::new())
+    };
+    let latex = run("export latex x^2/3");
+    assert!(!latex.is_error, "{:?}", latex.error_msg);
+    assert!(
+        latex.output_text.contains("frac") && latex.output_text.contains("{x}^{2}"),
+        "{}",
+        latex.output_text
+    );
+    assert!(run("export mathml x+1").output_text.contains("<m"));
+    assert!(run("export docx x+1").is_error);
+    assert!(run("log debug").is_error);
+    assert!(run("preset quadratic").is_error);
 }

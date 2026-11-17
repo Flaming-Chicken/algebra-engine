@@ -116,28 +116,22 @@ impl SymbolicSeries for ExprGraph {
 
     fn puiseux_series(
         &self,
-        _expr: ExprId,
+        expr: ExprId,
         wrt: SymbolId,
         point: ExprId,
         denom_q: u32,
         order: u32,
     ) -> AlgebraResult<ExprId> {
-        let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
-        let x = self.symbol(&wrt_name);
-        let x_minus_a = self.sub(x, point);
-
-        let mut terms = Vec::new();
-        for p in 0..=order {
-            let frac = self.rational(p as i64, denom_q as i64);
-            let pow_term = self.pow(x_minus_a, frac);
-            let coeff = self.symbol(&format!("a_{p}_{denom_q}"));
-            terms.push(self.mul([coeff, pow_term]));
+        match denom_q {
+            // Integer exponents only: a Puiseux series is then the Taylor series.
+            1 => Ok(self.taylor_series(expr, wrt, point, order)),
+            0 => Err(AlgebraError::EvaluationError(
+                "puiseux: the exponent denominator must be at least 1".into(),
+            )),
+            q => Err(AlgebraError::EvaluationError(format!(
+                "puiseux: fractional exponents (denominator {q}) are not implemented; only denominator 1 (the Taylor series) is"
+            ))),
         }
-
-        let big_o_term = self.big_o(wrt, point, order + 1);
-        terms.push(big_o_term);
-
-        Ok(self.add(terms))
     }
 
     fn big_o(&self, wrt: SymbolId, point: ExprId, order: u32) -> ExprId {

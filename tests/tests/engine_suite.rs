@@ -200,3 +200,6 @@ mod unification_robustness_tests;
 
 #[path = "engine/api_stream_workbench_tests.rs"]
 mod api_stream_workbench_tests;
+
+#[path = "engine/known_defect_tests.rs"]
+mod known_defect_tests;

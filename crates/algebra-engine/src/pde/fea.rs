@@ -145,6 +145,90 @@ impl FeaMesh {
 
         mesh
     }
+
+    /// A rectangular block `[0, lx] x [0, ly] x [0, lz]` of linear tetrahedra (Tet4): each of the
+    /// `nx * ny * nz` cells is cut into six tetrahedra around its main diagonal, which makes
+    /// neighbouring cells agree on shared faces. Boundary groups: `left`/`right` (x = 0 / lx),
+    /// `bottom`/`top` (y = 0 / ly) and `front`/`back` (z = 0 / lz).
+    pub fn box_3d(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> Self {
+        let mut mesh = Self::new(3, ElementType::Tet4);
+        for k in 0..=nz {
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    mesh.add_node(vec![
+                        lx * i as f64 / nx as f64,
+                        ly * j as f64 / ny as f64,
+                        lz * k as f64 / nz as f64,
+                    ]);
+                }
+            }
+        }
+        let id = |i: usize, j: usize, k: usize| (k * (ny + 1) + j) * (nx + 1) + i;
+        const CORNER: [[usize; 3]; 8] = [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 1, 1],
+        ];
+        const TETS: [[usize; 4]; 6] = [
+            [0, 1, 2, 6],
+            [0, 1, 5, 6],
+            [0, 3, 2, 6],
+            [0, 3, 7, 6],
+            [0, 4, 5, 6],
+            [0, 4, 7, 6],
+        ];
+        for k in 0..nz {
+            for j in 0..ny {
+                for i in 0..nx {
+                    for tet in TETS {
+                        let n: Vec<usize> = tet
+                            .iter()
+                            .map(|&c| id(i + CORNER[c][0], j + CORNER[c][1], k + CORNER[c][2]))
+                            .collect();
+                        mesh.add_element(n);
+                    }
+                }
+            }
+        }
+        let mut groups: [Vec<usize>; 6] = Default::default();
+        for k in 0..=nz {
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    let n = id(i, j, k);
+                    if i == 0 {
+                        groups[0].push(n);
+                    }
+                    if i == nx {
+                        groups[1].push(n);
+                    }
+                    if j == 0 {
+                        groups[2].push(n);
+                    }
+                    if j == ny {
+                        groups[3].push(n);
+                    }
+                    if k == 0 {
+                        groups[4].push(n);
+                    }
+                    if k == nz {
+                        groups[5].push(n);
+                    }
+                }
+            }
+        }
+        for (name, nodes) in ["left", "right", "bottom", "top", "front", "back"]
+            .into_iter()
+            .zip(groups)
+        {
+            mesh.add_boundary_group(name, nodes);
+        }
+        mesh
+    }
 }
 
 /// Physics discipline specification for Multiphysics simulation.
@@ -406,6 +490,12 @@ impl FeaEngine {
                                 k_global.add(dof_r, dof_c, val * area);
                             }
                         }
+                        // Body force: a third of the element's load to each node.
+                        for &ni in &n {
+                            for (d, &bf) in body_force.iter().enumerate().take(2) {
+                                f_global[ni * 2 + d] += bf * area / 3.0;
+                            }
+                        }
                     }
                 }
 
@@ -449,7 +539,44 @@ impl FeaEngine {
                         }
                     }
                 }
-                _ => {}
+                ElementType::Tet4 if mesh.dim == 3 => {
+                    if elem.len() != 4 {
+                        return Err(AlgebraError::EvaluationError(
+                            "a Tet4 element needs four nodes".into(),
+                        ));
+                    }
+                    let Some((grads, volume)) = Self::tet4_gradients(mesh, elem) else {
+                        continue; // degenerate (zero-volume) element contributes nothing
+                    };
+                    let d = Self::solid_constitutive(e_mod, nu);
+                    let b = Self::tet4_b_matrix(&grads);
+                    for r in 0..12 {
+                        for c in 0..12 {
+                            let mut val = 0.0;
+                            for i in 0..6 {
+                                for j in 0..6 {
+                                    val += b[i][r] * d[i][j] * b[j][c];
+                                }
+                            }
+                            k_global.add(
+                                elem[r / 3] * 3 + r % 3,
+                                elem[c / 3] * 3 + c % 3,
+                                val * volume,
+                            );
+                        }
+                    }
+                    for &ni in elem.iter() {
+                        for (dof, &bf) in body_force.iter().enumerate().take(3) {
+                            f_global[ni * 3 + dof] += bf * volume / 4.0;
+                        }
+                    }
+                }
+                other => {
+                    return Err(AlgebraError::EvaluationError(format!(
+                        "linear elasticity is not implemented for {other:?} elements in {} dimension(s)",
+                        mesh.dim
+                    )));
+                }
             }
         }
 
@@ -498,7 +625,31 @@ impl FeaEngine {
         let mut von_mises = Vec::new();
         let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
         for elem in &mesh.elements {
-            if elem.len() >= 3 && mesh.dim == 2 {
+            if mesh.element_type == ElementType::Tet4 && mesh.dim == 3 && elem.len() == 4 {
+                let Some((grads, _)) = Self::tet4_gradients(mesh, elem) else {
+                    von_mises.push(0.0);
+                    continue;
+                };
+                let b = Self::tet4_b_matrix(&grads);
+                let d = Self::solid_constitutive(e_mod, nu);
+                let mut strain = [0.0; 6];
+                for (i, row) in b.iter().enumerate() {
+                    for (col, value) in row.iter().enumerate() {
+                        strain[i] += value * displacement[elem[col / 3] * 3 + col % 3];
+                    }
+                }
+                let mut s = [0.0; 6];
+                for i in 0..6 {
+                    for j in 0..6 {
+                        s[i] += d[i][j] * strain[j];
+                    }
+                }
+                von_mises.push(
+                    (0.5 * ((s[0] - s[1]).powi(2) + (s[1] - s[2]).powi(2) + (s[2] - s[0]).powi(2))
+                        + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]))
+                        .sqrt(),
+                );
+            } else if elem.len() >= 3 && mesh.dim == 2 {
                 let n = [elem[0], elem[1], elem[2]];
                 let p = [&mesh.nodes[n[0]], &mesh.nodes[n[1]], &mesh.nodes[n[2]]];
                 let det = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
@@ -693,6 +844,95 @@ impl FeaEngine {
             reaction_forces: reactions,
             max_magnitude: max_t,
         })
+    }
+
+    /// Shape-function gradients `(b, c, d)` per node of a linear tetrahedron (`N_i = a + b x +
+    /// c y + d z`) and its volume, or `None` for a degenerate element.
+    fn tet4_gradients(mesh: &FeaMesh, elem: &[usize]) -> Option<([[f64; 3]; 4], f64)> {
+        // 6 V = det of the edge vectors from node 0.
+        let p0 = &mesh.nodes[elem[0]];
+        let e: Vec<[f64; 3]> = (1..4)
+            .map(|k| {
+                let p = &mesh.nodes[elem[k]];
+                [p[0] - p0[0], p[1] - p0[1], p[2] - p0[2]]
+            })
+            .collect();
+        let six_v = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1])
+            - e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0])
+            + e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
+        let volume = six_v.abs() / 6.0;
+        if volume < 1e-14 {
+            return None;
+        }
+        // Invert M = [1 x y z] by Gauss-Jordan; column i of M^-1 holds N_i's coefficients.
+        let mut m = [[0.0_f64; 8]; 4];
+        for (r, &node) in elem.iter().enumerate() {
+            let p = &mesh.nodes[node];
+            m[r][..4].copy_from_slice(&[1.0, p[0], p[1], p[2]]);
+            m[r][4 + r] = 1.0;
+        }
+        for col in 0..4 {
+            let pivot = (col..4).max_by(|&a, &b| m[a][col].abs().total_cmp(&m[b][col].abs()))?;
+            if m[pivot][col].abs() < 1e-14 {
+                return None;
+            }
+            m.swap(col, pivot);
+            let scale = m[col][col];
+            for v in m[col].iter_mut() {
+                *v /= scale;
+            }
+            for r in 0..4 {
+                if r != col {
+                    let f = m[r][col];
+                    for c in 0..8 {
+                        let delta = f * m[col][c];
+                        m[r][c] -= delta;
+                    }
+                }
+            }
+        }
+        // The inverse is in columns 4..8: N_i has coefficient k at inverse[k][i].
+        let mut grads = [[0.0; 3]; 4];
+        for (i, g) in grads.iter_mut().enumerate() {
+            for k in 0..3 {
+                g[k] = m[k + 1][4 + i];
+            }
+        }
+        Some((grads, volume))
+    }
+
+    /// The 6 x 12 strain-displacement matrix of a linear tetrahedron, strain ordered
+    /// `[exx, eyy, ezz, gxy, gyz, gzx]` and unknowns `[u0, v0, w0, u1, ...]`.
+    fn tet4_b_matrix(grads: &[[f64; 3]; 4]) -> [[f64; 12]; 6] {
+        let mut b = [[0.0; 12]; 6];
+        for (i, g) in grads.iter().enumerate() {
+            let (bx, cy, dz) = (g[0], g[1], g[2]);
+            let col = i * 3;
+            b[0][col] = bx;
+            b[1][col + 1] = cy;
+            b[2][col + 2] = dz;
+            b[3][col] = cy;
+            b[3][col + 1] = bx;
+            b[4][col + 1] = dz;
+            b[4][col + 2] = cy;
+            b[5][col] = dz;
+            b[5][col + 2] = bx;
+        }
+        b
+    }
+
+    /// The 6 x 6 isotropic 3-D constitutive matrix (Lame parameters `lambda`, `mu`).
+    fn solid_constitutive(e: f64, nu: f64) -> [[f64; 6]; 6] {
+        let lambda = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
+        let mu = e / (2.0 * (1.0 + nu));
+        let mut d = [[0.0; 6]; 6];
+        for i in 0..3 {
+            for j in 0..3 {
+                d[i][j] = if i == j { lambda + 2.0 * mu } else { lambda };
+            }
+            d[i + 3][i + 3] = mu;
+        }
+        d
     }
 
     /// Entries `(C11, C12, C33)` of the 2-D constitutive matrix `[[C11, C12, 0], [C12, C11, 0],

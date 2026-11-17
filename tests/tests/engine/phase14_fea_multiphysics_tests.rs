@@ -296,3 +296,45 @@ fn constraints_are_eliminated_exactly_and_reactions_balance_the_load() {
     );
     assert!(sol.reaction_forces[1..].iter().all(|r| *r == 0.0));
 }
+
+#[test]
+fn a_large_plate_solves_without_a_dense_matrix() {
+    use algebra_engine::pde::SparseAssembly;
+
+    let mut a = SparseAssembly::new(3);
+    a.add(0, 1, 2.0);
+    a.add(0, 1, 3.0);
+    assert_eq!(a.get(0, 1), 5.0);
+    assert_eq!(a.get(2, 2), 0.0);
+    assert_eq!(a.nnz(), 1);
+
+    // A 2-D heat plate with 40 x 40 elements (1681 unknowns, 14 million dense entries) heated
+    // on the bottom edge and cooled by convection on the top: the temperature must decrease
+    // monotonically upward and stay between the two reservoirs.
+    let mesh = FeaMesh::plate_2d(4.0, 4.0, 40, 40);
+    let physics = PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: 15.0,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: 0.0,
+    };
+    let bcs = vec![
+        FeaBoundaryCondition::PrescribedTemperature {
+            group_name: "bottom".into(),
+            temperature: 80.0,
+        },
+        FeaBoundaryCondition::ConvectiveCooling {
+            group_name: "top".into(),
+            heat_transfer_coeff: 2.0,
+            ambient_temperature: 20.0,
+        },
+    ];
+    let sol = FeaEngine::solve(&mesh, &physics, &bcs).expect("large plate solve");
+    assert_eq!(sol.nodal_values.len(), 41 * 41);
+    let column = |j: usize| sol.nodal_values[j * 41 + 20];
+    for j in 0..40 {
+        assert!(column(j + 1) <= column(j) + 1e-9, "row {j}");
+    }
+    assert!((column(0) - 80.0).abs() < 1e-9);
+    assert!(column(40) > 20.0 && column(40) < 80.0);
+}

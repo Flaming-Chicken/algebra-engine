@@ -143,3 +143,100 @@ fn test_sqrt_surface_height_selects_a_component_of_w() {
     }
     assert!(distinct, "the real and imaginary views must differ");
 }
+
+#[test]
+fn generated_shaders_pass_structural_validation_and_broken_ones_do_not() {
+    use algebra_engine::gpu::WgslShaderGenerator;
+    let grid = WgslShaderGenerator::generate_grid_evaluation_shader("x * x + 2.0 * x", 64);
+    let fem = WgslShaderGenerator::generate_matrix_free_fem_shader(3, 64);
+    let fractal = WgslShaderGenerator::generate_complex_fractal_shader(100, 8);
+    for kernel in [&grid, &fem, &fractal] {
+        assert!(
+            kernel.validate().is_ok(),
+            "{}: {:?}",
+            kernel.kernel_name,
+            kernel.validate()
+        );
+    }
+
+    // An expression with an unbalanced parenthesis breaks the shader and is caught.
+    let broken = WgslShaderGenerator::generate_grid_evaluation_shader("x * (x + 1.0", 64);
+    let message = broken.validate().unwrap_err();
+    assert!(
+        message.contains("unbalanced") || message.contains("unclosed"),
+        "{message}"
+    );
+
+    // A workgroup above the default WebGPU limit (256 invocations) is rejected.
+    let big = WgslShaderGenerator::generate_grid_evaluation_shader("x", 1024);
+    assert!(big.validate().unwrap_err().contains("limit"));
+
+    // The descriptor must agree with the source, and bindings must be unique and sufficient.
+    let mut mismatch = grid.clone();
+    mismatch.workgroup_size = [32, 1, 1];
+    assert!(mismatch.validate().unwrap_err().contains("disagrees"));
+    let mut duplicate = grid.clone();
+    duplicate.wgsl_source = duplicate
+        .wgsl_source
+        .replace("@group(0) @binding(1)", "@group(0) @binding(0)");
+    assert!(duplicate.validate().unwrap_err().contains("twice"));
+    let mut starved = grid.clone();
+    starved.input_buffer_count = 9;
+    assert!(
+        starved
+            .validate()
+            .unwrap_err()
+            .contains("bindings declared")
+    );
+    let mut no_entry = grid.clone();
+    no_entry.wgsl_source = no_entry.wgsl_source.replace("fn main(", "fn other(");
+    assert!(no_entry.validate().unwrap_err().contains("entry point"));
+}
+
+#[test]
+fn checked_polynomial_arithmetic_reports_overflow_and_the_wrapping_one_wraps() {
+    use algebra_advanced::gpu::SimdPolyVector;
+    let a = SimdPolyVector::new(vec![1, 2, 3]);
+    let b = SimdPolyVector::new(vec![4, 5]);
+    assert_eq!(a.checked_add(&b).unwrap().coeffs, vec![5, 7, 3]);
+    assert_eq!(a.checked_multiply(&b).unwrap().coeffs, vec![4, 13, 22, 15]);
+    // Agrees with the parallel version when nothing overflows.
+    assert_eq!(
+        a.multiply_simd(&b).coeffs,
+        a.checked_multiply(&b).unwrap().coeffs
+    );
+
+    let big = SimdPolyVector::new(vec![i64::MAX, 1]);
+    assert!(big.checked_add(&big).is_none());
+    assert!(
+        big.checked_multiply(&SimdPolyVector::new(vec![2]))
+            .is_none()
+    );
+    // The unchecked methods wrap (arithmetic mod 2^64), as documented.
+    assert_eq!(
+        big.add_simd(&big).coeffs[0],
+        i64::MAX.wrapping_add(i64::MAX)
+    );
+}
+
+#[test]
+fn the_enabled_flag_selects_between_the_parallel_and_the_sequential_path() {
+    use algebra_advanced::gpu::GpuComputeKernel;
+    use algebra_core::ExprGraph;
+    use algebra_engine::matrix::SymbolicMatrix;
+    let graph = ExprGraph::new();
+    let entries = |base: i64| -> Vec<_> { (0..9).map(|i| graph.integer(base + i)).collect() };
+    let a = SymbolicMatrix::new(3, 3, entries(1)).unwrap();
+    let b = SymbolicMatrix::new(3, 3, entries(2)).unwrap();
+
+    let parallel = GpuComputeKernel { enabled: true }
+        .multiply_matrix_blocks(&graph, &a, &b)
+        .unwrap();
+    let sequential = GpuComputeKernel { enabled: false }
+        .multiply_matrix_blocks(&graph, &a, &b)
+        .unwrap();
+    // The two paths give the same product.
+    assert_eq!(parallel.elements, sequential.elements);
+    // And it is the real product: row 0 of A is (1, 2, 3), column 0 of B is (2, 5, 8): 2 + 10 + 24.
+    assert_eq!(parallel.elements[0], graph.integer(36));
+}

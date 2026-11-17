@@ -39,6 +39,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `GeometricConstraintSolver::solve` ignored every constraint except distance and coincidence (placing a point along the x-axis); it now solves parallel, perpendicular, angle, tangent and fixed-area constraints too by damped Gauss-Newton, and reports inconsistent systems.
 - `IgaStiffnessMatrix::integrate_stiffness_entry_2d` ignored the NURBS basis and returned a fixed weight of 1.0 on the diagonal and 0.1 elsewhere times the area; it now integrates the real gradient inner product (the unit square gives the textbook Q1 matrix). `metric_determinant_2d` uses analytic tangents.
 - `DiffPolynomial::differentiate` left repeated indeterminates in a term (`y'` twice), which made degrees and leaders wrong; it now normalises.
 - LSP hover evaluated only the hovered line, so any line using an earlier definition showed an error or a wrong value; it now evaluates the document up to that line in order.

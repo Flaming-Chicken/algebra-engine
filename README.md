@@ -46,7 +46,7 @@ graph TD
     end
 
     subgraph L6 ["Layer 6: Workspace Test Suite"]
-        Tests["tests/<br/>Centralized Workspace Test Suite (480+ Tests)"]
+        Tests["tests/<br/>Centralized Workspace Test Suite (550+ Tests)"]
     end
 
     Promoters --> Core
@@ -298,7 +298,7 @@ fn main() {
 All workspace integration and unit tests are centralized in the `tests/` directory:
 
 ```bash
-# Run all 480+ workspace unit, integration, and doc tests
+# Run all 740+ workspace unit, integration, and doc tests
 cargo test --workspace
 
 # Run specific integration suites

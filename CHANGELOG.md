@@ -33,6 +33,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - FEA: linear tetrahedral solid elements (`Tet4`, `FeaMesh::box_3d`); 2-D body forces are applied; unimplemented element types are an error instead of being skipped.
 - FEA: bilinear quadrilateral elasticity elements (`Quad4`, `FeaMesh::plate_2d_quad`).
 - FEA heat conduction on `Quad4` and `Tet4` elements; unsupported element types are an error instead of being skipped.
+- FEA: trilinear hexahedral elements (`Hex8`, `FeaMesh::box_3d_hex`) for elasticity and heat conduction.
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.
 - `CustomShape::to_tri_mesh` returns `Result`; N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.

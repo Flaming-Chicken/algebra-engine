@@ -481,10 +481,91 @@ fn body_force_and_unsupported_elements_are_handled_honestly() {
     assert!((total - 8.0).abs() < 1e-8, "reaction {total} vs weight 8");
 
     // An element type the elasticity solver does not implement is an error, not silence.
-    let mut quad = FeaMesh::new(2, algebra_engine::pde::ElementType::Quad4);
+    let mut quad = FeaMesh::new(2, algebra_engine::pde::ElementType::Hex8);
     for p in [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]] {
         quad.add_node(p.to_vec());
     }
     quad.add_element(vec![0, 1, 2, 3]);
     assert!(FeaEngine::solve(&quad, &physics, &[]).is_err());
+}
+
+#[test]
+fn quadrilateral_elements_pass_the_patch_test_on_a_distorted_mesh() {
+    // Bilinear isoparametric quadrilaterals reproduce a constant-strain state exactly even on
+    // irregular quadrilaterals. Distort the interior nodes and stretch the plate uniaxially.
+    let (len, height, d, e, nu) = (6.0_f64, 3.0, 0.02, 150.0, 0.3);
+    for plane_stress in [true, false] {
+        let mut mesh = FeaMesh::plate_2d_quad(len, height, 6, 3);
+        for j in 1..3 {
+            for i in 1..6 {
+                let n = j * 7 + i;
+                mesh.nodes[n][0] += 0.17 * ((i * 3 + j) % 3) as f64 - 0.12;
+                mesh.nodes[n][1] += 0.11 * ((i + 2 * j) % 4) as f64 - 0.15;
+            }
+        }
+        let physics = PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: e,
+            poissons_ratio: nu,
+            density: 1.0,
+            body_force: vec![0.0, 0.0],
+            plane_stress,
+        };
+        let fix =
+            |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+                group_name: group.into(),
+                dof_index,
+                value,
+            };
+        let bcs = vec![
+            fix("left", 0, 0.0),
+            fix("right", 0, d),
+            fix("bottom", 1, 0.0),
+        ];
+        let sol = FeaEngine::solve(&mesh, &physics, &bcs).unwrap();
+
+        let eps = d / len;
+        let nu_eff = if plane_stress { nu } else { nu / (1.0 - nu) };
+        let sx = if plane_stress {
+            e * eps
+        } else {
+            e * eps / (1.0 - nu * nu)
+        };
+        let vm = if plane_stress {
+            sx
+        } else {
+            let sz = nu * sx;
+            (0.5 * (sx * sx + sz * sz + (sz - sx).powi(2))).sqrt()
+        };
+        for (i, p) in mesh.nodes.iter().enumerate() {
+            let want = [eps * p[0], -nu_eff * eps * p[1]];
+            for c in 0..2 {
+                let got = sol.nodal_values[i * 2 + c];
+                assert!(
+                    (got - want[c]).abs() < 1e-10,
+                    "node {i} comp {c}: {got} vs {want:?}"
+                );
+            }
+        }
+        for (k, v) in sol.von_mises_stresses.iter().enumerate() {
+            assert!(
+                (v - vm).abs() < 1e-9 * vm,
+                "plane_stress={plane_stress} element {k}: {v} vs {vm}"
+            );
+        }
+    }
+
+    // A clockwise (inverted) element is reported, not integrated with a negative area.
+    let mut bad = FeaMesh::new(2, algebra_engine::pde::ElementType::Quad4);
+    for p in [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]] {
+        bad.add_node(p.to_vec());
+    }
+    bad.add_element(vec![0, 1, 2, 3]);
+    let physics = PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 1.0,
+        poissons_ratio: 0.3,
+        density: 1.0,
+        body_force: vec![0.0, 0.0],
+        plane_stress: true,
+    };
+    assert!(FeaEngine::solve(&bad, &physics, &[]).is_err());
 }

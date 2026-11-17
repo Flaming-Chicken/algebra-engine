@@ -1145,3 +1145,48 @@ fn thread_profiles_are_periodic_bounded_and_differ_by_standard() {
         "ISO threads are deeper than square"
     );
 }
+
+#[test]
+fn implicit_surfaces_mesh_to_closed_solids_with_the_right_volume() {
+    use algebra_engine::cad::{BoundingBox3D, CustomShape, Mesh3D};
+    use std::f64::consts::PI;
+
+    // Sphere of radius 1: f = r^2 - x^2 - y^2 - z^2 is positive inside, so normals point inward;
+    // use f = x^2 + y^2 + z^2 - 1 (positive outside) for an outward-oriented solid.
+    let bbox = BoundingBox3D::new([-1.5; 3], [1.5; 3]);
+    let sphere = Mesh3D::from_implicit("x^2 + y^2 + z^2 - 1", &bbox, 40).unwrap();
+    assert!(sphere.is_closed(), "the sphere must be a closed surface");
+    let v = sphere.compute_volume();
+    let exact = 4.0 / 3.0 * PI;
+    assert!(
+        (v - exact).abs() < 0.04 * exact,
+        "sphere volume {v} vs {exact}"
+    );
+
+    // Torus (R=1, r=0.4): (sqrt(x^2+y^2)-1)^2 + z^2 - 0.16, volume 2 pi^2 R r^2.
+    let bbox = BoundingBox3D::new([-1.6, -1.6, -0.6], [1.6, 1.6, 0.6]);
+    let torus = Mesh3D::from_implicit("(sqrt(x^2 + y^2) - 1)^2 + z^2 - 0.16", &bbox, 60).unwrap();
+    assert!(torus.is_closed(), "the torus must be a closed surface");
+    let v = torus.compute_volume();
+    let exact = 2.0 * PI * PI * 0.16;
+    assert!(
+        (v - exact).abs() < 0.05 * exact,
+        "torus volume {v} vs {exact}"
+    );
+
+    // A surface that leaves the box is cut open.
+    let small = BoundingBox3D::new([-0.8; 3], [0.8; 3]);
+    let cut = Mesh3D::from_implicit("x^2 + y^2 + z^2 - 1", &small, 12).unwrap();
+    assert!(!cut.is_closed() || cut.triangles.is_empty());
+
+    // Bad input is an error, not a cube.
+    assert!(Mesh3D::from_implicit("x +", &bbox, 10).is_err());
+    assert!(Mesh3D::from_implicit("x", &bbox, 1).is_err());
+
+    // And CustomShape routes to it.
+    let shape = CustomShape::ParametricImplicit {
+        expr_str: "x^2 + y^2 + z^2 - 1".into(),
+        bbox: BoundingBox3D::new([-1.5; 3], [1.5; 3]),
+    };
+    assert!(shape.to_tri_mesh().unwrap().is_closed());
+}

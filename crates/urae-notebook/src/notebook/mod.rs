@@ -1585,7 +1585,7 @@ impl NotebookState {
         let target_ref_token = format!("${}", line_idx + 1);
 
         let new_target_line = if target_line.contains('=') && !target_line.contains("==") {
-            let (_, rhs) = target_line.split_once('=').unwrap();
+            let rhs = target_line.split_once('=').map_or("", |(_, rhs)| rhs);
             format!("{} = {}", var_name, rhs.trim())
         } else {
             format!("{} = {}", var_name, target_line)
@@ -1701,8 +1701,11 @@ impl NotebookState {
             let is_word_boundary = if start == 0 {
                 true
             } else {
-                let prev = rest[..start].chars().last().unwrap();
-                !prev.is_alphanumeric() && prev != '_'
+                // `start > 0`, so there is a preceding character.
+                rest[..start]
+                    .chars()
+                    .last()
+                    .is_none_or(|prev| !prev.is_alphanumeric() && prev != '_')
             };
 
             if !is_word_boundary {

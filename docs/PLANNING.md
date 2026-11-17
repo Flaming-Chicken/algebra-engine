@@ -91,8 +91,9 @@ number-theory output, the GUI plan status, and the documentation corrections to 
    presented as a result is worse than a refusal. A11 (GUI export formats) is the smallest; A8 needs a real algorithm.
 2. **Numerical and symbolic correctness (B1–B12).** B1–B4 and B6–B12 are fixed, with tests in
    `tests/tests/engine/known_defect_tests.rs`. For each remaining item add a failing test, then fix. Each fix needs a test that fails on the old code.
-3. **Panic hygiene.** About 63 production `panic!`/`unwrap` sites per `AUDIT-PANICS-AND-UNWRAPS.md`; replace
-   them with typed errors, then enable `clippy::unwrap_used` for non-test code.
+3. **Panic hygiene: done (17 Nov).** The recount found 29 production sites, not 63; reachable ones are removed and
+   `clippy::unwrap_used`, `expect_used` and `panic` are enforced as warnings (errors under CI's `-D warnings`).
+   Intentional panics remain only in the matrix operators and `Uint` arithmetic, which mirror `std`.
 4. **ROADMAP scope with no implementation.** Listed in `ROADMAP.md` section 2.1; decide per item whether to
    build it or drop the claim.
 5. **Known engine gaps:** `x*sqrt(x+1)` integration, the real-versus-complex solver convention (make it a typed
@@ -111,5 +112,5 @@ number-theory output, the GUI plan status, and the documentation corrections to 
   so the "every public symbol is documented" rule is a convention, not a gate (open-work item 7).
 - **`AUDIT-2026-11-15.md`** is a snapshot at `23f508b`. Its competitor comparison was removed by the reconciliation
   edit; its findings are tracked in section 3 above, not maintained in place.
-- **`AUDIT-PANICS-AND-UNWRAPS.md`** counts sites at v0.3.2; recount before using the 63 figure as a target.
+- **`AUDIT-PANICS-AND-UNWRAPS.md`** counted 63 sites; the 17 Nov recount found 29 and the doc now says so.
 

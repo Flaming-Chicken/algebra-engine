@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `algebra-engine`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
 

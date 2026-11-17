@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `urae-notebook`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "notebook/notebook_tests.rs"]
 mod notebook_tests;
 

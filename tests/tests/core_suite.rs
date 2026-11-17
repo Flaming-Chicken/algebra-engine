@@ -1,5 +1,7 @@
 //! Workspace Integration Test Suite for `algebra-core`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[path = "core/domain_tests.rs"]
 mod domain_tests;
 

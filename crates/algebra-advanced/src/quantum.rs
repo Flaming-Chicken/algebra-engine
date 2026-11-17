@@ -140,10 +140,39 @@ impl GaugeTheory {
 pub struct DysonSeries;
 
 impl DysonSeries {
-    /// First-order Dyson series term $-i \int_{t_0}^t H_I(t') dt'$.
+    /// First-order Dyson series term $-i \int H_I(t') dt'$ with an *indefinite* integral (the
+    /// antiderivative, no lower limit). If `H_I` cannot be integrated in closed form the result
+    /// keeps an unevaluated integral rather than substituting `H_I` itself.
     pub fn first_order_term(graph: &ExprGraph, interaction_h: ExprId, t: SymbolId) -> ExprId {
-        let int_h = graph.integrate(interaction_h, t).unwrap_or(interaction_h);
+        let int_h = graph.integrate(interaction_h, t).unwrap_or_else(|_| {
+            let name = graph.symbols.resolve(t).unwrap_or_default();
+            graph.integral(interaction_h, &name, None, None)
+        });
         let minus_i = graph.mul([graph.integer(-1), graph.constant(algebra_core::Constant::I)]);
         graph.mul([minus_i, int_h])
+    }
+
+    /// First-order Dyson series term $-i \int_{t_0}^{t} H_I(t') dt'$ over the interval from
+    /// `t0` to `t`. Falls back to an unevaluated definite integral when no antiderivative is found.
+    pub fn first_order_term_between(
+        graph: &ExprGraph,
+        interaction_h: ExprId,
+        t: SymbolId,
+        t0: ExprId,
+    ) -> ExprId {
+        let t_expr = graph.symbol(&graph.symbols.resolve(t).unwrap_or_default());
+        let integral = match graph.integrate(interaction_h, t) {
+            Ok(anti) => {
+                let upper = graph.substitute(anti, t, t_expr);
+                let lower = graph.substitute(anti, t, t0);
+                graph.sub(upper, lower)
+            }
+            Err(_) => {
+                let name = graph.symbols.resolve(t).unwrap_or_default();
+                graph.integral(interaction_h, &name, Some(t0), Some(t_expr))
+            }
+        };
+        let minus_i = graph.mul([graph.integer(-1), graph.constant(algebra_core::Constant::I)]);
+        graph.mul([minus_i, integral])
     }
 }

@@ -111,6 +111,9 @@ impl IdentityGroup for ItoNilpotentBridgeGroup {
             rewrite!("ito-dt-dw-zero"; "(* dt dW)" => "0"),
             // (dt)^2 = 0
             rewrite!("ito-dt-squared-zero"; "(* dt dt)" => "0"),
+            // The same identities once repeated factors have been merged into powers.
+            rewrite!("ito-quad-variation-pow"; "(^ dW 2)" => "dt"),
+            rewrite!("ito-dt-squared-zero-pow"; "(^ dt 2)" => "0"),
         ]
     }
 }

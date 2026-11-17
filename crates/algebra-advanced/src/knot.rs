@@ -196,7 +196,7 @@ impl BraidWord {
 }
 
 /// Laurent Polynomial representation $P(A) = \sum c_k A^k$.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct LaurentPoly {
     /// Mapping from exponent power $k \in \mathbb{Z}$ to coefficient $c_k \in \mathbb{R}$.
     pub terms: HashMap<i64, f64>,
@@ -255,58 +255,108 @@ impl LaurentPoly {
 pub struct KnotInvariants;
 
 impl KnotInvariants {
-    /// Computes the Kauffman Bracket $\langle K \rangle(A)$ for standard knot braid closures.
-    pub fn kauffman_bracket(braid: &BraidWord) -> LaurentPoly {
-        // d = -A^2 - A^-2
+    /// Largest number of crossings handled by the state sum (it visits `2^k` states).
+    pub const MAX_CROSSINGS: usize = 22;
+
+    /// Computes the Kauffman Bracket $\langle K \rangle(A)$ of the closure of `braid` by the
+    /// state sum over all `2^k` smoothings of its `k` crossings:
+    /// $$\langle D \rangle = \sum_s A^{a(s) - b(s)} d^{|s| - 1},\quad d = -A^2 - A^{-2},$$
+    /// where `|s|` is the number of loops of state `s`. A positive generator $\sigma_i$ smooths to
+    /// the identity with weight $A$ and to the cup-cap $e_i$ with weight $A^{-1}$; a negative one
+    /// the other way round.
+    ///
+    /// Errors when a generator index is outside `1..num_strands` or the word has more than
+    /// [`KnotInvariants::MAX_CROSSINGS`] crossings.
+    pub fn kauffman_bracket(braid: &BraidWord) -> Result<LaurentPoly, String> {
+        let n = braid.num_strands;
+        let k = braid.word.len();
+        if n == 0 {
+            return Err("a braid needs at least one strand".into());
+        }
+        if let Some(g) = braid.word.iter().find(|g| g.index == 0 || g.index >= n) {
+            return Err(format!(
+                "generator index {} is outside 1..{} for a {n}-strand braid",
+                g.index,
+                n - 1
+            ));
+        }
+        if k > Self::MAX_CROSSINGS {
+            return Err(format!(
+                "{k} crossings exceed the state-sum limit of {}",
+                Self::MAX_CROSSINGS
+            ));
+        }
+
+        // Powers of d = -A^2 - A^-2, built once.
         let d = LaurentPoly::monomial(-1.0, 2).add(&LaurentPoly::monomial(-1.0, -2));
+        let mut d_powers = vec![LaurentPoly::monomial(1.0, 0)];
+        for _ in 0..(n + k) {
+            let next = d_powers.last().cloned().unwrap_or_default().mul(&d);
+            d_powers.push(next);
+        }
 
-        if braid.word.is_empty() {
-            // Unknot or n disconnected unknots: d^(n-1)
-            let mut res = LaurentPoly::monomial(1.0, 0);
-            for _ in 0..(braid.num_strands.saturating_sub(1)) {
-                res = res.mul(&d);
+        // Count the loops of the closure for each state, grouped by (A-exponent, loops).
+        let node = |level: usize, strand: usize| level * n + strand;
+        let mut tally: HashMap<(i64, usize), f64> = HashMap::new();
+        for state in 0u64..(1u64 << k) {
+            let mut parent: Vec<usize> = (0..(k + 1) * n).collect();
+            fn find(parent: &mut [usize], mut x: usize) -> usize {
+                while parent[x] != x {
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
+                }
+                x
             }
-            return res;
-        }
-
-        // Exact analytical brackets for primary knots:
-        if braid == &BraidWord::trefoil() {
-            // Trefoil 3_1: <3_1> = A^7 - A^3 - A^-5
-            return LaurentPoly::monomial(1.0, 7)
-                .add(&LaurentPoly::monomial(-1.0, 3))
-                .add(&LaurentPoly::monomial(-1.0, -5));
-        }
-
-        if braid == &BraidWord::hopf_link() {
-            // Hopf Link 2_1^2: <2_1^2> = -A^4 - A^-4
-            return LaurentPoly::monomial(-1.0, 4).add(&LaurentPoly::monomial(-1.0, -4));
-        }
-
-        if braid == &BraidWord::figure_eight() {
-            // Figure Eight 4_1: <4_1> = A^8 - A^4 + 1 - A^-4 + A^-8
-            return LaurentPoly::monomial(1.0, 8)
-                .add(&LaurentPoly::monomial(-1.0, 4))
-                .add(&LaurentPoly::monomial(1.0, 0))
-                .add(&LaurentPoly::monomial(-1.0, -4))
-                .add(&LaurentPoly::monomial(1.0, -8));
-        }
-
-        // Generic skein recursive approximation
-        let mut bracket = LaurentPoly::monomial(1.0, 0);
-        for g in &braid.word {
-            let term = if g.sign > 0 {
-                LaurentPoly::monomial(1.0, 1)
-            } else {
-                LaurentPoly::monomial(1.0, -1)
+            let union = |parent: &mut Vec<usize>, x: usize, y: usize| {
+                let (rx, ry) = (find(parent, x), find(parent, y));
+                if rx != ry {
+                    parent[rx] = ry;
+                }
             };
-            bracket = bracket.mul(&term);
+            let mut exponent = 0i64;
+            for (level, g) in braid.word.iter().enumerate() {
+                let cup_cap = (state >> level) & 1 == 1;
+                // Weight: A for the "identity" smoothing of a positive crossing, A^-1 for the other.
+                let identity_weight_is_a = g.sign > 0;
+                exponent += if cup_cap == identity_weight_is_a {
+                    -1
+                } else {
+                    1
+                };
+                let (left, right) = (g.index - 1, g.index);
+                for strand in 0..n {
+                    if cup_cap && (strand == left || strand == right) {
+                        continue;
+                    }
+                    union(&mut parent, node(level, strand), node(level + 1, strand));
+                }
+                if cup_cap {
+                    union(&mut parent, node(level, left), node(level, right));
+                    union(&mut parent, node(level + 1, left), node(level + 1, right));
+                }
+            }
+            // Closure: the top of the braid is glued to the bottom.
+            for strand in 0..n {
+                union(&mut parent, node(k, strand), node(0, strand));
+            }
+            let mut roots = std::collections::HashSet::new();
+            for x in 0..(k + 1) * n {
+                roots.insert(find(&mut parent, x));
+            }
+            *tally.entry((exponent, roots.len())).or_insert(0.0) += 1.0;
         }
-        bracket
+
+        let mut bracket = LaurentPoly::default();
+        for ((exponent, loops), count) in tally {
+            let term = LaurentPoly::monomial(count, exponent).mul(&d_powers[loops - 1]);
+            bracket = bracket.add(&term);
+        }
+        Ok(bracket)
     }
 
     /// Computes the normalized Jones Polynomial $V(t) = (-A^3)^{-w(D)} \langle D \rangle \big|_{A = t^{-1/4}}$.
-    pub fn jones_polynomial(braid: &BraidWord) -> LaurentPoly {
-        let bracket = Self::kauffman_bracket(braid);
+    pub fn jones_polynomial(braid: &BraidWord) -> Result<LaurentPoly, String> {
+        let bracket = Self::kauffman_bracket(braid)?;
         let writhe = braid.writhe();
 
         // Factor (-A^3)^(-w) = (-1)^w * A^(-3w)
@@ -325,7 +375,7 @@ impl KnotInvariants {
         }
         jones_terms.retain(|_, v| v.abs() > 1e-12);
 
-        LaurentPoly { terms: jones_terms }
+        Ok(LaurentPoly { terms: jones_terms })
     }
 }
 

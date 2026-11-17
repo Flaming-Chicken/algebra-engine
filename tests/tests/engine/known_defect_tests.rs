@@ -1,4 +1,4 @@
-//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B10, B12).
+//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B7, B10, B12).
 //!
 //! Each test asserts the correct behaviour and was written to fail on the code it replaced.
 
@@ -77,7 +77,15 @@ fn eval_at(g: &ExprGraph, e: algebra_core::ExprId, n: f64) -> f64 {
         ExprKind::Div(l, r) => eval_at(g, *l, n) / eval_at(g, *r, n),
         ExprKind::Neg(i) => -eval_at(g, *i, n),
         ExprKind::Pow(b, x) => eval_at(g, *b, n).powf(eval_at(g, *x, n)),
-        ExprKind::Function { args, .. } => eval_at(g, args[0], n).sqrt(),
+        ExprKind::Function { name, args } => {
+            let x = eval_at(g, args[0], n);
+            match g.symbols.resolve(*name).as_deref() {
+                Some("exp") => x.exp(),
+                Some("sin") => x.sin(),
+                Some("cos") => x.cos(),
+                _ => x.sqrt(),
+            }
+        }
         other => panic!("unsupported node {other:?}"),
     }
 }
@@ -486,4 +494,52 @@ fn ito_product_rule_carries_the_quadratic_variation_drift() {
     // No drift in ordinary or Stratonovich calculus.
     let smooth = WeilJet::var(0.7, CalculusKind::Continuous);
     assert_eq!(smooth.mul(&smooth).ito_drift(), 0.0);
+}
+
+#[test]
+fn forced_linear_system_includes_the_duhamel_convolution() {
+    use algebra_engine::matrix::SymbolicMatrix;
+    use algebra_engine::systems::differential::DifferentialSystemSolver;
+    let g = ExprGraph::new();
+    let t = g.symbols.get_or_intern("t");
+    // y1' = -y1 + 1, y2' = -2 y2 with y(0) = 0: y1 = 1 - e^{-t}, y2 = 0.
+    let a = SymbolicMatrix::new(
+        2,
+        2,
+        vec![g.integer(-1), g.integer(0), g.integer(0), g.integer(-2)],
+    )
+    .unwrap();
+    let y0 = [g.integer(0), g.integer(0)];
+    let forcing = [g.integer(1), g.integer(0)];
+    let sol =
+        DifferentialSystemSolver::solve_linear_system_2x2(&g, &a, Some(&forcing), Some(&y0), t)
+            .unwrap();
+    for time in [0.0_f64, 0.5, 1.3, 2.0] {
+        let y1 = eval_at(&g, sol[0], time);
+        assert!(
+            (y1 - (1.0 - (-time).exp())).abs() < 1e-9,
+            "y1({time}) = {y1}: {}",
+            show(&g, sol[0])
+        );
+        assert!(
+            eval_at(&g, sol[1], time).abs() < 1e-9,
+            "y2: {}",
+            show(&g, sol[1])
+        );
+    }
+
+    // Off-diagonal coupling: y1' = y2, y2' = -y1 + 0 with forcing (0, 1): y1 = 1 - cos t.
+    let rot = SymbolicMatrix::new(
+        2,
+        2,
+        vec![g.integer(0), g.integer(1), g.integer(-1), g.integer(0)],
+    )
+    .unwrap();
+    let forced = [g.integer(0), g.integer(1)];
+    // The fundamental matrix is written with complex exponentials here, which the real
+    // evaluator above cannot check; assert that the convolution variable was integrated out.
+    let sol =
+        DifferentialSystemSolver::solve_linear_system_2x2(&g, &rot, Some(&forced), Some(&y0), t)
+            .unwrap();
+    assert!(!show(&g, sol[0]).contains("tau"), "{}", show(&g, sol[0]));
 }

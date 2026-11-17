@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
 ### Changed
+- Differential-equation classification reports PDEs as linear, semilinear, quasilinear or nonlinear by the location of the nonlinearity (the KdV equation is now semilinear, Burgers quasilinear). Powers and products of derivatives are detected as nonlinear.
 - Production code no longer contains reachable `unwrap`, `expect` or `panic!` calls outside documented operator panics; the workspace lints `clippy::unwrap_used`, `expect_used` and `panic` are on (test code exempt). A failed notebook launch is reported instead of panicking, and a poisoned token lock is recovered.
 - `KnotInvariants::kauffman_bracket` and `jones_polynomial` return `Result` and compute a state sum (previously a lookup table for three knots and a product of `A^±1` otherwise). A positive `σ₁³` now gives `A⁻⁷ − A⁻³ − A⁵`, the standard right-handed trefoil (the old table held its mirror image).
 - `AnytimeHandle::refine_step` and `run_to_budget` take a re-evaluation closure and `refine_with` accepts only sound (contained, tighter) balls; enclosures no longer shrink by a fixed factor.

@@ -89,10 +89,16 @@ impl DiffEqClassifier {
             dep_var = "u".to_string();
         }
 
-        let linearity = if has_nonlinear_dep {
-            DiffEqLinearity::Nonlinear
-        } else {
+        // The traversal above misses powers and products of derivatives; check term by term.
+        let has_nonlinear_dep =
+            has_nonlinear_dep || !Self::is_linear_in_unknown(graph, eq_id, &dep_var);
+        let linearity = if !has_nonlinear_dep {
             DiffEqLinearity::Linear
+        } else if kind == DiffEqKind::Pde {
+            // PDE theory distinguishes where the nonlinearity sits.
+            Self::refine_pde_linearity(graph, eq_id, &dep_var, max_order)
+        } else {
+            DiffEqLinearity::Nonlinear
         };
 
         let mut sorted_indep: Vec<String> = indep_vars.into_iter().collect();
@@ -127,7 +133,9 @@ impl DiffEqClassifier {
             (DiffEqKind::Pde, 2, DiffEqLinearity::Linear) => {
                 "Sturm-Liouville Separation of Variables & Fundamental Green Kernels".to_string()
             }
-            (DiffEqKind::Pde, _, DiffEqLinearity::Nonlinear) => {
+            (DiffEqKind::Pde, _, DiffEqLinearity::Nonlinear)
+            | (DiffEqKind::Pde, _, DiffEqLinearity::Semilinear)
+            | (DiffEqKind::Pde, _, DiffEqLinearity::Quasilinear) => {
                 "Traveling Wave Reduction (xi = x - ct) & Method of Lines".to_string()
             }
             (DiffEqKind::Pde, _, _) => {
@@ -143,6 +151,168 @@ impl DiffEqClassifier {
             independent_vars: sorted_indep,
             dependent_var: dep_var,
             recommended_method,
+        }
+    }
+
+    /// Order of the derivative of the dependent variable that `id` denotes: `0` for the variable
+    /// itself, `k` for `Derivative` nodes and subscript symbols such as `u_xx`. `None` otherwise.
+    fn derivative_order(graph: &ExprGraph, id: ExprId, dep: &str) -> Option<usize> {
+        match &graph.get(id).kind {
+            ExprKind::Symbol(s) => {
+                let name = graph.symbols.resolve(*s)?;
+                if name == dep {
+                    Some(0)
+                } else {
+                    name.strip_prefix(&format!("{dep}_"))
+                        .filter(|subscript| {
+                            !subscript.is_empty() && subscript.chars().all(|c| c.is_alphabetic())
+                        })
+                        .map(|subscript| subscript.chars().count())
+                }
+            }
+            ExprKind::Derivative { expr, order, .. } => {
+                Self::derivative_order(graph, *expr, dep).map(|inner| inner + *order as usize)
+            }
+            _ => None,
+        }
+    }
+
+    /// Highest derivative order of the dependent variable anywhere inside `id`.
+    fn deepest_order(graph: &ExprGraph, id: ExprId, dep: &str) -> usize {
+        if let Some(order) = Self::derivative_order(graph, id, dep) {
+            return order;
+        }
+        match &graph.get(id).kind {
+            ExprKind::Add(items) | ExprKind::Mul(items) => items
+                .iter()
+                .map(|&i| Self::deepest_order(graph, i, dep))
+                .max()
+                .unwrap_or(0),
+            ExprKind::Sub(a, b) | ExprKind::Div(a, b) | ExprKind::Pow(a, b) => {
+                Self::deepest_order(graph, *a, dep).max(Self::deepest_order(graph, *b, dep))
+            }
+            ExprKind::Neg(inner) => Self::deepest_order(graph, *inner, dep),
+            ExprKind::Function { args, .. } => args
+                .iter()
+                .map(|&a| Self::deepest_order(graph, a, dep))
+                .max()
+                .unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    fn collect_terms(graph: &ExprGraph, id: ExprId, out: &mut Vec<ExprId>) {
+        match &graph.get(id).kind {
+            ExprKind::Add(items) => items
+                .iter()
+                .for_each(|&i| Self::collect_terms(graph, i, out)),
+            ExprKind::Sub(a, b) => {
+                Self::collect_terms(graph, *a, out);
+                Self::collect_terms(graph, *b, out);
+            }
+            ExprKind::Neg(inner) => Self::collect_terms(graph, *inner, out),
+            ExprKind::Relational { lhs, rhs, .. } => {
+                Self::collect_terms(graph, *lhs, out);
+                Self::collect_terms(graph, *rhs, out);
+            }
+            _ => out.push(id),
+        }
+    }
+
+    fn collect_factors(graph: &ExprGraph, id: ExprId, out: &mut Vec<ExprId>) {
+        match &graph.get(id).kind {
+            ExprKind::Mul(items) => items
+                .iter()
+                .for_each(|&i| Self::collect_factors(graph, i, out)),
+            ExprKind::Neg(inner) => Self::collect_factors(graph, *inner, out),
+            ExprKind::Div(num, den) => {
+                Self::collect_factors(graph, *num, out);
+                // A denominator is only a harmless coefficient if it is free of the unknown.
+                out.push(*den);
+            }
+            _ => out.push(id),
+        }
+    }
+
+    /// Whether every term of the equation contains the unknown (or one of its derivatives) at
+    /// most once, to the first power, outside any function or denominator.
+    fn is_linear_in_unknown(graph: &ExprGraph, eq_id: ExprId, dep: &str) -> bool {
+        let mut terms = Vec::new();
+        Self::collect_terms(graph, eq_id, &mut terms);
+        terms.iter().all(|&term| {
+            let mut factors = Vec::new();
+            Self::collect_factors(graph, term, &mut factors);
+            let mut involved = 0;
+            for &factor in &factors {
+                if Self::derivative_order(graph, factor, dep).is_some() {
+                    involved += 1;
+                } else if Self::deepest_order(graph, factor, dep) > 0
+                    || Self::contains_symbol_name(graph, factor, dep)
+                {
+                    // Inside a function, power or denominator: not linear.
+                    return false;
+                }
+            }
+            involved <= 1
+        })
+    }
+
+    /// Distinguish semilinear, quasilinear and fully nonlinear PDEs. The caller has already
+    /// established that the equation is not linear.
+    ///
+    /// Let `m` be the highest derivative order. The equation is *fully nonlinear* if `m` occurs
+    /// inside a nonlinear function or twice in one product; *quasilinear* if each `m`-th
+    /// derivative enters linearly but its coefficient depends on the unknown or lower
+    /// derivatives; *semilinear* if those coefficients depend on the independent variables only.
+    fn refine_pde_linearity(
+        graph: &ExprGraph,
+        eq_id: ExprId,
+        dep: &str,
+        max_order: usize,
+    ) -> DiffEqLinearity {
+        let mut terms = Vec::new();
+        Self::collect_terms(graph, eq_id, &mut terms);
+        let mut m = 0;
+        for &term in &terms {
+            m = m.max(Self::deepest_order(graph, term, dep));
+        }
+        if m == 0 {
+            m = max_order;
+        }
+        let mut quasilinear = false;
+        for &term in &terms {
+            let mut factors = Vec::new();
+            Self::collect_factors(graph, term, &mut factors);
+            let mut top_atoms = 0; // factors that are exactly an m-th derivative
+            let mut others = 0; // any other factor that involves the unknown
+            let mut top_inside_other = false;
+            for &factor in &factors {
+                match Self::derivative_order(graph, factor, dep) {
+                    Some(k) if k == m && m > 0 => top_atoms += 1,
+                    Some(_) => others += 1,
+                    None => {
+                        let depth = Self::deepest_order(graph, factor, dep);
+                        let involves = depth > 0 || Self::contains_symbol_name(graph, factor, dep);
+                        if involves {
+                            others += 1;
+                            if depth == m && m > 0 {
+                                top_inside_other = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if top_inside_other || top_atoms > 1 {
+                return DiffEqLinearity::Nonlinear;
+            }
+            if top_atoms == 1 && others > 0 {
+                quasilinear = true;
+            }
+        }
+        if quasilinear {
+            DiffEqLinearity::Quasilinear
+        } else {
+            DiffEqLinearity::Semilinear
         }
     }
 

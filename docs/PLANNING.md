@@ -63,13 +63,13 @@ code. No item remains unchecked. Fixed defects have a regression test in
 ### C. Oversimplifications
 
 C1 (IGA Jacobian), C2 (differential pseudo-remainder), C4 (gear and screw builders), C5 (Cartan forms hold no
-`ExprId` coefficients), C6 (neural-ODE adjoint), C8 (PDE
-classification), C10 (FEA solver: dense, no CG or CSR), C11 (interconnect indexing), C13 (visualizer routing),
+`ExprId` coefficients), C6 (neural-ODE adjoint), C10 (FEA solver: dense, no CG or CSR), C11 (interconnect indexing), C13 (visualizer routing),
 C14 (e-graph extraction, wavefront; unification is done, see below) and C15 (LSP completion catalogue) are in files that have not
 changed since the plan, so they are **Open**. Three were checked directly after the files turned out to have
 changed:
 
 - **C14 unification Fixed.** `UnificationEngine::unify` is first-order Martelli–Montanari: structural decomposition of functions, operators and arithmetic nodes, an occurs check, and a most general unifier whose `apply` makes both sides equal. It is syntactic (no commutativity). The CLI proof export no longer uses unification to gate steps; it records the simplification only when the equivalence check confirms it.
+- **C8 Fixed.** PDEs are classified as linear, semilinear, quasilinear or fully nonlinear by where the highest derivative sits (Burgers is quasilinear, KdV and sine-Gordon semilinear, Monge–Ampère fully nonlinear); ODEs keep linear/nonlinear. The linearity test is now term by term, so powers and products of derivatives are no longer missed.
 - **C7 Fixed.** Stability uses Routh–Hurwitz (continuous) or Schur–Cohn (discrete) on the characteristic polynomial at every order (it was a trace heuristic above 2 states); `frequency_response` and the SISO helper solve `C(sI−A)⁻¹B + D` for any order, MIMO and discrete systems (they returned zeros above 2 states); Ackermann pole placement works for any controllable single-input system. Verified on companion matrices with known roots, partial fractions and the closed-loop characteristic polynomial.
 - **C3 Open.** `cad/mod.rs:581-612` solves only `Distance` and `Coincident` constraints, by placing a point along
   the x-axis; every other constraint is ignored (`_ => {}`).

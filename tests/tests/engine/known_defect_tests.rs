@@ -552,7 +552,8 @@ fn lagrange_inversion_returns_the_series_of_the_inverse_function() {
     let y = g.symbols.get_or_intern("y");
     let wv = g.symbol("w");
     let order = 12;
-    let cases: Vec<(&str, algebra_core::ExprId, Box<dyn Fn(f64) -> f64>)> = vec![
+    type Case = (&'static str, algebra_core::ExprId, Box<dyn Fn(f64) -> f64>);
+    let cases: Vec<Case> = vec![
         // f(w) = w + w^2  =>  w = (sqrt(1 + 4y) - 1) / 2
         (
             "w + w^2",

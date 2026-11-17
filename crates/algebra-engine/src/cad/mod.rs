@@ -1010,6 +1010,29 @@ impl Mesh3D {
         total_area
     }
 
+    /// Number of directed edges that are not matched by an opposite edge in another triangle, plus
+    /// edges used more than once in the same direction. Zero for a closed, consistently oriented
+    /// surface; a positive count means open boundaries, holes or inconsistent winding. A mesh
+    /// that is not closed has no well-defined enclosed volume.
+    pub fn boundary_edge_count(&self) -> usize {
+        let mut directed: HashMap<(usize, usize), usize> = HashMap::new();
+        for t in &self.triangles {
+            for k in 0..3 {
+                *directed.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
+            }
+        }
+        directed
+            .iter()
+            .filter(|&(&(a, b), &count)| count != 1 || directed.get(&(b, a)) != Some(&1))
+            .count()
+    }
+
+    /// Whether every edge is shared by exactly two triangles with opposite directions (a closed,
+    /// consistently oriented surface), so that [`Mesh3D::compute_volume`] is meaningful.
+    pub fn is_closed(&self) -> bool {
+        !self.triangles.is_empty() && self.boundary_edge_count() == 0
+    }
+
     /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
     pub fn compute_volume(&self) -> f64 {
         let mut signed_vol = 0.0;

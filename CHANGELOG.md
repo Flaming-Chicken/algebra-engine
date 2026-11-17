@@ -6,6 +6,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ## [0.5.0] - 2026-11-17
 
 ### Added
+- `Mesh3D::boundary_edge_count` and `Mesh3D::is_closed`: detect open boundaries and inconsistent winding.
 - `GpuKernelDescriptor::validate` (structural WGSL checks) and `SimdPolyVector::{checked_add, checked_multiply}`.
 - `cat_egraph::EGraph::rebuild` (congruence closure) and `extract_term`/`ExtractedTerm` (the cheapest expression as a tree). `EGraph::add` now hash-conses.
 - `IgaStiffnessMatrix::assemble_2d`, `NurbsPatchND::rational_basis` and `tangents`: the isogeometric Laplace-Beltrami stiffness matrix with analytic NURBS derivatives.
@@ -41,6 +42,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
+- `NacaAirfoil::generate_3d_mesh` and `HelicalSpring::generate_3d_mesh` returned open shells without end caps (so `compute_volume` was meaningless); they are now closed solids. The airfoil outline no longer repeats its leading-edge point. `ThreadedScrew` meshes are documented as open surfaces.
 - `GpuComputeKernel::enabled` was ignored; it now selects the parallel or sequential path. The `algebra_advanced::gpu` documentation no longer claims SIMD or GPU offload (the kernels are Rayon-parallel CPU code).
 - `EGraph::extract_min_cost` costed only the chosen node's operator, not its operands, so the cheapest-looking node was not the cheapest expression; it now returns the total cost of the cheapest expression, and handles cyclic classes.
 - `InvoluteGear::generate_3d_mesh` ignored `bore_radius` and capped the ends with a fan from one vertex of the non-convex tooth outline, giving overlapping or inverted faces. It is now a closed solid with a real bore and annular end caps (volume equals the outline area minus the bore, times the face width).

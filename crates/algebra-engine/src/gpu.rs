@@ -2,7 +2,13 @@
 //!
 //! GPU Compute Shader Generation & Matrix-Free Kernel Abstraction.
 //!
-//! Provides WebGPU (WGSL) compute shader emission for:
+//! Provides WebGPU (WGSL) compute shader **source emission** for the cases below. This module
+//! produces text only: it never creates a GPU device or dispatches work, and
+//! [`GpuKernelDescriptor::validate`] is a structural check (balanced delimiters, an entry point,
+//! workgroup limits, unique bindings), not a WGSL compiler. Shaders still have to be compiled by
+//! a WebGPU implementation.
+//!
+//! Supported kernels:
 //! - High-throughput multi-point expression evaluation ($10^6+$ points in parallel).
 //! - Matrix-free Finite Element stiffness-vector contraction $\mathbf{y} = \mathbf{K} \mathbf{x}$.
 //! - Complex fractal iteration kernels (Mandelbrot & Julia sets).
@@ -15,6 +21,117 @@ pub struct GpuKernelDescriptor {
     pub wgsl_source: String,
     pub input_buffer_count: usize,
     pub output_buffer_count: usize,
+}
+
+impl GpuKernelDescriptor {
+    /// Largest `x * y * z` workgroup the WebGPU default limits guarantee
+    /// (`maxComputeInvocationsPerWorkgroup`).
+    pub const MAX_WORKGROUP_INVOCATIONS: u32 = 256;
+
+    /// Structural validation of the descriptor and its WGSL text. Checks that the workgroup
+    /// size is positive and within the default WebGPU limit, that `(`, `[` and `{` balance
+    /// outside comments, that there is an `@compute` entry point `fn main` whose
+    /// `@workgroup_size` matches `workgroup_size`, that no `@group/@binding` pair is declared
+    /// twice, and that at least `input_buffer_count + output_buffer_count` storage buffers are
+    /// bound. It does not type-check the shader.
+    pub fn validate(&self) -> Result<(), String> {
+        let [x, y, z] = self.workgroup_size;
+        if x == 0 || y == 0 || z == 0 {
+            return Err("workgroup dimensions must be positive".into());
+        }
+        let invocations = x.saturating_mul(y).saturating_mul(z);
+        if invocations > Self::MAX_WORKGROUP_INVOCATIONS {
+            return Err(format!(
+                "workgroup of {invocations} invocations exceeds the default WebGPU limit of {}",
+                Self::MAX_WORKGROUP_INVOCATIONS
+            ));
+        }
+
+        // Drop `//` comments, then check balance.
+        let code: String = self
+            .wgsl_source
+            .lines()
+            .map(|line| line.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut stack: Vec<char> = Vec::new();
+        for ch in code.chars() {
+            match ch {
+                '(' | '[' | '{' => stack.push(ch),
+                ')' | ']' | '}' => {
+                    let expected = match ch {
+                        ')' => '(',
+                        ']' => '[',
+                        _ => '{',
+                    };
+                    if stack.pop() != Some(expected) {
+                        return Err(format!("unbalanced `{ch}` in the shader source"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(open) = stack.last() {
+            return Err(format!("unclosed `{open}` in the shader source"));
+        }
+
+        if !code.contains("@compute") || !code.contains("fn main(") {
+            return Err("the shader needs an `@compute` entry point `fn main`".into());
+        }
+        let declared = code
+            .split("@workgroup_size(")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .map(|inside| {
+                inside
+                    .split(',')
+                    .map(|v| v.trim().parse::<u32>().ok())
+                    .collect::<Vec<_>>()
+            })
+            .ok_or("the entry point has no `@workgroup_size(...)`")?;
+        let mut sizes = [1u32; 3];
+        for (slot, value) in sizes.iter_mut().zip(&declared) {
+            match value {
+                Some(v) => *slot = *v,
+                None => return Err("`@workgroup_size` must use integer literals".into()),
+            }
+        }
+        if sizes != self.workgroup_size {
+            return Err(format!(
+                "`@workgroup_size{sizes:?}` disagrees with the descriptor's {:?}",
+                self.workgroup_size
+            ));
+        }
+
+        let mut bindings: Vec<(String, String)> = Vec::new();
+        let mut rest = code.as_str();
+        while let Some(at) = rest.find("@group(") {
+            let after = &rest[at + "@group(".len()..];
+            let group = after.split(')').next().unwrap_or("").trim().to_string();
+            let binding = after
+                .split("@binding(")
+                .nth(1)
+                .and_then(|b| b.split(')').next())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if bindings.contains(&(group.clone(), binding.clone())) {
+                return Err(format!(
+                    "binding (group {group}, binding {binding}) is declared twice"
+                ));
+            }
+            bindings.push((group, binding));
+            rest = after;
+        }
+        let needed = self.input_buffer_count + self.output_buffer_count;
+        if bindings.len() < needed {
+            return Err(format!(
+                "{} bindings declared but {needed} buffers are required",
+                bindings.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// WebGPU (WGSL) Compute Shader Generator.

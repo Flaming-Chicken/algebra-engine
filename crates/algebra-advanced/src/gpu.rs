@@ -1,14 +1,19 @@
 //! # `algebra-gpu`
 //!
-//! SIMD-vectorized operations and GPU compute shader offloading abstraction for
-//! large-scale polynomial multiplication, dense matrix blocks, and massive tensor contractions.
+//! Multi-threaded (Rayon) polynomial and dense-matrix kernels. Despite the type names, nothing
+//! here uses SIMD intrinsics or a GPU: the work is spread across CPU threads, and
+//! [`GpuComputeKernel::enabled`] chooses between that parallel path and a sequential one. The
+//! WGSL text generators live in `algebra_engine::gpu`.
+//!
+//! Integer polynomial arithmetic wraps on overflow (arithmetic modulo 2^64); use the `checked_`
+//! methods when overflow must be an error.
 
 use spodeian_parallel::prelude::*;
 
 use algebra_core::{AlgebraError, AlgebraResult, ExprGraph};
 use algebra_engine::matrix::SymbolicMatrix;
 
-/// SIMD-vectorized polynomial block operations.
+/// Integer polynomial block operations, parallelised across threads (no SIMD intrinsics).
 #[derive(Debug, Clone)]
 pub struct SimdPolyVector {
     pub coeffs: Vec<i64>,
@@ -61,7 +66,38 @@ impl SimdPolyVector {
     }
 }
 
-/// Compute Shader / GPU Execution Kernel Abstraction.
+impl SimdPolyVector {
+    /// Coefficient-wise sum, or `None` if any coefficient overflows `i64`.
+    pub fn checked_add(&self, other: &Self) -> Option<Self> {
+        let len = self.coeffs.len().max(other.coeffs.len());
+        (0..len)
+            .map(|i| {
+                self.coeffs
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0)
+                    .checked_add(other.coeffs.get(i).copied().unwrap_or(0))
+            })
+            .collect::<Option<Vec<i64>>>()
+            .map(|coeffs| Self { coeffs })
+    }
+
+    /// Polynomial product, or `None` if any intermediate product or sum overflows `i64`.
+    pub fn checked_multiply(&self, other: &Self) -> Option<Self> {
+        if self.coeffs.is_empty() || other.coeffs.is_empty() {
+            return Some(Self { coeffs: Vec::new() });
+        }
+        let mut result = vec![0i64; self.coeffs.len() + other.coeffs.len() - 1];
+        for (i, a) in self.coeffs.iter().enumerate() {
+            for (j, b) in other.coeffs.iter().enumerate() {
+                result[i + j] = result[i + j].checked_add(a.checked_mul(*b)?)?;
+            }
+        }
+        Some(Self { coeffs: result })
+    }
+}
+
+/// Dense-matrix kernel with a switchable parallel path (CPU threads; it does not use a GPU).
 #[derive(Debug, Clone, Default)]
 pub struct GpuComputeKernel {
     pub enabled: bool,
@@ -92,21 +128,39 @@ impl GpuComputeKernel {
 
         let mut data = vec![graph.integer(0); rows * cols];
 
+        // `enabled` selects the multi-threaded path; otherwise (and always on wasm) run
+        // sequentially.
         #[cfg(not(target_arch = "wasm32"))]
-        data.par_chunks_mut(cols)
-            .enumerate()
-            .for_each(|(r, row_slice)| {
-                for (c, item) in row_slice.iter_mut().enumerate() {
-                    let mut terms = Vec::with_capacity(k_dim);
-                    for k in 0..k_dim {
-                        let elem_a = a.elements[r * k_dim + k];
-                        let elem_b = b.elements[k * cols + c];
-                        let prod = graph.mul([elem_a, elem_b]);
-                        terms.push(prod);
+        if self.enabled {
+            data.par_chunks_mut(cols)
+                .enumerate()
+                .for_each(|(r, row_slice)| {
+                    for (c, item) in row_slice.iter_mut().enumerate() {
+                        let mut terms = Vec::with_capacity(k_dim);
+                        for k in 0..k_dim {
+                            let elem_a = a.elements[r * k_dim + k];
+                            let elem_b = b.elements[k * cols + c];
+                            let prod = graph.mul([elem_a, elem_b]);
+                            terms.push(prod);
+                        }
+                        *item = graph.add(terms);
                     }
-                    *item = graph.add(terms);
-                }
-            });
+                });
+        } else {
+            data.chunks_mut(cols)
+                .enumerate()
+                .for_each(|(r, row_slice)| {
+                    for (c, item) in row_slice.iter_mut().enumerate() {
+                        let mut terms = Vec::with_capacity(k_dim);
+                        for k in 0..k_dim {
+                            let elem_a = a.elements[r * k_dim + k];
+                            let elem_b = b.elements[k * cols + c];
+                            terms.push(graph.mul([elem_a, elem_b]));
+                        }
+                        *item = graph.add(terms);
+                    }
+                });
+        }
 
         #[cfg(target_arch = "wasm32")]
         data.chunks_mut(cols)

@@ -1236,3 +1236,64 @@ fn boolean_combinations_of_implicit_solids_have_the_right_volumes() {
     };
     assert!(mixed.to_tri_mesh().is_err());
 }
+
+#[test]
+fn gear_teeth_have_the_involute_thickness_and_profile_shift_thickens_them() {
+    use algebra_engine::cad::InvoluteGear;
+    use std::f64::consts::PI;
+
+    for (z, shift) in [(24usize, 0.0), (24, 0.4), (14, 0.5), (17, -0.2)] {
+        let gear = InvoluteGear::spur(2.0, z, 5.0).with_profile_shift(shift);
+        let r = gear.pitch_diameter() / 2.0;
+        let alpha = gear.pressure_angle_deg.to_radians();
+        // Standard thickness on the pitch circle: pi m / 2 + 2 x m tan(alpha).
+        let expected = PI * gear.module / 2.0 + 2.0 * shift * gear.module * alpha.tan();
+        let measured = 2.0 * r * gear.tooth_half_angle(r);
+        assert!((measured - expected).abs() < 1e-9, "z={z} x={shift}");
+
+        // The outline really passes through that width: pick the two profile points of tooth 0
+        // nearest the pitch circle and compare their angular separation (fine sampling).
+        let profile = gear.generate_2d_profile(600);
+        let tooth: Vec<[f64; 2]> = profile
+            .iter()
+            .copied()
+            .filter(|p| p[1].atan2(p[0]).abs() < PI / z as f64 * 0.9 && p[0] > 0.0)
+            .collect();
+        let near = |sign: f64| {
+            tooth
+                .iter()
+                .filter(|p| {
+                    p[1] * sign >= 0.0 && p[0].hypot(p[1]) > gear.root_diameter() / 2.0 + 1e-6
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - expected).abs() < 5e-3,
+            "z={z} x={shift}: {width} vs {expected}"
+        );
+
+        // Tip and root radii follow the shift, and the solid is still closed.
+        assert!((gear.tip_diameter() / 2.0 - (r + (1.0 + shift) * gear.module)).abs() < 1e-12);
+        assert!((gear.root_diameter() / 2.0 - (r - (1.25 - shift) * gear.module)).abs() < 1e-12);
+        assert_closed_and_oriented(&gear.generate_3d_mesh());
+    }
+
+    // A positive shift makes a fatter tooth, so the outline encloses more area.
+    let area = |x: f64| {
+        shoelace(
+            &InvoluteGear::spur(2.0, 24, 5.0)
+                .with_profile_shift(x)
+                .generate_2d_profile(8),
+        )
+        .abs()
+    };
+    assert!(area(0.5) > area(0.0));
+}

@@ -1000,3 +1000,51 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
             .contains("Boolean")
     );
 }
+
+#[test]
+fn the_evaluator_reports_when_a_tier_overran_its_hard_timeout() {
+    use algebra_core::ExprGraph;
+    use algebra_core::parser::ExprParser;
+    use algebra_engine::cat_eval::{CatEvalInput, CatExprEvaluator};
+    use cat_anytime::{AnytimeBudget, MultiFidelityOp};
+    use cat_core::enclosure::{EvalForm, FidelityMode};
+    use std::time::Duration;
+
+    let graph = ExprGraph::new();
+    let expr = ExprParser::new(&graph).parse("(x + 1) * 2").unwrap();
+    let input = CatEvalInput::new(graph, expr).with_var("x", Some(3.0));
+    let evaluator = CatExprEvaluator::new();
+
+    let generous = AnytimeBudget {
+        hard_timeout: Duration::from_secs(60),
+        ..AnytimeBudget::default()
+    };
+    let impossible = AnytimeBudget {
+        hard_timeout: Duration::ZERO,
+        ..AnytimeBudget::default()
+    };
+    for mode in [
+        FidelityMode::NumericalApprox,
+        FidelityMode::SymbolicApprox,
+        FidelityMode::SymbolicExact,
+        FidelityMode::SymbolicHybrid,
+    ] {
+        let within = evaluator
+            .eval_with_fidelity(&input, mode, EvalForm::Canonical, &generous)
+            .unwrap();
+        let over = evaluator
+            .eval_with_fidelity(&input, mode, EvalForm::Canonical, &impossible)
+            .unwrap();
+        assert!(
+            !within.budget_exceeded,
+            "{mode:?} flagged with a 60 s budget"
+        );
+        assert!(
+            over.budget_exceeded,
+            "{mode:?} not flagged with a zero budget"
+        );
+        // The budget only reports; the value is the same either way.
+        assert_eq!(within.mode_used, over.mode_used);
+        assert_eq!(within.value.numeric_value, over.value.numeric_value);
+    }
+}

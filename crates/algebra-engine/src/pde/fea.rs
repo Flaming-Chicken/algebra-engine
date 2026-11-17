@@ -368,19 +368,7 @@ impl FeaEngine {
                     let area = det.abs() / 2.0;
 
                     if area > 1e-14 {
-                        // Elasticity constitutive matrix C for 2D plane stress
-                        let factor = if plane_stress {
-                            e_mod / (1.0 - nu * nu)
-                        } else {
-                            e_mod / ((1.0 + nu) * (1.0 - 2.0 * nu))
-                        };
-                        let c11 = factor;
-                        let c12 = if plane_stress {
-                            factor * nu
-                        } else {
-                            factor * nu / (1.0 - nu)
-                        };
-                        let c33 = factor * (1.0 - nu) / 2.0;
+                        let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
 
                         // Constant Strain Triangle (CST) B-matrix derivatives
                         let b0 = p1[1] - p2[1];
@@ -504,29 +492,42 @@ impl FeaEngine {
         // 4. Solve Linear System K u = F via Gaussian Elimination with Partial Pivoting
         let (displacement, reactions) = Self::solve_with_fixed(&k_global, &f_global, &fixed)?;
 
-        // 5. Compute von Mises Stresses across elements
+        // 5. Von Mises stress per element. A 2-D triangle has constant strain `B u` and stress
+        // `C B u`; the 3-D surface triangle has no stress model and reports the axial estimate
+        // used by its (simple) stiffness.
         let mut von_mises = Vec::new();
+        let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
         for elem in &mesh.elements {
             if elem.len() >= 3 && mesh.dim == 2 {
                 let n = [elem[0], elem[1], elem[2]];
-                let u0 = displacement[n[0] * 2];
-                let v0 = displacement[n[0] * 2 + 1];
-                let u1 = displacement[n[1] * 2];
-                let v1 = displacement[n[1] * 2 + 1];
-                let u2 = displacement[n[2] * 2];
-                let v2 = displacement[n[2] * 2 + 1];
-
-                let du_dx = (u1 - u0).abs() + (u2 - u0).abs();
-                let dv_dy = (v1 - v0).abs() + (v2 - v0).abs();
-                let gamma_xy = (u1 - u0 + v1 - v0).abs();
-
-                let sigma_x = e_mod * du_dx;
-                let sigma_y = e_mod * dv_dy;
-                let tau_xy = (e_mod / (2.0 * (1.0 + nu))) * gamma_xy;
-
-                // von Mises 2D: sqrt(sigma_x^2 - sigma_x*sigma_y + sigma_y^2 + 3*tau_xy^2)
-                let vm = (sigma_x * sigma_x - sigma_x * sigma_y
-                    + sigma_y * sigma_y
+                let p = [&mesh.nodes[n[0]], &mesh.nodes[n[1]], &mesh.nodes[n[2]]];
+                let det = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1])
+                    - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+                if det.abs() < 1e-14 {
+                    von_mises.push(0.0);
+                    continue;
+                }
+                let b = [p[1][1] - p[2][1], p[2][1] - p[0][1], p[0][1] - p[1][1]];
+                let c = [p[2][0] - p[1][0], p[0][0] - p[2][0], p[1][0] - p[0][0]];
+                let (mut ex, mut ey, mut gxy) = (0.0, 0.0, 0.0);
+                for k in 0..3 {
+                    let (u, v) = (displacement[n[k] * 2], displacement[n[k] * 2 + 1]);
+                    ex += b[k] * u / det;
+                    ey += c[k] * v / det;
+                    gxy += c[k] * u / det + b[k] * v / det;
+                }
+                let sigma_x = c11 * ex + c12 * ey;
+                let sigma_y = c12 * ex + c11 * ey;
+                let tau_xy = c33 * gxy;
+                let sigma_z = if plane_stress {
+                    0.0
+                } else {
+                    nu * (sigma_x + sigma_y)
+                };
+                let vm = (0.5
+                    * ((sigma_x - sigma_y).powi(2)
+                        + (sigma_y - sigma_z).powi(2)
+                        + (sigma_z - sigma_x).powi(2))
                     + 3.0 * tau_xy * tau_xy)
                     .sqrt();
                 von_mises.push(vm);
@@ -692,6 +693,20 @@ impl FeaEngine {
             reaction_forces: reactions,
             max_magnitude: max_t,
         })
+    }
+
+    /// Entries `(C11, C12, C33)` of the 2-D constitutive matrix `[[C11, C12, 0], [C12, C11, 0],
+    /// [0, 0, C33]]`. Plane stress: `E/(1-v^2)`, `v C11`, `G`. Plane strain:
+    /// `E(1-v)/((1+v)(1-2v))`, `E v/((1+v)(1-2v))`, `G`, where `G = E/(2(1+v))`.
+    fn plane_constitutive(e: f64, nu: f64, plane_stress: bool) -> (f64, f64, f64) {
+        let g = e / (2.0 * (1.0 + nu));
+        if plane_stress {
+            let c11 = e / (1.0 - nu * nu);
+            (c11, nu * c11, g)
+        } else {
+            let f = e / ((1.0 + nu) * (1.0 - 2.0 * nu));
+            (f * (1.0 - nu), f * nu, g)
+        }
     }
 
     /// Solve `K u = f` with some unknowns prescribed (`fixed`: index to value) by eliminating

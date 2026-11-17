@@ -338,3 +338,58 @@ fn a_large_plate_solves_without_a_dense_matrix() {
     assert!((column(0) - 80.0).abs() < 1e-9);
     assert!(column(40) > 20.0 && column(40) < 80.0);
 }
+
+#[test]
+fn uniaxial_patch_test_gives_the_exact_stress_in_plane_stress_and_plane_strain() {
+    // A plate stretched by prescribed end displacement d over length L, free to contract
+    // sideways. Linear fields are reproduced exactly by constant-strain triangles, so the
+    // result is exact on any mesh.
+    let (len, height, d, e, nu) = (6.0_f64, 2.0, 0.03, 200.0, 0.3);
+    for plane_stress in [true, false] {
+        let mesh = FeaMesh::plate_2d(len, height, 6, 3);
+        let physics = PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: e,
+            poissons_ratio: nu,
+            density: 1.0,
+            body_force: vec![0.0, 0.0],
+            plane_stress,
+        };
+        let fix =
+            |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+                group_name: group.into(),
+                dof_index,
+                value,
+            };
+        let bcs = vec![
+            fix("left", 0, 0.0),
+            fix("right", 0, d),
+            fix("bottom", 1, 0.0),
+        ];
+        let sol = FeaEngine::solve(&mesh, &physics, &bcs).unwrap();
+
+        let eps = d / len;
+        // Plane stress: sigma_x = E eps, sigma_z = 0. Plane strain with sigma_y = 0:
+        // sigma_x = E eps / (1 - nu^2) and sigma_z = nu sigma_x.
+        let (sigma_x, vm) = if plane_stress {
+            (e * eps, e * eps)
+        } else {
+            let sx = e * eps / (1.0 - nu * nu);
+            let sz = nu * sx;
+            (sx, (0.5 * (sx * sx + sz * sz + (sz - sx).powi(2))).sqrt())
+        };
+        for (k, v) in sol.von_mises_stresses.iter().enumerate() {
+            assert!(
+                (v - vm).abs() < 1e-9 * vm.max(1.0),
+                "plane_stress={plane_stress} element {k}: {v} vs {vm} (sigma_x {sigma_x})"
+            );
+        }
+        // The sides contract freely: v = -nu' eps y with nu' = nu (stress) or nu/(1-nu) (strain).
+        let nu_eff = if plane_stress { nu } else { nu / (1.0 - nu) };
+        let top_node = mesh.nodes.len() - 1; // x = L, y = H
+        let tip_v = sol.nodal_values[top_node * 2 + 1];
+        assert!(
+            (tip_v + nu_eff * eps * height).abs() < 1e-9,
+            "tip v {tip_v}"
+        );
+    }
+}

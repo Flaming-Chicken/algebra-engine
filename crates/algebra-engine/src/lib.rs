@@ -16,6 +16,7 @@ pub mod branch;
 pub mod cad;
 pub mod calculus;
 pub mod cartan;
+pub mod cartan_symbolic;
 pub mod cat_eval;
 pub mod cft;
 pub mod combinatorics;
@@ -97,6 +98,7 @@ pub use cad::{
 };
 pub use calculus::{FractionalCalculus, SymbolicCalculus, VariationalCalculus};
 pub use cartan::{DifferentialForm, FormBasis, VectorField};
+pub use cartan_symbolic::SymbolicForm;
 pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use cft::{KacMoodyAlgebra, OperatorProductExpansion, VirasoroAlgebra};
 pub use combinatorics::{

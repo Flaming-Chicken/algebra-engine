@@ -223,3 +223,6 @@ mod iga_stiffness_tests;
 
 #[path = "engine/cad_constraint_solver_tests.rs"]
 mod cad_constraint_solver_tests;
+
+#[path = "engine/symbolic_cartan_tests.rs"]
+mod symbolic_cartan_tests;

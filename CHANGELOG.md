@@ -3,6 +3,11 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+- `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added

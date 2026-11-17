@@ -208,3 +208,6 @@ mod known_defect_tests;
 
 #[path = "engine/control_general_order_tests.rs"]
 mod control_general_order_tests;
+
+#[path = "engine/exact_groebner_tests.rs"]
+mod exact_groebner_tests;

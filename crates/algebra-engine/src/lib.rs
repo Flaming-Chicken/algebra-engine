@@ -91,7 +91,7 @@ pub use branch::{
 };
 pub use cad::{
     BoltHeadType, BoundingBox3D, BvhIntersection, BvhNode, BvhTree, CadCell, CadCellType,
-    CadEngine, CadPolynomial, CsgBooleanOp, CustomShape, GeometricConstraint,
+    CadEngine, CadPolynomial, CsgBooleanOp, CustomShape, CycloidalGear, GeometricConstraint,
     GeometricConstraintSolver, GeometricEntity, HelicalSpring, InvoluteGear, Mesh3D, NacaAirfoil,
     Quantifier, QuantifierEliminator, Ray3D, RelationalOp, ShapeExporter, ShapeImporter, Sign,
     ThreadStandard, ThreadedScrew,

@@ -155,10 +155,7 @@ impl InvoluteGear {
     /// A helical gear twists the layers about the axis; the cross-section area is unchanged.
     pub fn generate_3d_mesh(&self) -> Mesh3D {
         let profile = self.generate_2d_profile(6);
-        let n_prof = profile.len();
         let height = self.face_width;
-        let mut mesh = Mesh3D::new(format!("Gear_m{}_z{}", self.module, self.teeth));
-
         let n_layers = if self.helix_angle_deg.abs() > 1e-4 {
             8
         } else {
@@ -170,129 +167,318 @@ impl InvoluteGear {
         } else {
             0.0
         };
-
         // The bore must stay inside the root circle to leave a wall.
         let bore_radius = self
             .bore_radius
             .min(0.8 * self.root_diameter() / 2.0)
             .max(0.0);
-        let n_bore = if bore_radius > 1e-9 { 48 } else { 0 };
-        let per_layer = n_prof + n_bore;
-        let start_angle = profile[0][1].atan2(profile[0][0]);
+        toothed_gear_solid(
+            format!("Gear_m{}_z{}", self.module, self.teeth),
+            &profile,
+            bore_radius,
+            height,
+            n_layers,
+            max_twist,
+        )
+    }
+}
 
-        for l in 0..n_layers {
-            let fraction = l as f64 / (n_layers - 1) as f64;
-            let z_pos = fraction * height;
-            let twist = fraction * max_twist;
-            let (cos_tw, sin_tw) = (twist.cos(), twist.sin());
-            for p in &profile {
-                mesh.add_vertex([
-                    p[0] * cos_tw - p[1] * sin_tw,
-                    p[0] * sin_tw + p[1] * cos_tw,
-                    z_pos,
-                ]);
-            }
-            for j in 0..n_bore {
-                let angle = start_angle + 2.0 * PI * j as f64 / n_bore as f64;
-                // The bore is a round hole about the axis, so it is not twisted.
-                mesh.add_vertex([bore_radius * angle.cos(), bore_radius * angle.sin(), z_pos]);
-            }
+/// Extrude a toothed outline (counter-clockwise, star-shaped about the axis: its polar angle only
+/// increases) into a closed, outward-oriented solid of the given `height`, with a cylindrical
+/// bore of radius `bore_radius` (none when zero) and annular end caps. `n_layers` layers are
+/// stacked and each is rotated about the axis so that the top is twisted by `max_twist` radians
+/// (a helical gear); the cross-section area is unchanged by the twist.
+fn toothed_gear_solid(
+    name: String,
+    profile: &[[f64; 2]],
+    bore_radius: f64,
+    height: f64,
+    n_layers: usize,
+    max_twist: f64,
+) -> Mesh3D {
+    let n_prof = profile.len();
+    let mut mesh = Mesh3D::new(name);
+    let n_bore = if bore_radius > 1e-9 { 48 } else { 0 };
+    let per_layer = n_prof + n_bore;
+    let start_angle = profile[0][1].atan2(profile[0][0]);
+
+    for l in 0..n_layers {
+        let fraction = l as f64 / (n_layers - 1) as f64;
+        let z_pos = fraction * height;
+        let twist = fraction * max_twist;
+        let (cos_tw, sin_tw) = (twist.cos(), twist.sin());
+        for p in profile {
+            mesh.add_vertex([
+                p[0] * cos_tw - p[1] * sin_tw,
+                p[0] * sin_tw + p[1] * cos_tw,
+                z_pos,
+            ]);
         }
-
-        // Outer wall (normals point away from the axis) and bore wall (towards the axis).
-        for l in 0..n_layers - 1 {
-            let (l0, l1) = (l * per_layer, (l + 1) * per_layer);
-            for i in 0..n_prof {
-                let next = (i + 1) % n_prof;
-                mesh.add_triangle(l0 + i, l0 + next, l1 + next);
-                mesh.add_triangle(l0 + i, l1 + next, l1 + i);
-            }
-            for j in 0..n_bore {
-                let (a, b) = (n_prof + j, n_prof + (j + 1) % n_bore);
-                mesh.add_triangle(l0 + a, l1 + b, l0 + b);
-                mesh.add_triangle(l0 + a, l1 + a, l1 + b);
-            }
+        for j in 0..n_bore {
+            let angle = start_angle + 2.0 * PI * j as f64 / n_bore as f64;
+            // The bore is a round hole about the axis, so it is not twisted.
+            mesh.add_vertex([bore_radius * angle.cos(), bore_radius * angle.sin(), z_pos]);
         }
+    }
 
-        // Polar angles (increasing, unwrapped from the first outline vertex).
-        let mut outline_angles = Vec::with_capacity(n_prof + 1);
-        let mut previous = start_angle;
-        let mut unwrapped = start_angle;
+    // Outer wall (normals point away from the axis) and bore wall (towards the axis).
+    for l in 0..n_layers - 1 {
+        let (l0, l1) = (l * per_layer, (l + 1) * per_layer);
+        for i in 0..n_prof {
+            let next = (i + 1) % n_prof;
+            mesh.add_triangle(l0 + i, l0 + next, l1 + next);
+            mesh.add_triangle(l0 + i, l1 + next, l1 + i);
+        }
+        for j in 0..n_bore {
+            let (a, b) = (n_prof + j, n_prof + (j + 1) % n_bore);
+            mesh.add_triangle(l0 + a, l1 + b, l0 + b);
+            mesh.add_triangle(l0 + a, l1 + a, l1 + b);
+        }
+    }
+
+    // Polar angles (increasing, unwrapped from the first outline vertex).
+    let mut outline_angles = Vec::with_capacity(n_prof + 1);
+    let mut previous = start_angle;
+    let mut unwrapped = start_angle;
+    outline_angles.push(unwrapped);
+    for p in &profile[1..] {
+        let angle = p[1].atan2(p[0]);
+        let mut delta = angle - previous;
+        while delta < -PI {
+            delta += 2.0 * PI;
+        }
+        while delta > PI {
+            delta -= 2.0 * PI;
+        }
+        unwrapped += delta;
         outline_angles.push(unwrapped);
-        for p in &profile[1..] {
-            let angle = p[1].atan2(p[0]);
-            let mut delta = angle - previous;
-            while delta < -PI {
-                delta += 2.0 * PI;
-            }
-            while delta > PI {
-                delta -= 2.0 * PI;
-            }
-            unwrapped += delta;
-            outline_angles.push(unwrapped);
-            previous = angle;
-        }
-        outline_angles.push(start_angle + 2.0 * PI);
+        previous = angle;
+    }
+    outline_angles.push(start_angle + 2.0 * PI);
 
-        // Triangulate an end cap. `layer_base` is the first vertex of the layer, `twist` the angle
-        // by which that layer's outline is rotated (the bore ring is not rotated), and `up`
-        // selects the winding (counter-clockwise seen from +z for the top cap).
-        let mut cap = |layer_base: usize, up: bool, twist: f64| {
-            let mut push = |a: usize, b: usize, c: usize| {
-                if up {
-                    mesh.add_triangle(a, b, c);
-                } else {
-                    mesh.add_triangle(a, c, b);
-                }
-            };
-            if n_bore == 0 {
-                // No bore: the solid-disc fans below close the ends.
-                return;
-            }
-            let step = 2.0 * PI / n_bore as f64;
-            // Start at the bore vertex at or just before the rotated outline's first vertex.
-            let first_bore = (twist / step).floor() as i64;
-            let bore_angle = |k: i64| start_angle + step * (first_bore + k) as f64;
-            let bore_index = |k: i64| (first_bore + k).rem_euclid(n_bore as i64) as usize;
-            let (mut i, mut k) = (0usize, 0i64);
-            while i < n_prof || k < n_bore as i64 {
-                let advance_outer = if i >= n_prof {
-                    false
-                } else if k >= n_bore as i64 {
-                    true
-                } else {
-                    outline_angles[i + 1] + twist <= bore_angle(k + 1)
-                };
-                let (outer, outer_next) = (layer_base + i % n_prof, layer_base + (i + 1) % n_prof);
-                let (inner, inner_next) = (
-                    layer_base + n_prof + bore_index(k),
-                    layer_base + n_prof + bore_index(k + 1),
-                );
-                if advance_outer {
-                    push(outer, outer_next, inner);
-                    i += 1;
-                } else {
-                    push(outer, inner_next, inner);
-                    k += 1;
-                }
+    // Triangulate an end cap. `layer_base` is the first vertex of the layer, `twist` the angle
+    // by which that layer's outline is rotated (the bore ring is not rotated), and `up`
+    // selects the winding (counter-clockwise seen from +z for the top cap).
+    let mut cap = |layer_base: usize, up: bool, twist: f64| {
+        let mut push = |a: usize, b: usize, c: usize| {
+            if up {
+                mesh.add_triangle(a, b, c);
+            } else {
+                mesh.add_triangle(a, c, b);
             }
         };
-        let top = (n_layers - 1) * per_layer;
-        cap(0, false, 0.0);
-        cap(top, true, max_twist);
-
         if n_bore == 0 {
-            // Solid disc: a fan from an axis vertex at each end.
-            let bottom_axis = mesh.add_vertex([0.0, 0.0, 0.0]);
-            let top_axis = mesh.add_vertex([0.0, 0.0, height]);
-            for i in 0..n_prof {
-                let next = (i + 1) % n_prof;
-                mesh.add_triangle(bottom_axis, next, i);
-                mesh.add_triangle(top_axis, top + i, top + next);
+            // No bore: the solid-disc fans below close the ends.
+            return;
+        }
+        let step = 2.0 * PI / n_bore as f64;
+        // Start at the bore vertex at or just before the rotated outline's first vertex.
+        let first_bore = (twist / step).floor() as i64;
+        let bore_angle = |k: i64| start_angle + step * (first_bore + k) as f64;
+        let bore_index = |k: i64| (first_bore + k).rem_euclid(n_bore as i64) as usize;
+        let (mut i, mut k) = (0usize, 0i64);
+        while i < n_prof || k < n_bore as i64 {
+            let advance_outer = if i >= n_prof {
+                false
+            } else if k >= n_bore as i64 {
+                true
+            } else {
+                outline_angles[i + 1] + twist <= bore_angle(k + 1)
+            };
+            let (outer, outer_next) = (layer_base + i % n_prof, layer_base + (i + 1) % n_prof);
+            let (inner, inner_next) = (
+                layer_base + n_prof + bore_index(k),
+                layer_base + n_prof + bore_index(k + 1),
+            );
+            if advance_outer {
+                push(outer, outer_next, inner);
+                i += 1;
+            } else {
+                push(outer, inner_next, inner);
+                k += 1;
             }
         }
+    };
+    let top = (n_layers - 1) * per_layer;
+    cap(0, false, 0.0);
+    cap(top, true, max_twist);
 
-        mesh
+    if n_bore == 0 {
+        // Solid disc: a fan from an axis vertex at each end.
+        let bottom_axis = mesh.add_vertex([0.0, 0.0, 0.0]);
+        let top_axis = mesh.add_vertex([0.0, 0.0, height]);
+        for i in 0..n_prof {
+            let next = (i + 1) % n_prof;
+            mesh.add_triangle(bottom_axis, next, i);
+            mesh.add_triangle(top_axis, top + i, top + next);
+        }
+    }
+
+    mesh
+}
+
+/// Cycloidal spur gear: the addendum flanks are epicycloids and the dedendum flanks hypocycloids
+/// generated by a rolling circle on the pitch circle, as in clock and watch gearing.
+///
+/// Unlike an involute pair, a cycloidal gear meshes correctly only with a partner whose rolling
+/// circles match (same module, and the addendum rolling circle of one equal to the dedendum one
+/// of the other). The tooth is thick `pi m / 2` on the pitch circle. With a rolling radius of half
+/// the pitch radius the hypocycloid degenerates to a radial line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CycloidalGear {
+    /// Gear module $m$ (mm/tooth).
+    pub module: f64,
+    /// Number of teeth $z$.
+    pub teeth: usize,
+    /// Face width.
+    pub face_width: f64,
+    /// Central bore radius.
+    pub bore_radius: f64,
+    /// Rolling-circle radius as a fraction of the pitch radius, in `(0, 0.5]`.
+    pub rolling_ratio: f64,
+}
+
+impl CycloidalGear {
+    /// A cycloidal spur gear with the usual rolling circle of 0.3 pitch radii.
+    pub fn new(module: f64, teeth: usize, face_width: f64) -> Self {
+        Self {
+            module,
+            teeth,
+            face_width,
+            bore_radius: module * (teeth as f64) * 0.15,
+            rolling_ratio: 0.3,
+        }
+    }
+
+    /// Pitch radius `m z / 2`.
+    pub fn pitch_radius(&self) -> f64 {
+        self.module * self.teeth as f64 / 2.0
+    }
+
+    /// Tip radius `R + m` (reduced where the tooth would otherwise come to a point).
+    pub fn tip_radius(&self) -> f64 {
+        self.pitch_radius() + self.module
+    }
+
+    /// Root radius `R - 1.25 m`.
+    pub fn root_radius(&self) -> f64 {
+        self.pitch_radius() - 1.25 * self.module
+    }
+
+    /// Point at parameter `theta` of the epicycloid (`outside = true`) or hypocycloid of the
+    /// rolling circle of radius `rho` on the pitch circle of radius `r`; both start at `(r, 0)`.
+    fn cycloid(r: f64, rho: f64, theta: f64, outside: bool) -> [f64; 2] {
+        if outside {
+            let k = (r + rho) / rho;
+            [
+                (r + rho) * theta.cos() - rho * (k * theta).cos(),
+                (r + rho) * theta.sin() - rho * (k * theta).sin(),
+            ]
+        } else {
+            let k = (r - rho) / rho;
+            [
+                (r - rho) * theta.cos() + rho * (k * theta).cos(),
+                (r - rho) * theta.sin() - rho * (k * theta).sin(),
+            ]
+        }
+    }
+
+    /// The flank point at distance `radius` from the axis, as (polar angle offset from the pitch
+    /// point, found by bisection on the monotone radius): returns the angle of the cycloid point
+    /// at that radius measured from the x-axis.
+    fn flank_angle(r: f64, rho: f64, radius: f64, outside: bool) -> f64 {
+        // The radius is monotone in theta on the first arch (up to R + 2 rho outside, down to
+        // R - 2 rho inside).
+        let (mut lo, mut hi) = (
+            0.0,
+            PI * rho / (r + if outside { rho } else { -rho }).max(1e-9),
+        );
+        let at = |theta: f64| {
+            let p = Self::cycloid(r, rho, theta, outside);
+            p[0].hypot(p[1])
+        };
+        for _ in 0..80 {
+            let mid = 0.5 * (lo + hi);
+            let reached = if outside {
+                at(mid) >= radius
+            } else {
+                at(mid) <= radius
+            };
+            if reached {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        let p = Self::cycloid(r, rho, 0.5 * (lo + hi), outside);
+        p[1].atan2(p[0])
+    }
+
+    /// The tooth outline, counter-clockwise (`samples` points per flank segment). Each tooth is
+    /// centred on `i 2pi/z`; the flanks are mirrored about that line.
+    pub fn generate_2d_profile(&self, samples: usize) -> Vec<[f64; 2]> {
+        let z = self.teeth;
+        let r = self.pitch_radius();
+        let rho = (self.rolling_ratio.clamp(0.05, 0.5)) * r;
+        let (rf, ra) = (self.root_radius(), self.tip_radius());
+        let step = 2.0 * PI / z as f64;
+        let psi = PI / (2.0 * z as f64); // half tooth thickness (angle) on the pitch circle
+        let n = samples.max(4);
+        // Half-angle of the tooth at radius `radius`: it widens inward along the hypocycloid and
+        // narrows outward along the epicycloid.
+        let half = |radius: f64| -> f64 {
+            if radius <= r {
+                psi + Self::flank_angle(r, rho, radius.max(r - 2.0 * rho + 1e-9), false)
+            } else {
+                psi - Self::flank_angle(r, rho, radius.min(r + 2.0 * rho - 1e-9), true)
+            }
+        };
+        // Limit the tip so the tooth keeps at least a tenth of its width there, and the root so
+        // the hypocycloid exists and neighbouring teeth do not overlap.
+        let mut tip = ra.min(r + 2.0 * rho - 1e-6);
+        while tip > r && half(tip) < 0.1 * psi {
+            tip -= 0.01 * self.module;
+        }
+        let root = rf.max(r - 2.0 * rho + 1e-6);
+        let limit = 0.5 * step * 0.98;
+        let mut points = Vec::new();
+        for i in 0..z {
+            let c = i as f64 * step;
+            let polar = |radius: f64, angle: f64| [radius * angle.cos(), radius * angle.sin()];
+            // Root arc midpoint, then the leading flank from the root outwards to the tip.
+            points.push(polar(rf, c - 0.5 * step));
+            if rf < root {
+                points.push(polar(rf, c - half(root).min(limit)));
+            }
+            let radii: Vec<f64> = (0..=2 * n)
+                .map(|k| root + (tip - root) * k as f64 / (2 * n) as f64)
+                .collect();
+            for &radius in &radii {
+                points.push(polar(radius, c - half(radius).min(limit)));
+            }
+            points.push(polar(tip, c));
+            for &radius in radii.iter().rev() {
+                points.push(polar(radius, c + half(radius).min(limit)));
+            }
+            if rf < root {
+                points.push(polar(rf, c + half(root).min(limit)));
+            }
+        }
+        points
+    }
+
+    /// The closed, outward-oriented solid of the gear (see [`InvoluteGear::generate_3d_mesh`]).
+    pub fn generate_3d_mesh(&self) -> Mesh3D {
+        let profile = self.generate_2d_profile(8);
+        let bore = self.bore_radius.min(0.8 * self.root_radius()).max(0.0);
+        toothed_gear_solid(
+            format!("CycloidalGear_m{}_z{}", self.module, self.teeth),
+            &profile,
+            bore,
+            self.face_width,
+            2,
+            0.0,
+        )
     }
 }
 

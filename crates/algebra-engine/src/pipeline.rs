@@ -391,8 +391,11 @@ impl CadFeaBridge {
     /// stack, or if the rows are not in increasing height.
     fn extruded_screw_solid(screw: &ThreadedScrew, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
         const N_THETA: usize = 96;
-        if screw.effective_socket().is_some() || mesh_3d.vertices.len() < 2 * N_THETA + 2 {
+        if mesh_3d.vertices.len() < 2 * N_THETA + 2 {
             return None;
+        }
+        if let Some((_, depth)) = screw.effective_socket() {
+            return Self::extruded_socketed_screw_solid(mesh_3d, depth, screw.pitch);
         }
         let rows = (mesh_3d.vertices.len() - 2) / N_THETA;
         if rows * N_THETA + 2 != mesh_3d.vertices.len() {
@@ -463,11 +466,141 @@ impl CadFeaBridge {
         Some(fea)
     }
 
+    /// Solid mesh of a screw with a key socket. Every layer carries three kinds of node: the
+    /// outline ring, an inner ring at the socket outline (clipped to stay inside the outline of
+    /// that layer) and the axis node. Below the socket floor the cross-section is the fan from the
+    /// axis to the inner ring plus the annulus between the two rings; from the floor up only the
+    /// annulus is meshed, so the cavity is a void whose floor is the fan's top face. Both stacks use
+    /// the same base triangles, so the mesh conforms across the floor. `mesh_3d` is the CAD mesh
+    /// (rows of 96 vertices, the last two rows being the socket's rim and floor), `depth` the
+    /// socket depth and `pitch` the thread pitch (for the lowering of step rows). `None` if the layout is not as expected or a layer would fold.
+    fn extruded_socketed_screw_solid(mesh_3d: &Mesh3D, depth: f64, pitch: f64) -> Option<FeaMesh> {
+        const N: usize = 96;
+        let rows = (mesh_3d.vertices.len() - 2) / N;
+        if rows < 5 || rows * N + 2 != mesh_3d.vertices.len() {
+            return None;
+        }
+        let at = |r: usize, i: usize| &mesh_3d.vertices[r * N + i];
+        // Rows 0..=head_top are the solid's outline rows; the last two are the socket's rim and floor.
+        let head_top = rows - 3;
+        let top = at(head_top, 0)[2];
+        let floor_z = top - depth;
+        let original: Vec<f64> = (0..=head_top).map(|r| at(r, 0)[2]).collect();
+        let mut z = original.clone();
+        for j in 0..head_top {
+            if (original[j + 1] - original[j]).abs() < 1e-9 {
+                // Same lowering rule as the plain screw (see `extruded_screw_solid`).
+                let gap = if j > 0 {
+                    original[j] - original[j - 1]
+                } else {
+                    f64::INFINITY
+                };
+                z[j] -= (0.05 * pitch).min(0.5 * gap);
+            }
+        }
+        if z.windows(2).any(|w| w[1] - w[0] < 1e-9) {
+            return None;
+        }
+        // Outline layers: (height, outline points), with a layer inserted at the socket floor.
+        let mut layers: Vec<(f64, Vec<[f64; 2]>)> = (0..=head_top)
+            .map(|r| (z[r], (0..N).map(|i| [at(r, i)[0], at(r, i)[1]]).collect()))
+            .collect();
+        let floor_index = match layers.iter().position(|l| (l.0 - floor_z).abs() < 1e-9) {
+            Some(k) => k,
+            None => {
+                let k = layers.iter().position(|l| l.0 > floor_z)?;
+                if k == 0 {
+                    return None;
+                }
+                let (a, b) = (&layers[k - 1], &layers[k]);
+                let t = (floor_z - a.0) / (b.0 - a.0);
+                let ring: Vec<[f64; 2]> = (0..N)
+                    .map(|i| {
+                        [
+                            a.1[i][0] + t * (b.1[i][0] - a.1[i][0]),
+                            a.1[i][1] + t * (b.1[i][1] - a.1[i][1]),
+                        ]
+                    })
+                    .collect();
+                layers.insert(k, (floor_z, ring));
+                k
+            }
+        };
+        let socket: Vec<[f64; 2]> = (0..N)
+            .map(|i| [at(rows - 1, i)[0], at(rows - 1, i)[1]])
+            .collect();
+        let n_layers = layers.len();
+        let per_layer = 2 * N + 1;
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for (k, (zk, outline)) in layers.iter().enumerate() {
+            for p in outline {
+                fea.add_node(vec![p[0], p[1], *zk]);
+            }
+            for i in 0..N {
+                let (o, sk) = (outline[i], socket[i]);
+                let (ro, rs) = (o[0].hypot(o[1]), sk[0].hypot(sk[1]));
+                if k >= floor_index && rs > 0.9 * ro {
+                    return None; // the socket would not fit inside the outline
+                }
+                let scale = if rs > 0.9 * ro { 0.9 * ro / rs } else { 1.0 };
+                fea.add_node(vec![sk[0] * scale, sk[1] * scale, *zk]);
+            }
+            fea.add_node(vec![0.0, 0.0, *zk]);
+        }
+        let node = |layer: usize, local: usize| layer * per_layer + local;
+        // Local ids: outline i, inner ring N + i, axis 2N.
+        let (mut fan, mut annulus): (Vec<[usize; 3]>, Vec<[usize; 3]>) = (Vec::new(), Vec::new());
+        for i in 0..N {
+            let j = (i + 1) % N;
+            fan.push([2 * N, N + i, N + j]);
+            annulus.push([N + i, i, j]);
+            annulus.push([N + i, j, N + j]);
+        }
+        let area = |mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+            let v = |i: usize| &mesh.nodes[node(layer, i)];
+            let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        };
+        let full: Vec<[usize; 3]> = fan.iter().chain(annulus.iter()).copied().collect();
+        // Below the floor: fan and annulus; from the floor up: annulus only (the cavity is void).
+        Self::stack_prisms(&mut fea, &full, floor_index + 1, &node, &area)?;
+        let upper = |layer: usize, local: usize| node(layer + floor_index, local);
+        let upper_area =
+            |mesh: &FeaMesh, layer: usize, t: &[usize; 3]| area(mesh, layer + floor_index, t);
+        Self::stack_prisms(
+            &mut fea,
+            &annulus,
+            n_layers - floor_index,
+            &upper,
+            &upper_area,
+        )?;
+        // The axis and inner-ring nodes above the floor belong to no element (they lie in the
+        // void); drop them so the stiffness matrix has no empty rows.
+        let mut used = vec![false; fea.nodes.len()];
+        for e in &fea.elements {
+            for &i in e {
+                used[i] = true;
+            }
+        }
+        let mut new_id = vec![usize::MAX; fea.nodes.len()];
+        let mut compact = FeaMesh::new(3, ElementType::Tet4);
+        for (i, node) in fea.nodes.iter().enumerate() {
+            if used[i] {
+                new_id[i] = compact.add_node(node.clone());
+            }
+        }
+        for e in &fea.elements {
+            compact.add_element(e.iter().map(|&i| new_id[i]).collect());
+        }
+        Some(compact)
+    }
+
     /// Convert a Threaded Fastener to a simulation `FeaMesh` with `"bolt_head"` and `"shank_tip"`.
     ///
-    /// A screw without a key socket is meshed as a **solid** of linear tetrahedra (see
-    /// [`CadFeaBridge::extruded_screw_solid`]); a screw with a socket keeps the surface
-    /// triangulation (ledger D1).
+    /// A screw is meshed as a **solid** of linear tetrahedra (see
+    /// [`CadFeaBridge::extruded_screw_solid`], and for a key socket
+    /// [`CadFeaBridge::extruded_socketed_screw_solid`]), falling back to the surface
+    /// triangulation if the layers would fold.
     pub fn screw_to_fea(screw: &ThreadedScrew) -> FeaMesh {
         let mesh_3d = screw.generate_3d_mesh();
         let mut fea = Self::extruded_screw_solid(screw, &mesh_3d)

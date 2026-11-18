@@ -511,10 +511,11 @@ fn a_spring_is_meshed_as_a_solid_and_compresses_under_an_axial_load() {
 }
 
 #[test]
-fn a_screw_without_a_socket_is_meshed_as_a_solid_and_stretches_like_a_bar() {
+fn a_screw_with_or_without_a_key_socket_is_a_solid_and_stretches_like_a_bar() {
     use algebra_engine::cad::ThreadedScrew;
     use algebra_engine::pde::ElementType;
-    let screw = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    let mut screw = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    screw.thread_length = 3.0; // few rows keep the analysis quick
     let cad = screw.generate_3d_mesh();
     let fea = CadFeaBridge::screw_to_fea(&screw);
     assert_eq!(
@@ -538,57 +539,99 @@ fn a_screw_without_a_socket_is_meshed_as_a_solid_and_stretches_like_a_bar() {
         "tets {tets} vs solid {solid}"
     );
 
-    // A bolt with a socket keeps the surface mesh (a cavity is not a star-shaped stack).
-    let mut socketed = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    // A bolt with a key socket is a solid too: the cavity is a void in the mesh.
+    let mut socketed = screw.clone();
     socketed.socket_depth = 2.0;
-    assert_ne!(
-        CadFeaBridge::screw_to_fea(&socketed).element_type,
-        ElementType::Tet4
+    let socketed_fea = CadFeaBridge::screw_to_fea(&socketed);
+    assert_eq!(
+        socketed_fea.element_type,
+        ElementType::Tet4,
+        "a socketed bolt is a solid"
+    );
+    assert!(
+        socketed_fea
+            .elements
+            .iter()
+            .all(|e| tet_volume(&socketed_fea, e) > 1e-12)
+    );
+    let socketed_tets: f64 = socketed_fea
+        .elements
+        .iter()
+        .map(|e| tet_volume(&socketed_fea, e))
+        .sum();
+    let socketed_solid = socketed.generate_3d_mesh().compute_volume();
+    assert!(
+        (socketed_tets - socketed_solid).abs() < 0.04 * socketed_solid,
+        "socketed tets {socketed_tets} vs solid {socketed_solid}"
+    );
+    // The cavity removes material: the same bolt without a socket is heavier.
+    assert!(
+        socketed_tets < 0.99 * tets,
+        "socket volume missing: {socketed_tets} vs {tets}"
+    );
+    let mut socket_used = vec![false; socketed_fea.nodes.len()];
+    for e in &socketed_fea.elements {
+        for &i in e {
+            socket_used[i] = true;
+        }
+    }
+    assert!(
+        socket_used.iter().all(|u| *u),
+        "no node floats in the cavity"
     );
 
     // Tension: tip clamped, the head pulled along +z. The shank is a bar of cross-section between
     // the minor and the major circle, so the stiffness is bracketed by those two areas.
     let (e_mod, load) = (200_000.0, 1000.0);
-    let mut pipeline = SimulationPipeline::from_cad(cad.clone());
-    pipeline.fea_mesh = fea;
-    pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
-        youngs_modulus: e_mod,
-        poissons_ratio: 0.3,
-        density: 7850.0,
-        body_force: vec![0.0, 0.0, 0.0],
-        plane_stress: false,
-    });
-    for dof in 0..3 {
-        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
-            group_name: "shank_tip".into(),
-            dof_index: dof,
-            value: 0.0,
+    let stiffness = |fea: algebra_engine::pde::FeaMesh| -> f64 {
+        let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+        pipeline.fea_mesh = fea;
+        pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: e_mod,
+            poissons_ratio: 0.3,
+            density: 7850.0,
+            body_force: vec![0.0, 0.0, 0.0],
+            plane_stress: false,
         });
-    }
-    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
-        group_name: "bolt_head".into(),
-        force_vector: vec![0.0, 0.0, load],
-    });
-    let result = pipeline.run_analysis().expect("screw analysis");
-    let head = &result.fea_mesh.boundary_groups["bolt_head"];
-    let stretch = head
-        .iter()
-        .map(|&n| result.solution.nodal_values[n * 3 + 2])
-        .sum::<f64>()
-        / head.len() as f64;
-    assert!(stretch > 0.0, "the bolt lengthens under tension");
-    let tip = &result.fea_mesh.boundary_groups["shank_tip"];
-    let reaction: f64 = tip
-        .iter()
-        .map(|&n| result.solution.reaction_forces[n * 3 + 2])
-        .sum();
-    assert!((reaction + load).abs() < 1e-4 * load, "reaction {reaction}");
+        for dof in 0..3 {
+            pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+                group_name: "shank_tip".into(),
+                dof_index: dof,
+                value: 0.0,
+            });
+        }
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+            group_name: "bolt_head".into(),
+            force_vector: vec![0.0, 0.0, load],
+        });
+        let result = pipeline.run_analysis().expect("screw analysis");
+        let head = &result.fea_mesh.boundary_groups["bolt_head"];
+        let stretch = head
+            .iter()
+            .map(|&n| result.solution.nodal_values[n * 3 + 2])
+            .sum::<f64>()
+            / head.len() as f64;
+        assert!(stretch > 0.0, "the bolt lengthens under tension");
+        let tip = &result.fea_mesh.boundary_groups["shank_tip"];
+        let reaction: f64 = tip
+            .iter()
+            .map(|&n| result.solution.reaction_forces[n * 3 + 2])
+            .sum();
+        assert!((reaction + load).abs() < 1e-4 * load, "reaction {reaction}");
+        load / stretch
+    };
     let (r_minor, r_major) = (screw.minor_radius(), screw.nominal_diameter / 2.0);
-    let k = load / stretch;
+    let k = stiffness(CadFeaBridge::screw_to_fea(&screw));
+    let k_socket = stiffness(socketed_fea);
     let k_soft = e_mod * std::f64::consts::PI * r_minor * r_minor / screw.total_length;
     let k_stiff = e_mod * std::f64::consts::PI * r_major * r_major / screw.total_length;
     assert!(
         k > 0.9 * k_soft && k < 1.2 * k_stiff,
         "k {k} not in [{k_soft}, {k_stiff}]"
+    );
+    // The socket only removes material in the head: the bolt is no stiffer, and not much softer.
+    assert!(
+        k_socket <= 1.001 * k && k_socket > 0.5 * k,
+        "socketed k {k_socket} vs {k}"
     );
 }

@@ -694,16 +694,25 @@ impl GeometricConstraintSolver {
             }
             GeometricConstraint::Tangent(line_name, circle_name) => {
                 let (p, q) = line(line_name)?;
+                // A circle with no stated radius has it as an unknown (see `refine_2d`).
                 let (center_name, radius) = match self.entities.get(circle_name) {
                     Some(GeometricEntity::Circle2D {
                         center,
                         radius: Some(r),
                         ..
                     }) => (center.clone(), *r),
+                    Some(GeometricEntity::Circle2D {
+                        center,
+                        radius: None,
+                        ..
+                    }) => match points.get(&format!("{circle_name}#radius")) {
+                        Some(r) => (center.clone(), r[0]),
+                        None => {
+                            return Err(fail(format!("`{circle_name}` has no radius value")));
+                        }
+                    },
                     _ => {
-                        return Err(fail(format!(
-                            "`{circle_name}` is not a Circle2D with a known radius"
-                        )));
+                        return Err(fail(format!("`{circle_name}` is not a Circle2D")));
                     }
                 };
                 let c = point(&center_name)?;
@@ -764,6 +773,17 @@ impl GeometricConstraintSolver {
                 });
             }
             points.insert(name.clone(), position);
+        }
+        // A circle without a stated radius contributes the radius as one more unknown, stored
+        // under the key `<circle>#radius` (initial guess 1).
+        let mut circle_names: Vec<&String> = self.entities.keys().collect();
+        circle_names.sort();
+        for name in circle_names {
+            if let Some(GeometricEntity::Circle2D { radius: None, .. }) = self.entities.get(name) {
+                let key = format!("{name}#radius");
+                free.push((key.clone(), 0));
+                points.insert(key, vec![1.0]);
+            }
         }
 
         let evaluate = |points: &HashMap<String, Vec<f64>>| -> AlgebraResult<Vec<f64>> {
@@ -895,7 +915,11 @@ impl GeometricConstraintSolver {
             )));
         }
         for (name, p) in points {
-            solved.insert(name, p);
+            // `<circle>#radius` entries report the solved radius under the circle's own name.
+            let key = name
+                .strip_suffix("#radius")
+                .map_or(name.clone(), str::to_string);
+            solved.insert(key, p);
         }
         Ok(())
     }

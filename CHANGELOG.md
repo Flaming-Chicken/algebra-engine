@@ -41,6 +41,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Symbolic form coefficients accept juxtaposed products (`x^2 y dx`).
 - FEA: quadratic triangle elements (`Tri6`, `FeaMesh::plate_2d_tri6`) for elasticity and heat conduction.
 - Notebook: workspace tabs and layout presets are routed to views (`WorkspaceTab::route`, `apply_layout`), with palette commands for the Presentation Report and Dependency Graph layouts.
+- Geometric constraint solver: a circle with no stated radius gets the radius solved from tangency.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

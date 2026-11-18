@@ -348,3 +348,74 @@ fn three_dimensional_constraints_report_what_they_cannot_do() {
     solver.add_constraint(C::Distance("A".into(), "B".into(), 1.0));
     assert!(solver.solve().is_err());
 }
+
+fn circle(name: &str, center: &str, radius: Option<f64>) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Circle2D {
+            name: name.to_string(),
+            center: center.to_string(),
+            radius,
+        },
+    )
+}
+
+#[test]
+fn a_circle_radius_can_be_an_unknown() {
+    // Radius from tangency: a circle centred at (2, 1.5) tangent to the x-axis has radius 1.5.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 4.0, 0.0),
+            fixed("Ctr", 2.0, 1.5),
+            line("axis", "A", "B"),
+            circle("c", "Ctr", None),
+        ],
+        vec![C::Tangent("axis".into(), "c".into())],
+    )
+    .solve()
+    .unwrap();
+    assert!((solved["c"][0] - 1.5).abs() < 1e-8, "{:?}", solved["c"]);
+
+    // A circle tangent to two parallel lines y = 0 and y = 2 with its centre 3 from a fixed
+    // point on the x-axis: the radius is 1 and the centre is at height 1.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 5.0, 0.0),
+            fixed("E", 0.0, 2.0),
+            fixed("F", 5.0, 2.0),
+            free("Ctr"),
+            line("low", "A", "B"),
+            line("high", "E", "F"),
+            circle("c", "Ctr", None),
+        ],
+        vec![
+            C::Tangent("low".into(), "c".into()),
+            C::Tangent("high".into(), "c".into()),
+            C::Distance("A".into(), "Ctr".into(), 3.0_f64.hypot(1.0)),
+        ],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["c"][0] - 1.0).abs() < 1e-7,
+        "radius {:?}",
+        solved["c"]
+    );
+    let centre = &solved["Ctr"];
+    assert!((centre[1] - 1.0).abs() < 1e-7, "{centre:?}");
+    assert!((centre[0].hypot(centre[1]) - 10.0_f64.sqrt()).abs() < 1e-7);
+
+    // A tangent to something that is not a circle is still an error.
+    let bad = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 1.0, 0.0),
+            line("l", "A", "B"),
+        ],
+        vec![C::Tangent("l".into(), "A".into())],
+    )
+    .solve();
+    assert!(bad.is_err());
+}

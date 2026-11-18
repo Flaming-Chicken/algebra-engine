@@ -235,3 +235,6 @@ mod geometric_summation_tests;
 
 #[path = "engine/guess_tests.rs"]
 mod guess_tests;
+
+#[path = "engine/zeilberger_tests.rs"]
+mod zeilberger_tests;

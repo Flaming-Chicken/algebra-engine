@@ -212,43 +212,7 @@ pub fn gosper(ratio_num: &QPoly, ratio_den: &QPoly) -> Result<Option<GosperSum>,
             denominator: QPoly::one(),
         }));
     }
-    let (mut a, mut b, mut c) = (ratio_num.clone(), ratio_den.clone(), QPoly::one());
-
-    // Step 1: cancel every non-negative integer shift h at which a(k) and b(k+h) share a factor.
-    // Such an h is a difference of a root of a and a root of b, so it is at most the sum of their
-    // Cauchy root bounds.
-    let bound = |p: &QPoly| -> BigRational {
-        match (p.degree(), p.lead()) {
-            (Some(d), Some(lead)) if d > 0 => {
-                let m = (0..d)
-                    .map(|i| (p.coeff(i) / lead.clone()).abs())
-                    .fold(BigRational::zero(), |acc, v| if v > acc { v } else { acc });
-                m + BigRational::one()
-            }
-            _ => BigRational::zero(),
-        }
-    };
-    let limit = (bound(&a) + bound(&b)).ceil().to_integer();
-    let limit = limit.to_i64().filter(|l| *l <= MAX_SHIFT).ok_or_else(|| {
-        "the coefficients are too large to bound the shifts to search".to_string()
-    })?;
-    for h in 0..=limit {
-        let hh = rat(h);
-        let g = a.gcd(&b.shift(&hh));
-        if g.degree().is_none_or(|d| d == 0) {
-            continue;
-        }
-        // a <- a / g,  b <- b / g(k - h),  c <- c * prod_{i=1}^{h} g(k - i).
-        let g_back = g.shift(&rat(-h));
-        a = a.div_rem(&g).map(|(q, _)| q).unwrap_or_else(QPoly::zero);
-        b = b
-            .div_rem(&g_back)
-            .map(|(q, _)| q)
-            .unwrap_or_else(QPoly::zero);
-        for i in 1..=h {
-            c = c.mul(&g.shift(&rat(-i)));
-        }
-    }
+    let (a, b, c) = gosper_normal_form(ratio_num, ratio_den)?;
 
     // Step 2: a(k) x(k+1) - b(k-1) x(k) = c(k) for a polynomial x(k).
     let a_k = a.clone();
@@ -352,4 +316,60 @@ fn solve_linear(columns: &[Vec<BigRational>], rhs: &[BigRational]) -> Option<Vec
         x[col] = m[row][cols].clone();
     }
     Some(x)
+}
+
+/// Gosper's normal form of a ratio `P/Q`: polynomials `(a, b, c)` with
+/// `P/Q = a(k)/b(k) * c(k+1)/c(k)` and `gcd(a(k), b(k+h)) = 1` for every integer `h >= 0`, found by
+/// cancelling each shift at which `a(k)` and `b(k+h)` share a factor. `Err` if the coefficients are
+/// too large to bound the shifts to search.
+pub(crate) fn gosper_normal_form(
+    ratio_num: &QPoly,
+    ratio_den: &QPoly,
+) -> Result<(QPoly, QPoly, QPoly), String> {
+    let (mut a, mut b, mut c) = (ratio_num.clone(), ratio_den.clone(), QPoly::one());
+
+    // Step 1: cancel every non-negative integer shift h at which a(k) and b(k+h) share a factor.
+    // Such an h is a difference of a root of a and a root of b, so it is at most the sum of their
+    // magnitudes; each is bounded by Fujiwara's bound 2 max_i |p_{d-i} / p_d|^(1/i) (far tighter
+    // than the Cauchy bound for products of many factors).
+    let bound = |p: &QPoly| -> Result<BigRational, String> {
+        match (p.degree(), p.lead()) {
+            (Some(d), Some(lead)) if d > 0 => {
+                let mut m = 0.0_f64;
+                for i in 1..=d {
+                    let ratio = (p.coeff(d - i) / lead.clone()).abs();
+                    let value = ratio.to_f64().filter(|v| v.is_finite()).ok_or_else(|| {
+                        "a coefficient is too large to bound the shifts".to_string()
+                    })?;
+                    m = m.max(value.powf(1.0 / i as f64));
+                }
+                // A little slack keeps the floating-point bound safe.
+                BigRational::from_float(2.0 * m * 1.0001 + 1.0)
+                    .ok_or_else(|| "a coefficient is too large to bound the shifts".to_string())
+            }
+            _ => Ok(BigRational::zero()),
+        }
+    };
+    let limit = (bound(&a)? + bound(&b)?).ceil().to_integer();
+    let limit = limit.to_i64().filter(|l| *l <= MAX_SHIFT).ok_or_else(|| {
+        "the coefficients are too large to bound the shifts to search".to_string()
+    })?;
+    for h in 0..=limit {
+        let hh = rat(h);
+        let g = a.gcd(&b.shift(&hh));
+        if g.degree().is_none_or(|d| d == 0) {
+            continue;
+        }
+        // a <- a / g,  b <- b / g(k - h),  c <- c * prod_{i=1}^{h} g(k - i).
+        let g_back = g.shift(&rat(-h));
+        a = a.div_rem(&g).map(|(q, _)| q).unwrap_or_else(QPoly::zero);
+        b = b
+            .div_rem(&g_back)
+            .map(|(q, _)| q)
+            .unwrap_or_else(QPoly::zero);
+        for i in 1..=h {
+            c = c.mul(&g.shift(&rat(-i)));
+        }
+    }
+    Ok((a, b, c))
 }

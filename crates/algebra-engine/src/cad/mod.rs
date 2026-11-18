@@ -509,6 +509,14 @@ pub enum GeometricEntity {
         p1: String,
         p2: String,
     },
+    /// A plane through three 3-D points (given by entity name); used by the point-plane
+    /// distance and the line/plane parallel and perpendicular constraints.
+    Plane3D {
+        name: String,
+        p1: String,
+        p2: String,
+        p3: String,
+    },
     /// A straight line through two 3-D points (given by entity name); used by the line
     /// constraints (parallel, perpendicular, angle).
     Line3D {
@@ -700,6 +708,38 @@ impl GeometricConstraintSolver {
                 ))),
             }
         };
+        // A `Plane3D`'s normal `(p2 - p1) x (p3 - p1)`; `None` for other entities.
+        let plane_normal = |name: &str| -> Option<AlgebraResult<[f64; 3]>> {
+            let Some(GeometricEntity::Plane3D { p1, p2, p3, .. }) = self.entities.get(name) else {
+                return None;
+            };
+            Some((|| {
+                let (a, b, c) = (point_any(p1)?, point_any(p2)?, point_any(p3)?);
+                if a.len() != 3 || b.len() != 3 || c.len() != 3 {
+                    return Err(fail(format!("`{name}` needs three 3-D points")));
+                }
+                let (u, v) = (
+                    [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+                    [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+                );
+                Ok([
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ])
+            })())
+        };
+        // Unit vector and kind (`true` = plane normal) of a spatial line or plane, if it is one.
+        let spatial = |name: &str| -> Option<AlgebraResult<(bool, [f64; 3])>> {
+            let unit = |v: [f64; 3]| {
+                let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-12);
+                [v[0] / n, v[1] / n, v[2] / n]
+            };
+            if let Some(d) = line3(name) {
+                return Some(d.map(|v| (false, unit(v))));
+            }
+            plane_normal(name).map(|n| n.map(|v| (true, unit(v))))
+        };
         let cross3 = |a: [f64; 3], b: [f64; 3]| {
             [
                 a[1] * b[2] - a[2] * b[1],
@@ -717,6 +757,45 @@ impl GeometricConstraintSolver {
                 Ok(pa.iter().zip(&pb).map(|(u, v)| u - v).collect())
             }
             GeometricConstraint::Distance(a, b, d) => {
+                // A point and a plane: |(P - A) . n| / |n| with n the plane's normal.
+                let plane_of = |name: &str| match self.entities.get(name) {
+                    Some(GeometricEntity::Plane3D { p1, .. }) => Some(p1.clone()),
+                    _ => None,
+                };
+                if plane_of(a).is_some() || plane_of(b).is_some() {
+                    let (point_name, plane_name) = if plane_of(b).is_some() {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    let Some(origin) = plane_of(plane_name) else {
+                        return Err(fail(
+                            "the distance between two planes is not supported".into(),
+                        ));
+                    };
+                    if plane_of(point_name).is_some() {
+                        return Err(fail(
+                            "the distance between two planes is not supported".into(),
+                        ));
+                    }
+                    let normal = plane_normal(plane_name)
+                        .ok_or_else(|| fail(format!("`{plane_name}` is not a plane")))??;
+                    let (pt, o) = (point_any(point_name)?, point_any(&origin)?);
+                    if pt.len() != 3 {
+                        return Err(fail(format!(
+                            "`{point_name}` must be a 3-D point to measure a distance to a plane"
+                        )));
+                    }
+                    let len =
+                        (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
+                            .sqrt()
+                            .max(1e-12);
+                    let signed = ((pt[0] - o[0]) * normal[0]
+                        + (pt[1] - o[1]) * normal[1]
+                        + (pt[2] - o[2]) * normal[2])
+                        / len;
+                    return Ok(vec![signed.abs() - d]);
+                }
                 // A point and a line (2-D or 3-D): the distance from the point to the infinite
                 // line, |(P - A) - ((P - A) . u) u| with u the unit direction of the line.
                 let line_ends = |name: &str| match self.entities.get(name) {
@@ -765,6 +844,22 @@ impl GeometricConstraintSolver {
                 Ok(vec![dist - d])
             }
             GeometricConstraint::Parallel(a, b) => {
+                if let (Some(sa), Some(sb)) = (spatial(a), spatial(b)) {
+                    let ((plane_a, va), (plane_b, vb)) = (sa?, sb?);
+                    // Same kind (line-line, plane-plane): the vectors are parallel. A line and a
+                    // plane: the line lies along the plane, so the direction is orthogonal to the
+                    // normal.
+                    return Ok(if plane_a == plane_b {
+                        cross3(va, vb).to_vec()
+                    } else {
+                        vec![dot3(va, vb)]
+                    });
+                }
+                if spatial(a).is_some() != spatial(b).is_some() {
+                    return Err(fail(format!(
+                        "`{a}` and `{b}` must both be planar (Line2D) or both spatial (Line3D/Plane3D)"
+                    )));
+                }
                 if let Some((da, db)) = lines3(a, b)? {
                     // Parallel in space: the cross product of the directions vanishes.
                     return Ok(cross3(da, db).to_vec());
@@ -772,6 +867,21 @@ impl GeometricConstraintSolver {
                 Ok(vec![cross(direction(line(a)?), direction(line(b)?))])
             }
             GeometricConstraint::Perpendicular(a, b) => {
+                if let (Some(sa), Some(sb)) = (spatial(a), spatial(b)) {
+                    let ((plane_a, va), (plane_b, vb)) = (sa?, sb?);
+                    // Line-line and plane-plane: the vectors are orthogonal. A line and a plane:
+                    // the line is along the normal, so the vectors are parallel.
+                    return Ok(if plane_a == plane_b {
+                        vec![dot3(va, vb)]
+                    } else {
+                        cross3(va, vb).to_vec()
+                    });
+                }
+                if spatial(a).is_some() != spatial(b).is_some() {
+                    return Err(fail(format!(
+                        "`{a}` and `{b}` must both be planar (Line2D) or both spatial (Line3D/Plane3D)"
+                    )));
+                }
                 if let Some((da, db)) = lines3(a, b)? {
                     return Ok(vec![dot3(da, db)]);
                 }

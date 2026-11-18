@@ -241,3 +241,110 @@ fn constraints_on_unknown_or_wrong_kind_entities_are_errors() {
     );
     assert!(s.solve().is_err());
 }
+
+fn point3(name: &str, c: [Option<f64>; 3]) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Point3D {
+            name: name.to_string(),
+            coords: c,
+        },
+    )
+}
+
+fn dist3(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(u, v)| (u - v).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+#[test]
+fn three_dimensional_points_are_solved_from_distances() {
+    // Apex D at distance 1.2 from three base points of a right triangle: D = (0.5, 0.5, +-h) with
+    // h^2 = 1.44 - 0.5.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(0.0), Some(0.0), Some(0.0)]),
+        point3("B", [Some(1.0), Some(0.0), Some(0.0)]),
+        point3("C", [Some(0.0), Some(1.0), Some(0.0)]),
+        point3("D", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    for base in ["A", "B", "C"] {
+        solver.add_constraint(C::Distance(base.into(), "D".into(), 1.2));
+    }
+    let solved = solver.solve().unwrap();
+    let d = &solved["D"];
+    assert_eq!(d.len(), 3);
+    for base in ["A", "B", "C"] {
+        assert!(
+            (dist3(&solved[base], d) - 1.2).abs() < 1e-8,
+            "distance to {base}"
+        );
+    }
+    let h = (1.44_f64 - 0.5).sqrt();
+    assert!(
+        (d[0] - 0.5).abs() < 1e-6 && (d[1] - 0.5).abs() < 1e-6,
+        "{d:?}"
+    );
+    assert!((d[2].abs() - h).abs() < 1e-6, "{d:?}");
+
+    // A chain with a 3-4-5 style spatial step: P at distance 3 from the origin, Q at distance 4
+    // from P and 5 from the origin, with P pinned to the x axis through two known coordinates.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("O", [Some(0.0), Some(0.0), Some(0.0)]),
+        point3("P", [None, Some(0.0), Some(0.0)]),
+        point3("Q", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Distance("O".into(), "P".into(), 3.0));
+    solver.add_constraint(C::Distance("P".into(), "Q".into(), 4.0));
+    solver.add_constraint(C::Distance("O".into(), "Q".into(), 5.0));
+    let solved = solver.solve().unwrap();
+    assert!((dist3(&solved["O"], &solved["P"]) - 3.0).abs() < 1e-8);
+    assert!((dist3(&solved["P"], &solved["Q"]) - 4.0).abs() < 1e-8);
+    assert!((dist3(&solved["O"], &solved["Q"]) - 5.0).abs() < 1e-8);
+    assert!((solved["P"][1]).abs() < 1e-12 && (solved["P"][2]).abs() < 1e-12);
+
+    // Coincidence in 3-D.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(1.0), Some(-2.0), Some(3.0)]),
+        point3("B", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Coincident("A".into(), "B".into()));
+    let solved = solver.solve().unwrap();
+    assert!(dist3(&solved["A"], &solved["B"]) < 1e-9);
+}
+
+#[test]
+fn three_dimensional_constraints_report_what_they_cannot_do() {
+    // Inconsistent distances in 3-D (triangle inequality violated) are an error.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(0.0); 3]),
+        point3("B", [Some(1.0), Some(0.0), Some(0.0)]),
+        point3("D", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Distance("A".into(), "D".into(), 0.2));
+    solver.add_constraint(C::Distance("B".into(), "D".into(), 0.2));
+    assert!(solver.solve().is_err());
+
+    // A 2-D point cannot be related to a 3-D point.
+    let mut solver = GeometricConstraintSolver::new();
+    let (n, e) = point3("A", [Some(0.0); 3]);
+    solver.add_entity(n, e);
+    let (n, e) = fixed("B", 1.0, 1.0);
+    solver.add_entity(n, e);
+    solver.add_constraint(C::Distance("A".into(), "B".into(), 1.0));
+    assert!(solver.solve().is_err());
+}

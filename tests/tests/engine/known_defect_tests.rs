@@ -270,8 +270,9 @@ fn cartan_operations_use_the_form_that_was_typed() {
         is_minkowski: false,
     });
     assert!(star.contains("= dy∧dz"), "{star}");
-    // Unreadable input is an error, not a canned answer.
-    assert!(cartan(wedge("nonsense", "dy")).starts_with("ERROR"));
+    // Unreadable input is an error, not a canned answer. (A bare word such as `nonsense` is now a
+    // legitimate symbolic 0-form, so use input that is not an expression at all.)
+    assert!(cartan(wedge("2 +* dx", "dy")).starts_with("ERROR"));
     assert!(cartan(wedge("dw", "dy")).starts_with("ERROR"));
 }
 

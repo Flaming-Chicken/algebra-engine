@@ -232,3 +232,6 @@ mod gosper_tests;
 
 #[path = "engine/geometric_summation_tests.rs"]
 mod geometric_summation_tests;
+
+#[path = "engine/guess_tests.rs"]
+mod guess_tests;

@@ -637,3 +637,127 @@ fn a_point_can_be_at_a_given_distance_from_a_line() {
     .solve();
     assert!(mismatch.is_err());
 }
+
+fn plane3(name: &str, a: &str, b: &str, c: &str) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Plane3D {
+            name: name.to_string(),
+            p1: a.to_string(),
+            p2: b.to_string(),
+            p3: c.to_string(),
+        },
+    )
+}
+
+#[test]
+fn planes_in_space_give_distances_and_parallel_perpendicular_constraints() {
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+    let base = || {
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("Y", 0.0, 1.0, 0.0),
+            plane3("floor", "O", "X", "Y"),
+        ]
+    };
+
+    // Distance to the plane z = 0: the point (1, 2, z) is 3 away at z = +-3, and on the plane at 0.
+    let mut entities = base();
+    entities.push(point3("P", [Some(1.0), Some(2.0), None]));
+    let solved = solver(entities, vec![C::Distance("P".into(), "floor".into(), 3.0)])
+        .solve()
+        .unwrap();
+    assert!(
+        (solved["P"][2].abs() - 3.0).abs() < 1e-7,
+        "{:?}",
+        solved["P"]
+    );
+    assert!(!solved.contains_key("floor"));
+    let mut entities = base();
+    entities.push(point3("P", [Some(1.0), Some(1.0), None]));
+    let solved = solver(entities, vec![C::Distance("floor".into(), "P".into(), 0.0)])
+        .solve()
+        .unwrap();
+    assert!(solved["P"][2].abs() < 1e-7, "{:?}", solved["P"]);
+
+    // A line from O to Q parallel to the plane (Q on it, at distance 2 from O) has Q.z = 0.
+    let mut entities = base();
+    entities.push(point3("Q", [None, None, None]));
+    entities.push(line3("ray", "O", "Q"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Parallel("ray".into(), "floor".into()),
+            C::Distance("O".into(), "Q".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        q[2].abs() < 1e-6 && (q[0].hypot(q[1]) - 2.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // A line perpendicular to the plane is along its normal: Q = (0, 0, +-2).
+    let mut entities = base();
+    entities.push(point3("Q", [None, None, None]));
+    entities.push(line3("ray", "O", "Q"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Perpendicular("ray".into(), "floor".into()),
+            C::Distance("O".into(), "Q".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        q[0].abs() < 1e-6 && q[1].abs() < 1e-6 && (q[2].abs() - 2.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // A second plane (the wall) through O, X and a point W = (0, y, z): perpendicular to the floor
+    // it must contain the z direction, so with |OW| = 1 the point is W = (0, 0, +-1).
+    let mut entities = base();
+    entities.push(point3("W", [Some(0.0), None, None]));
+    entities.push(plane3("wall", "O", "X", "W"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Perpendicular("floor".into(), "wall".into()),
+            C::Distance("O".into(), "W".into(), 1.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let w = &solved["W"];
+    assert!(
+        w[1].abs() < 1e-6 && (w[2].abs() - 1.0).abs() < 1e-6,
+        "{w:?}"
+    );
+
+    // Mixing a planar line with a plane, and the distance between two planes, are errors.
+    let mut entities = base();
+    entities.push(fixed("a", 0.0, 0.0));
+    entities.push(fixed("b", 1.0, 0.0));
+    entities.push(line("flat", "a", "b"));
+    assert!(
+        solver(entities, vec![C::Parallel("flat".into(), "floor".into())])
+            .solve()
+            .is_err()
+    );
+    let mut entities = base();
+    entities.push(known("Z", 0.0, 0.0, 1.0));
+    entities.push(plane3("other", "O", "X", "Z"));
+    assert!(
+        solver(
+            entities,
+            vec![C::Distance("floor".into(), "other".into(), 1.0)]
+        )
+        .solve()
+        .is_err()
+    );
+}

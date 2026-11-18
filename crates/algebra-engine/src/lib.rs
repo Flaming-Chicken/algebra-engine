@@ -82,6 +82,7 @@ pub mod urscript_pose;
 pub mod visualizer;
 pub mod weyl_dmodules;
 pub mod workbench;
+pub mod zeilberger;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,

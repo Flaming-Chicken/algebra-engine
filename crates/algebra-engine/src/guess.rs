@@ -65,7 +65,7 @@ impl Recurrence {
 }
 
 /// Null space of `rows x cols` matrix `m` (rational), as a list of basis vectors.
-fn null_space(mut m: Vec<Vec<BigRational>>, cols: usize) -> Vec<Vec<BigRational>> {
+pub(crate) fn null_space(mut m: Vec<Vec<BigRational>>, cols: usize) -> Vec<Vec<BigRational>> {
     let rows = m.len();
     let mut pivot_cols: Vec<usize> = Vec::new();
     let mut r = 0;

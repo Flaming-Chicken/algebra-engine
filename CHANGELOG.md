@@ -63,6 +63,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Cartan operation `HodgeStarMetric`: Hodge star for a diagonal metric given as expressions.
 - `SymbolicForm::hodge_star_metric`: Hodge star for a general symmetric metric with symbolic entries.
 - Cartan operation `HodgeStarMatrix`: Hodge star for a general symmetric metric matrix given as expressions.
+- `zeilberger::{zeilberger, telescoping_at}`: creative telescoping by specialisation and interpolation (recurrences for binomial, squared-binomial and Delannoy sums, verified beyond the fitted range; not an all-n proof).
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

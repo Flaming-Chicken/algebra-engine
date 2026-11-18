@@ -51,6 +51,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `airfoil_to_fea` meshes the wing as a solid of linear tetrahedra (shared prism stacker with the gear mesh).
 - Fixed: gear FEA boundary groups are selected by geometry (`bore_hole` = the bore cylinder, `teeth_flanks` = outline above the pitch circle) instead of by radial-range fractions.
 - `spring_to_fea`: helical springs are meshed as solids of linear tetrahedra with end-face groups.
+- `gosper::{gosper, QPoly, GosperSum}`: Gosper's algorithm for indefinite hypergeometric summation in exact rational arithmetic (the building block of Zeilberger's creative telescoping, which is still open).
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

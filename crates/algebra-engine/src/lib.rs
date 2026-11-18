@@ -29,6 +29,7 @@ pub mod exceptional_lie;
 pub mod executor;
 pub mod geometric_dl;
 pub mod geometry;
+pub mod gosper;
 pub mod gpu;
 pub mod hecs;
 pub mod heuristic;

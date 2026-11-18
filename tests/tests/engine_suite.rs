@@ -226,3 +226,6 @@ mod cad_constraint_solver_tests;
 
 #[path = "engine/symbolic_cartan_tests.rs"]
 mod symbolic_cartan_tests;
+
+#[path = "engine/gosper_tests.rs"]
+mod gosper_tests;

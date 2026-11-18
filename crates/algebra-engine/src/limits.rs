@@ -121,6 +121,36 @@ impl LimitEngine {
             }
         }
 
+        // 3b. A power f^g with both depending on x at a finite point (1^oo, 0^0, oo^0): the
+        // limit is exp(lim g ln f), valid while the base stays positive. The product is
+        // written as ln f / (1/g) so that it is a 0/0 or oo/oo quotient for L'Hopital.
+        if !pos_inf
+            && !neg_inf
+            && let ExprKind::Pow(base, exp) = graph.get(expr).kind
+            && graph.has_symbol(exp, wrt)
+            && graph.has_symbol(base, wrt)
+        {
+            let base_at = Self::simplify_constants(graph, graph.substitute(base, wrt, point));
+            let positive = graph
+                .evalf(base_at, &crate::numeric::EvalContext::default())
+                .is_ok_and(|v| v.to_f64() > 0.0);
+            if positive {
+                let one = graph.integer(1);
+                let ln_base = graph.function("ln", [base]);
+                let inverse = graph.div(one, exp);
+                let inverse =
+                    crate::simplify::Simplifier::simplify(graph, inverse).unwrap_or(inverse);
+                let quotient = graph.div(ln_base, inverse);
+                if let Ok(l) = Self::limit_directed(graph, quotient, wrt, point, direction)
+                    && !Self::is_indeterminate(graph, l)
+                {
+                    let e = graph.constant(algebra_core::Constant::E);
+                    let power = graph.pow(e, l);
+                    return Ok(crate::simplify::Simplifier::simplify(graph, power).unwrap_or(power));
+                }
+            }
+        }
+
         // 4. Fallback Taylor series expansion around finite point
         if !pos_inf && !neg_inf {
             let taylor = graph.taylor_series(expr, wrt, point, 4);
@@ -343,7 +373,9 @@ impl LimitEngine {
                     ExprKind::Number(Number::Integer(ib)),
                 ) = (&graph.get(sa).kind, &graph.get(sb).kind)
                 {
-                    return graph.integer(ia - ib);
+                    if let Some(d) = ia.checked_sub(*ib) {
+                        return graph.integer(d);
+                    }
                 }
                 graph.sub(sa, sb)
             }
@@ -364,8 +396,10 @@ impl LimitEngine {
                     } else if Self::is_infinity_node(graph, sf) {
                         has_pos_inf = true;
                         all_int = false;
-                    } else if let ExprKind::Number(Number::Integer(i)) = graph.get(sf).kind {
-                        prod *= i;
+                    } else if let ExprKind::Number(Number::Integer(i)) = graph.get(sf).kind
+                        && let Some(p) = prod.checked_mul(i)
+                    {
+                        prod = p;
                     } else {
                         all_int = false;
                         new_factors.push(sf);
@@ -443,10 +477,16 @@ impl LimitEngine {
                     ExprKind::Number(Number::Integer(e)),
                 ) = (&graph.get(s_base).kind, &graph.get(s_exp).kind)
                 {
-                    if *e >= 0 {
-                        return graph.integer(b.pow(*e as u32));
-                    } else if *b != 0 {
-                        return graph.rational(1, b.pow((-*e) as u32));
+                    // Exact only while the result fits an i64; otherwise the power stays symbolic.
+                    let magnitude = u32::try_from(e.unsigned_abs())
+                        .ok()
+                        .and_then(|n| b.checked_pow(n));
+                    if let Some(power) = magnitude {
+                        if *e >= 0 {
+                            return graph.integer(power);
+                        } else if *b != 0 {
+                            return graph.rational(1, power);
+                        }
                     }
                 }
                 graph.pow(s_base, s_exp)
@@ -457,7 +497,9 @@ impl LimitEngine {
                     return graph.integer(0);
                 }
                 if let ExprKind::Number(Number::Integer(i)) = graph.get(sa).kind {
-                    return graph.integer(-i);
+                    if let Some(n) = i.checked_neg() {
+                        return graph.integer(n);
+                    }
                 }
                 if let ExprKind::Number(Number::Constant(c)) = graph.get(sa).kind {
                     match c {

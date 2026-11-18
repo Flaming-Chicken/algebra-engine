@@ -1,7 +1,7 @@
 # URAE Cross-Platform GUI, Accessibility, Interactive Workflow & Documentation Architecture Plan
 
 > [!NOTE]
-> **Implementation Status (`dev` v0.4.0):** This document is a design specification. Shipped v0.4.0 baseline status and code defects are tracked in [`PLANNING.md`](PLANNING.md) (`Index` / `v0.4.0` ledger).
+> **Implementation Status (`dev` v0.6.0):** This document is a design specification. What is shipped, and the defects found in it, are tracked in [`PLANNING.md`](PLANNING.md) (index and ledger); its priority list places the GUI plan after the correctness work. The notebook's `.tex`, `.py` and `.lean` export, printable HTML report and workspace-tab routing (ledger A11) are the only parts built so far; the rest is unstarted.
 
 **Universal Rust Algebra Engine (URAE)**  
 *Unified Platform-Agnostic UI/UX (`urae-ui-model` MVU + upstream `spodeian-core` alignment), Extreme-Viewport Resilience (`280×280` to `7680×4320`), WCAG 2.2 AAA Semantic Accessibility (`AccessKit`/Speech/Braille/Sonification), Three-Tier Solution & Three-Pillar (`quant!` $\leftrightarrow$ `cas!` $\leftrightarrow$ `sim!`) Ergonomics, Generalized Function Connections / Metrics / Series / Domain Contracts, 100% Backend Feature Exposure, and Monitor-Paced Non-Blocking Execution across Desktop (`wgpu`/`glow`/`epaint -> tiny-skia`), Web/PWA (`urae-wasm` `baseline` + `+simd128`), Mobile (`Android`/`iOS`), Terminal TUI (`urae-cli`), Embeds, LSP (`urae-lsp`), and Jupyter (`urae-kernel`)*

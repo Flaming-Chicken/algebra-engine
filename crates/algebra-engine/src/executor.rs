@@ -1956,6 +1956,53 @@ impl OperationExecutor {
                             Err(_) => OperationResult::error(e),
                         },
                     },
+                    CartanOpKind::InteriorProductSymbolic {
+                        form_str,
+                        vector_field,
+                        dim,
+                    }
+                    | CartanOpKind::LieDerivativeSymbolic {
+                        form_str,
+                        vector_field,
+                        dim,
+                    } => {
+                        let lie = matches!(kind, CartanOpKind::LieDerivativeSymbolic { .. });
+                        // The vector components are parsed as expressions in the coordinates.
+                        let components: Result<Vec<algebra_core::ExprId>, String> = vector_field
+                            .iter()
+                            .map(|c| {
+                                parser
+                                    .parse(c)
+                                    .map_err(|e| format!("vector component `{c}`: {e:?}"))
+                            })
+                            .collect();
+                        let result = sym_parse(form_str, *dim).and_then(|f| {
+                            let v = components?;
+                            if lie {
+                                f.lie_derivative(graph, &v)
+                            } else {
+                                f.interior_product(graph, &v)
+                            }
+                            .map_err(|e| e.to_string())
+                        });
+                        match result {
+                            Ok(form) => {
+                                let (label, latex) = if lie {
+                                    (
+                                        format!("Lie Derivative L_X({form_str})"),
+                                        r"\mathcal{L}_X \omega",
+                                    )
+                                } else {
+                                    (
+                                        format!("Interior Product i_X({form_str})"),
+                                        r"\iota_X \omega",
+                                    )
+                                };
+                                sym_report(label, &form, latex)
+                            }
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
                     CartanOpKind::HodgeStar {
                         form_str,
                         dim,

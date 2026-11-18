@@ -57,6 +57,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Geometric constraint solver: point-to-line distances (2-D and 3-D); a distance of zero puts a point on a line.
 - Geometric constraint solver: `Plane3D` with point-plane distance and line/plane parallel and perpendicular constraints.
 - Geometric constraint solver: `PointND` unknowns in any dimension for distance and coincidence.
+- Cartan operations with symbolic vector fields (`InteriorProductSymbolic`, `LieDerivativeSymbolic`).
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

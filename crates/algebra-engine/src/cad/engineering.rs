@@ -179,6 +179,7 @@ impl InvoluteGear {
             height,
             n_layers,
             max_twist,
+            false,
         )
     }
 }
@@ -188,6 +189,11 @@ impl InvoluteGear {
 /// bore of radius `bore_radius` (none when zero) and annular end caps. `n_layers` layers are
 /// stacked and each is rotated about the axis so that the top is twisted by `max_twist` radians
 /// (a helical gear); the cross-section area is unchanged by the twist.
+///
+/// With `inside_out` the circle of radius `bore_radius` is the *outer* wall and the outline the
+/// inner one (an internal gear): the rings are merged by polar angle exactly as before, which
+/// works whichever is larger, and every triangle is then reversed so that the normals point out
+/// of the material.
 fn toothed_gear_solid(
     name: String,
     profile: &[[f64; 2]],
@@ -195,6 +201,7 @@ fn toothed_gear_solid(
     height: f64,
     n_layers: usize,
     max_twist: f64,
+    inside_out: bool,
 ) -> Mesh3D {
     let n_prof = profile.len();
     let mut mesh = Mesh3D::new(name);
@@ -314,6 +321,11 @@ fn toothed_gear_solid(
         }
     }
 
+    if inside_out {
+        for tri in &mut mesh.triangles {
+            tri.swap(1, 2);
+        }
+    }
     mesh
 }
 
@@ -478,6 +490,126 @@ impl CycloidalGear {
             self.face_width,
             2,
             0.0,
+            false,
+        )
+    }
+}
+
+/// Internal (ring) involute spur gear: the teeth point inward from a cylindrical ring.
+///
+/// The tooth of an internal gear is the space of the external gear it meshes with, so its
+/// thickness on the pitch circle is `pi m / 2` (zero profile shift), the addendum circle lies
+/// *inside* the pitch circle at `R - m` and the root circle outside it at `R + 1.25 m`. Below
+/// about 34 teeth the addendum circle would fall inside the base circle, where an involute does
+/// not exist; the tooth tip is then limited to just outside the base circle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InternalGear {
+    /// Gear module $m$ (mm/tooth).
+    pub module: f64,
+    /// Number of teeth $z$ (must be large enough to keep the ring geometry valid, at least 20).
+    pub teeth: usize,
+    /// Pressure angle in degrees.
+    pub pressure_angle_deg: f64,
+    /// Face width.
+    pub face_width: f64,
+    /// Outer radius of the ring; it must exceed the root radius.
+    pub outer_radius: f64,
+}
+
+impl InternalGear {
+    /// An internal spur gear with a 20 degree pressure angle and a ring `3 m` thick behind the
+    /// roots.
+    pub fn new(module: f64, teeth: usize, face_width: f64) -> Self {
+        let mut gear = Self {
+            module,
+            teeth,
+            pressure_angle_deg: 20.0,
+            face_width,
+            outer_radius: 0.0,
+        };
+        gear.outer_radius = gear.root_radius() + 3.0 * module;
+        gear
+    }
+
+    /// Pitch radius `m z / 2`.
+    pub fn pitch_radius(&self) -> f64 {
+        self.module * self.teeth as f64 / 2.0
+    }
+
+    /// Base radius `R cos(alpha)`.
+    pub fn base_radius(&self) -> f64 {
+        self.pitch_radius() * self.pressure_angle_deg.to_radians().cos()
+    }
+
+    /// Root radius `R + 1.25 m` (outside the pitch circle).
+    pub fn root_radius(&self) -> f64 {
+        self.pitch_radius() + 1.25 * self.module
+    }
+
+    /// Tooth tip radius `R - m`, limited to stay outside the base circle.
+    pub fn tip_radius(&self) -> f64 {
+        (self.pitch_radius() - self.module).max(self.base_radius() * 1.0005)
+    }
+
+    /// Center distance to an external pinion of `pinion_teeth` teeth of the same module:
+    /// `m (z_ring - z_pinion) / 2`.
+    pub fn center_distance(&self, pinion_teeth: usize) -> f64 {
+        self.module * (self.teeth as f64 - pinion_teeth as f64) / 2.0
+    }
+
+    /// Half the angular width of a tooth on the circle of radius `r` (radians): it grows with the
+    /// radius, `psi + inv(alpha_r) - inv(alpha)` with `psi = pi / (2 z)` the half thickness on the
+    /// pitch circle and `cos(alpha_r) = r_b / r`.
+    pub fn tooth_half_angle(&self, r: f64) -> f64 {
+        let alpha = self.pressure_angle_deg.to_radians();
+        let inv = |a: f64| a.tan() - a;
+        let rb = self.base_radius();
+        let alpha_r = (rb / r.max(rb)).clamp(-1.0, 1.0).acos();
+        PI / (2.0 * self.teeth as f64) + inv(alpha_r) - inv(alpha)
+    }
+
+    /// The inner (toothed) outline, counter-clockwise about the axis: each tooth is centred on
+    /// `i 2 pi / z`, with root arcs between teeth at the root radius, true involute flanks
+    /// (`samples` points each) and a tip at the addendum radius.
+    pub fn generate_2d_profile(&self, samples: usize) -> Vec<[f64; 2]> {
+        let z = self.teeth;
+        let (ra, rf) = (self.tip_radius(), self.root_radius());
+        let step = 2.0 * PI / z as f64;
+        let limit = 0.5 * step * 0.98;
+        let n = samples.max(4);
+        let polar = |r: f64, a: f64| [r * a.cos(), r * a.sin()];
+        let half = |r: f64| self.tooth_half_angle(r).min(limit);
+        let mut points = Vec::new();
+        for i in 0..z {
+            let c = i as f64 * step;
+            points.push(polar(rf, c - 0.5 * step));
+            // Leading flank from the root inwards to the tip: the angle rises as the radius falls.
+            for k in 0..=n {
+                let r = rf + (ra - rf) * k as f64 / n as f64;
+                points.push(polar(r, c - half(r)));
+            }
+            points.push(polar(ra, c));
+            for k in (0..=n).rev() {
+                let r = rf + (ra - rf) * k as f64 / n as f64;
+                points.push(polar(r, c + half(r)));
+            }
+        }
+        points
+    }
+
+    /// The closed, outward-oriented ring solid: a cylindrical outer wall, the toothed inner wall
+    /// and two flat annular end caps.
+    pub fn generate_3d_mesh(&self) -> Mesh3D {
+        let profile = self.generate_2d_profile(8);
+        toothed_gear_solid(
+            format!("InternalGear_m{}_z{}", self.module, self.teeth),
+            &profile,
+            self.outer_radius
+                .max(self.root_radius() + 0.5 * self.module),
+            self.face_width,
+            2,
+            0.0,
+            true,
         )
     }
 }

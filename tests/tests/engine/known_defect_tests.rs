@@ -1393,3 +1393,88 @@ fn cycloidal_gears_are_closed_star_shaped_solids_with_the_right_tooth_thickness(
     assert!(radial.len() > 3);
     assert!(radial.iter().all(|a| (a + psi).abs() < 1e-6), "{radial:?}");
 }
+
+#[test]
+fn internal_gears_are_inside_out_rings_with_the_right_tooth_thickness() {
+    use algebra_engine::cad::InternalGear;
+    use std::f64::consts::PI;
+
+    for (module, z) in [(2.0, 24usize), (1.5, 40), (2.0, 60)] {
+        let gear = InternalGear::new(module, z, 5.0);
+        let r = gear.pitch_radius();
+        assert!(
+            gear.tip_radius() < r
+                && gear.root_radius() > r
+                && gear.tip_radius() >= gear.base_radius()
+        );
+        // Without clamping, the addendum circle is R - m.
+        if r - module >= gear.base_radius() * 1.0005 {
+            assert!((gear.tip_radius() - (r - module)).abs() < 1e-12);
+        }
+
+        // Star-shaped, winding once, radii within [tip, root].
+        let profile = gear.generate_2d_profile(12);
+        let (mut total, mut previous) = (0.0, profile[0][1].atan2(profile[0][0]));
+        for p in profile.iter().skip(1).chain(std::iter::once(&profile[0])) {
+            let angle = p[1].atan2(p[0]);
+            let mut delta = angle - previous;
+            while delta < -PI {
+                delta += 2.0 * PI;
+            }
+            while delta > PI {
+                delta -= 2.0 * PI;
+            }
+            assert!(delta >= -1e-12, "z={z}: outline turns back by {delta}");
+            total += delta;
+            previous = angle;
+            let radius = p[0].hypot(p[1]);
+            assert!(radius >= gear.tip_radius() - 1e-9 && radius <= gear.root_radius() + 1e-9);
+        }
+        assert!((total - 2.0 * PI).abs() < 1e-9, "z={z}: winds {total}");
+
+        // Tooth thickness on the pitch circle is pi m / 2 (formula and geometric measurement).
+        assert!((2.0 * r * gear.tooth_half_angle(r) - PI * module / 2.0).abs() < 1e-9);
+        let fine = gear.generate_2d_profile(600);
+        let near = |sign: f64| {
+            fine.iter()
+                .filter(|p| {
+                    p[0] > 0.0 && p[1] * sign >= 0.0 && p[1].atan2(p[0]).abs() < PI / z as f64
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - PI * module / 2.0).abs() < 3e-3,
+            "z={z}: thickness {width}"
+        );
+
+        // A closed ring with outward normals (positive volume) = (outer polygon - outline) x width.
+        let mesh = gear.generate_3d_mesh();
+        assert_closed_and_oriented(&mesh);
+        let outer = gear.outer_radius;
+        let n = 48.0;
+        let outer_area = 0.5 * n * outer * outer * (2.0 * PI / n).sin();
+        let expected =
+            (outer_area - shoelace(&gear.generate_2d_profile(8)).abs()) * gear.face_width;
+        let volume = mesh.compute_volume();
+        assert!(
+            volume > 0.0,
+            "z={z}: normals point into the material (volume {volume})"
+        );
+        assert!(
+            (volume - expected).abs() < 1e-6 * expected,
+            "z={z}: {volume} vs {expected}"
+        );
+    }
+
+    // Center distance to a pinion: m (z_ring - z_pinion) / 2.
+    let gear = InternalGear::new(2.0, 40, 5.0);
+    assert!((gear.center_distance(16) - 24.0).abs() < 1e-12);
+}

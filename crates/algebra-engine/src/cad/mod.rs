@@ -34,8 +34,8 @@ pub mod engineering;
 
 pub use bvh::{BvhIntersection, BvhNode, BvhTree, Ray3D};
 pub use engineering::{
-    BoltHeadType, CycloidalGear, HelicalSpring, InvoluteGear, NacaAirfoil, ThreadStandard,
-    ThreadedScrew,
+    BoltHeadType, CycloidalGear, HelicalSpring, InternalGear, InvoluteGear, NacaAirfoil,
+    ThreadStandard, ThreadedScrew,
 };
 
 use algebra_core::error::{AlgebraError, AlgebraResult};

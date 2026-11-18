@@ -1,4 +1,4 @@
-//! Exact projection and root isolation for Cylindrical Algebraic Decomposition in two variables.
+//! Exact projection and root isolation for Cylindrical Algebraic Decomposition in two and three variables.
 //!
 //! The projection follows McCallum's operator for a set `A` of polynomials in `Q[x][y]`
 //! (projecting `R^2` onto `R^1`): the leading coefficient of each `f` in `y` (a constant `f`, of
@@ -8,8 +8,8 @@
 //! or where a fibre degenerates, so the cells they cut out are sign-invariant for `A`. Everything
 //! is computed with exact rational arithmetic; real roots are isolated with Sturm sequences.
 //!
-//! Limits: two variables only; the input polynomials must be squarefree in `y` and pairwise
-//! without a common factor in `y` (otherwise a discriminant or resultant vanishes identically
+//! Limits: up to three variables (`resultant_z`, `project3`); the input polynomials must be
+//! squarefree in the eliminated variable and pairwise without a common factor in it (otherwise a discriminant or resultant vanishes identically
 //! and the operator is not defined), which is reported as an error rather than guessed around.
 
 use crate::gosper::QPoly;
@@ -186,6 +186,147 @@ pub fn project(polys: &[BiPoly]) -> Result<Vec<QPoly>, String> {
                 );
             }
             push(res);
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Three variables: the first projection step eliminates `z` and leaves polynomials in (x, y).
+// ---------------------------------------------------------------------------------------------
+
+/// A polynomial in `z` whose coefficients are polynomials in `(x, y)`: `coeffs[i]` multiplies
+/// `z^i`, and each coefficient is a [`BiPoly`] (a polynomial in `y` over `Q[x]`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriPoly {
+    pub coeffs: Vec<BiPoly>,
+}
+
+/// Whether a bivariate polynomial is identically zero.
+pub fn bi_is_zero(b: &BiPoly) -> bool {
+    b.coeffs.iter().all(|c| c.is_zero())
+}
+
+/// The value of a bivariate polynomial at `(x, y)`.
+pub fn bi_eval(b: &BiPoly, x: &BigRational, y: &BigRational) -> BigRational {
+    b.at_x(x).eval(y)
+}
+
+impl TriPoly {
+    /// Degree in `z` (`None` for the zero polynomial).
+    pub fn degree_z(&self) -> Option<usize> {
+        let mut d = self.coeffs.len();
+        while d > 0 && bi_is_zero(&self.coeffs[d - 1]) {
+            d -= 1;
+        }
+        d.checked_sub(1)
+    }
+
+    /// Largest degree in `x` over all coefficients.
+    pub fn degree_x(&self) -> usize {
+        self.coeffs.iter().map(BiPoly::degree_x).max().unwrap_or(0)
+    }
+
+    /// Largest degree in `y` over all coefficients.
+    pub fn degree_y(&self) -> usize {
+        self.coeffs
+            .iter()
+            .filter_map(BiPoly::degree_y)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The polynomial in `z` obtained by substituting `(x, y)`.
+    pub fn at(&self, x: &BigRational, y: &BigRational) -> QPoly {
+        QPoly::new(self.coeffs.iter().map(|c| bi_eval(c, x, y)).collect())
+    }
+
+    /// Partial derivative with respect to `z`.
+    pub fn derivative_z(&self) -> TriPoly {
+        TriPoly {
+            coeffs: self
+                .coeffs
+                .iter()
+                .enumerate()
+                .skip(1)
+                .map(|(i, c)| BiPoly {
+                    coeffs: c.coeffs.iter().map(|q| q.scale(&rat(i as i64))).collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The resultant of `f` and `g` with respect to `z`, as a polynomial in `(x, y)`: the Sylvester
+/// determinant is evaluated at a grid of integer points (more than the degree in each variable)
+/// and interpolated exactly.
+pub fn resultant_z(f: &TriPoly, g: &TriPoly) -> Option<BiPoly> {
+    let (df, dg) = (f.degree_z()?, g.degree_z()?);
+    let bx = dg * f.degree_x() + df * g.degree_x();
+    let by = dg * f.degree_y() + df * g.degree_y();
+    // values[y0][x0]
+    let rows: Vec<Vec<BigRational>> = (0..=by as i64)
+        .map(|y0| {
+            let y0 = rat(y0);
+            (0..=bx as i64)
+                .map(|x0| {
+                    let x0 = rat(x0);
+                    let a: Vec<BigRational> =
+                        (0..=df).map(|i| bi_eval(&f.coeffs[i], &x0, &y0)).collect();
+                    let b: Vec<BigRational> =
+                        (0..=dg).map(|i| bi_eval(&g.coeffs[i], &x0, &y0)).collect();
+                    sylvester_resultant(&a, &b, df, dg)
+                })
+                .collect()
+        })
+        .collect();
+    // Interpolate in x for each y0, then every x-coefficient in y.
+    let in_x: Vec<QPoly> = rows.iter().map(|r| interpolate(r)).collect();
+    let by_x_power: Vec<QPoly> = (0..=bx)
+        .map(|i| interpolate(&in_x.iter().map(|q| q.coeff(i)).collect::<Vec<_>>()))
+        .collect();
+    // coeffs[j] is the coefficient of y^j, a polynomial in x.
+    let coeffs: Vec<QPoly> = (0..=by)
+        .map(|j| QPoly::new(by_x_power.iter().map(|q| q.coeff(j)).collect()))
+        .collect();
+    Some(BiPoly { coeffs })
+}
+
+/// The projection of trivariate polynomials onto the `(x, y)` plane: the non-constant leading
+/// coefficients, discriminants and pairwise resultants with respect to `z` (McCallum's operator for
+/// well-oriented sets). `Err` if a discriminant or resultant vanishes identically.
+pub fn project3(polys: &[TriPoly]) -> Result<Vec<BiPoly>, String> {
+    let mut out: Vec<BiPoly> = Vec::new();
+    let non_constant = |b: &BiPoly| b.degree_y().is_some_and(|d| d > 0) || b.degree_x() > 0;
+    for f in polys {
+        let Some(df) = f.degree_z() else { continue };
+        if non_constant(&f.coeffs[df]) {
+            out.push(f.coeffs[df].clone());
+        }
+        if df >= 2 {
+            let disc = resultant_z(f, &f.derivative_z()).unwrap_or(BiPoly { coeffs: Vec::new() });
+            if bi_is_zero(&disc) {
+                return Err("a polynomial has a repeated factor in z (its discriminant is                             identically zero); pass a squarefree polynomial"
+                    .into());
+            }
+            if non_constant(&disc) {
+                out.push(disc);
+            }
+        }
+    }
+    for (i, f) in polys.iter().enumerate() {
+        for g in polys.iter().skip(i + 1) {
+            if f.degree_z().is_none_or(|d| d == 0) || g.degree_z().is_none_or(|d| d == 0) {
+                continue;
+            }
+            let res = resultant_z(f, g).unwrap_or(BiPoly { coeffs: Vec::new() });
+            if bi_is_zero(&res) {
+                return Err("two polynomials have a common factor in z (their resultant is                             identically zero); pass a coprime set"
+                    .into());
+            }
+            if non_constant(&res) {
+                out.push(res);
+            }
         }
     }
     Ok(out)

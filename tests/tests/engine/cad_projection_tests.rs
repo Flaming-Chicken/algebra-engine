@@ -173,9 +173,121 @@ fn unsupported_and_degenerate_inputs_are_errors_not_wrong_answers() {
     let a = poly(&[(0, 1, 1.0), (1, 0, -1.0)]);
     let b = poly(&[(0, 2, 1.0), (1, 2, 0.0), (2, 0, -1.0)]); // y^2 - x^2 = (y - x)(y + x)
     assert!(CadEngine::decompose(&[a, b], &vars2(), 1e-10).is_err());
-    // Three variables are rejected instead of decomposed unsoundly.
-    let vars3 = vec!["x".to_string(), "y".to_string(), "z".to_string()];
-    let mut p = CadPolynomial::zero(vars3.clone());
-    p.terms.insert(vec![1, 0, 0], 1.0);
-    assert!(CadEngine::decompose(&[p], &vars3, 1e-10).is_err());
+    // Four variables are rejected instead of decomposed unsoundly.
+    let vars4: Vec<String> = ["x", "y", "z", "w"].iter().map(|v| v.to_string()).collect();
+    let mut p = CadPolynomial::zero(vars4.clone());
+    p.terms.insert(vec![1, 0, 0, 0], 1.0);
+    assert!(CadEngine::decompose(&[p], &vars4, 1e-10).is_err());
+    // A repeated factor in z: (z - x)^2.
+    let mut repeated_z = CadPolynomial::zero(vars3());
+    repeated_z.terms.insert(vec![0, 0, 2], 1.0);
+    repeated_z.terms.insert(vec![1, 0, 1], -2.0);
+    repeated_z.terms.insert(vec![2, 0, 0], 1.0);
+    assert!(CadEngine::decompose(&[repeated_z], &vars3(), 1e-10).is_err());
+}
+
+fn vars3() -> Vec<String> {
+    vec!["x".to_string(), "y".to_string(), "z".to_string()]
+}
+
+/// A polynomial in (x, y, z) from `(x, y, z exponents, coefficient)` terms.
+fn poly3(terms: &[(usize, usize, usize, f64)]) -> CadPolynomial {
+    let mut p = CadPolynomial::zero(vars3());
+    for &(ex, ey, ez, c) in terms {
+        p.terms.insert(vec![ex, ey, ez], c);
+    }
+    p
+}
+
+fn leaves(cell: &algebra_engine::cad::CadCell) -> Vec<&algebra_engine::cad::CadCell> {
+    if cell.children.is_empty() {
+        vec![cell]
+    } else {
+        cell.children.iter().flat_map(leaves).collect()
+    }
+}
+
+#[test]
+fn the_unit_sphere_has_twenty_five_cells() {
+    use algebra_engine::cad::Sign;
+    // x^2 + y^2 + z^2 - 1. Over x < -1 and x > 1 one cell; over x = +-1 the fibre is the single
+    // point (y, z) = (0, 0), cut into 1, 3, 1 cells in y with one root in z only at y = 0 (5 cells
+    // in all); over -1 < x < 1 the y line has cuts at +-sqrt(1 - x^2) with 1, 3, 5, 3, 1 cells in z.
+    let sphere = poly3(&[
+        (2, 0, 0, 1.0),
+        (0, 2, 0, 1.0),
+        (0, 0, 2, 1.0),
+        (0, 0, 0, -1.0),
+    ]);
+    let tree = CadEngine::decompose(&[sphere], &vars3(), 1e-10).unwrap();
+    assert_eq!(tree.children.len(), 5);
+    assert_eq!(fibre_counts(&tree), vec![1, 5, 13, 5, 1]);
+    assert_eq!(tree.count_leaf_cells(), 25);
+    // One cell inside the ball, six on the sphere, the rest outside.
+    let signs: Vec<Sign> = leaves(&tree).iter().map(|l| l.signs[0]).collect();
+    let count = |s: Sign| signs.iter().filter(|&&x| x == s).count();
+    assert_eq!(
+        (
+            count(Sign::Negative),
+            count(Sign::Zero),
+            count(Sign::Positive)
+        ),
+        (1, 6, 18)
+    );
+}
+
+#[test]
+fn a_sphere_cut_by_a_plane_is_decomposed_along_their_intersection_circle() {
+    use algebra_engine::cad::Sign;
+    // The sphere and the plane z = x meet in a circle: the resultants must cut the x line at
+    // x = +-1/sqrt(2) (where the circle's extremes lie), which neither polynomial does alone.
+    let sphere = poly3(&[
+        (2, 0, 0, 1.0),
+        (0, 2, 0, 1.0),
+        (0, 0, 2, 1.0),
+        (0, 0, 0, -1.0),
+    ]);
+    let plane = poly3(&[(0, 0, 1, 1.0), (1, 0, 0, -1.0)]);
+    let tree = CadEngine::decompose(&[sphere, plane], &vars3(), 1e-10).unwrap();
+    let both_zero = leaves(&tree)
+        .iter()
+        .filter(|l| l.signs[0] == Sign::Zero && l.signs[1] == Sign::Zero)
+        .count();
+    assert!(both_zero >= 3, "the circle appears as cells: {both_zero}");
+    let cuts: Vec<f64> = tree
+        .children
+        .iter()
+        .filter(|c| c.cell_type == CadCellType::Section)
+        .map(|c| c.sample_point[0])
+        .collect();
+    let half = 0.5_f64.sqrt();
+    for want in [-1.0, -half, half, 1.0] {
+        assert!(
+            cuts.iter().any(|c| (c - want).abs() < 1e-6),
+            "x cut {want} missing from {cuts:?}"
+        );
+    }
+}
+
+#[test]
+fn the_trivariate_resultant_is_exact() {
+    use algebra_engine::cad::projection::{TriPoly, bi_eval, resultant_z};
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    // res_z(z^2 - x, z - y) = y^2 - x.
+    let q = |n: i64| BigRational::from_integer(BigInt::from(n));
+    let bi = |coeffs: Vec<Vec<i64>>| BiPoly {
+        coeffs: coeffs.iter().map(|c| QPoly::from_ints(c)).collect(),
+    };
+    // coefficients indexed [z power] -> BiPoly [y power] -> QPoly in x
+    let f = TriPoly {
+        coeffs: vec![bi(vec![vec![0, -1]]), bi(vec![]), bi(vec![vec![1]])],
+    };
+    let g = TriPoly {
+        coeffs: vec![bi(vec![vec![0], vec![-1]]), bi(vec![vec![1]])],
+    };
+    let r = resultant_z(&f, &g).unwrap();
+    for (x, y) in [(3, 2), (-1, 5), (0, 0), (7, -4)] {
+        assert_eq!(bi_eval(&r, &q(x), &q(y)), q(y * y - x), "at ({x}, {y})");
+    }
 }

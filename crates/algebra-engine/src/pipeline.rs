@@ -14,11 +14,12 @@
 //!   Generates deformed 3D CAD meshes $\mathbf{v}' = \mathbf{v} + \alpha \mathbf{u}$ and computes von Mises stress
 //!   distributions, temperature fields, and VTK data export.
 
-use crate::cad::{InvoluteGear, Mesh3D, NacaAirfoil, ThreadedScrew};
+use crate::cad::{HelicalSpring, InvoluteGear, Mesh3D, NacaAirfoil, ThreadedScrew};
 use crate::pde::{
     ElementType, FeaBoundaryCondition, FeaEngine, FeaMesh, FeaSolution, PhysicsDiscipline,
 };
 use algebra_core::error::AlgebraResult;
+use std::f64::consts::PI;
 
 /// Bridge utility for converting CAD representations to FEA simulation meshes.
 pub struct CadFeaBridge;
@@ -121,9 +122,18 @@ impl CadFeaBridge {
         for v in &mesh_3d.vertices {
             fea.add_node(v.to_vec());
         }
-        Self::stack_prisms(&mut fea, &bottom, layers, &|layer, local| {
-            layer * per_layer + local
-        })?;
+        let node_of = |layer: usize, local: usize| layer * per_layer + local;
+        Self::stack_prisms(
+            &mut fea,
+            &bottom,
+            layers,
+            &node_of,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
         Some(fea)
     }
 
@@ -139,21 +149,20 @@ impl CadFeaBridge {
         base: &[[usize; 3]],
         layers: usize,
         node: &dyn Fn(usize, usize) -> usize,
+        orientation: &dyn Fn(&FeaMesh, usize, &[usize; 3]) -> f64,
     ) -> Option<()> {
         if base.is_empty() || layers < 2 {
             return None;
         }
-        let area = |layer: usize, t: &[usize; 3]| {
-            let v = |i: usize| &fea.nodes[node(layer, i)];
-            let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
-            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-        };
+        // `orientation(mesh, layer, triangle)` is a signed measure of how the base triangle sits
+        // in that layer (its planar area for a straight stack, its normal along the path for a
+        // swept one); it must keep its sign through the stack.
         for tri in base {
-            let reference = area(0, tri);
+            let reference = orientation(fea, 0, tri);
             if reference.abs() < 1e-12 {
                 return None;
             }
-            if (1..layers).any(|l| area(l, tri) * reference <= 1e-12) {
+            if (1..layers).any(|l| orientation(fea, l, tri) * reference <= 1e-12) {
                 return None;
             }
         }
@@ -221,8 +230,115 @@ impl CadFeaBridge {
                 first_extra + layer - 1
             }
         };
-        Self::stack_prisms(&mut fea, &base, sections, &node)?;
+        let node_of = &node;
+        Self::stack_prisms(
+            &mut fea,
+            &base,
+            sections,
+            &node,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
         Some(fea)
+    }
+
+    /// Tetrahedral solid mesh of a helical spring: the wire's circular cross-section (a fan around
+    /// the ring centre) is swept along the helix and each step between consecutive rings is cut
+    /// into tetrahedra. The FEA nodes are the CAD vertices followed by one centre node per
+    /// interior ring. `None` if a triangle of the cross-section would fold between rings.
+    fn extruded_spring_solid(spring: &HelicalSpring, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let steps_per_turn = 24;
+        let circ = 8;
+        let total_steps = (spring.active_coils * steps_per_turn as f64) as usize;
+        let rings = total_steps + 1;
+        if total_steps < 1 || mesh_3d.vertices.len() != rings * circ + 2 {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (rings * circ, rings * circ + 1);
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        let r_coil = spring.mean_diameter / 2.0;
+        let first_extra = fea.nodes.len();
+        for s in 1..total_steps {
+            let theta = (s as f64 / steps_per_turn as f64) * 2.0 * PI;
+            fea.add_node(vec![
+                r_coil * theta.cos(),
+                r_coil * theta.sin(),
+                (s as f64 / steps_per_turn as f64) * spring.pitch,
+            ]);
+        }
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { circ } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < circ {
+                layer * circ + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == total_steps {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        // Orientation of a cross-section triangle: its normal along the direction to the next
+        // ring's centre (the last ring looks back at the previous one).
+        let orientation = |mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+            let p = |i: usize| &mesh.nodes[node(layer, i)];
+            let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let n = [
+                u[1] * w[2] - u[2] * w[1],
+                u[2] * w[0] - u[0] * w[2],
+                u[0] * w[1] - u[1] * w[0],
+            ];
+            let (this, other) = if layer < total_steps {
+                (node(layer, circ), node(layer + 1, circ))
+            } else {
+                (node(layer - 1, circ), node(layer, circ))
+            };
+            let d = [
+                mesh.nodes[other][0] - mesh.nodes[this][0],
+                mesh.nodes[other][1] - mesh.nodes[this][1],
+                mesh.nodes[other][2] - mesh.nodes[this][2],
+            ];
+            n[0] * d[0] + n[1] * d[1] + n[2] * d[2]
+        };
+        Self::stack_prisms(&mut fea, &base, rings, &node, &orientation)?;
+        Some(fea)
+    }
+
+    /// Convert a helical spring to a simulation `FeaMesh` (a solid of linear tetrahedra, see
+    /// [`CadFeaBridge::extruded_spring_solid`]) with the end-face groups `"spring_bottom"` and
+    /// `"spring_top"`. Falls back to the surface triangulation if the sweep would fold.
+    pub fn spring_to_fea(spring: &HelicalSpring) -> FeaMesh {
+        let mesh_3d = spring.generate_3d_mesh();
+        let mut fea = Self::extruded_spring_solid(spring, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
+        // The end faces are the first and last rings plus their centres (vertex order is by ring).
+        let ring = |lo: bool| -> Vec<usize> {
+            let circ = 8;
+            let rings = (mesh_3d.vertices.len() - 2) / circ;
+            let range = if lo {
+                0..circ
+            } else {
+                (rings - 1) * circ..rings * circ
+            };
+            let centre = mesh_3d.vertices.len() - if lo { 2 } else { 1 };
+            range.chain(std::iter::once(centre)).collect()
+        };
+        fea.add_boundary_group("spring_bottom", ring(true));
+        fea.add_boundary_group("spring_top", ring(false));
+        fea
     }
 
     /// Convert an Involute Gear to a specialized simulation `FeaMesh` with named `"bore_hole"` and `"teeth_flanks"`.

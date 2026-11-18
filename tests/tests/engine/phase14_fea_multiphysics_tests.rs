@@ -833,3 +833,110 @@ fn quadratic_triangles_represent_quadratic_solutions_exactly() {
         .is_err()
     );
 }
+
+#[test]
+fn quadratic_tetrahedra_represent_quadratic_solutions_exactly() {
+    let elastic = |nu: f64, bf: Vec<f64>| PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 200.0,
+        poissons_ratio: nu,
+        density: 1.0,
+        body_force: bf,
+        plane_stress: false,
+    };
+    let fix = |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+        group_name: group.into(),
+        dof_index,
+        value,
+    };
+
+    // A block hanging under its own weight (nu = 0): w(z) = -g (H^2 - z^2) / (2 E), quadratic.
+    let (lx, ly, lz, g, e) = (1.0_f64, 1.0, 2.0, 4.0, 200.0);
+    let mesh = FeaMesh::box_3d_tet10(lx, ly, lz, 1, 1, 2);
+    assert!(mesh.elements.iter().all(|el| el.len() == 10));
+    let bcs = [
+        fix("back", 0, 0.0),
+        fix("back", 1, 0.0),
+        fix("back", 2, 0.0),
+    ];
+    let sol = FeaEngine::solve(&mesh, &elastic(0.0, vec![0.0, 0.0, -g]), &bcs).unwrap();
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = -g * (lz * lz - p[2] * p[2]) / (2.0 * e);
+        assert!(
+            (sol.nodal_values[i * 3 + 2] - want).abs() < 1e-10,
+            "node {i} z={}: {}",
+            p[2],
+            sol.nodal_values[i * 3 + 2]
+        );
+        assert!(sol.nodal_values[i * 3].abs() < 1e-10 && sol.nodal_values[i * 3 + 1].abs() < 1e-10);
+    }
+    // The support carries the whole weight.
+    let total: f64 = mesh.boundary_groups["back"]
+        .iter()
+        .map(|&n| sol.reaction_forces[n * 3 + 2])
+        .sum();
+    assert!((total - g * lx * ly * lz).abs() < 1e-8, "reaction {total}");
+
+    // Uniaxial patch test: exact displacement field and stress with Poisson contraction.
+    let (nu, d) = (0.25, 0.02);
+    let mesh = FeaMesh::box_3d_tet10(4.0, 2.0, 1.5, 2, 1, 1);
+    let bcs = [
+        fix("left", 0, 0.0),
+        fix("right", 0, d),
+        fix("bottom", 1, 0.0),
+        fix("front", 2, 0.0),
+    ];
+    let sol = FeaEngine::solve(&mesh, &elastic(nu, vec![0.0; 3]), &bcs).unwrap();
+    let eps = d / 4.0;
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = [eps * p[0], -nu * eps * p[1], -nu * eps * p[2]];
+        for c in 0..3 {
+            assert!(
+                (sol.nodal_values[i * 3 + c] - want[c]).abs() < 1e-10,
+                "node {i} comp {c}"
+            );
+        }
+    }
+    for v in &sol.von_mises_stresses {
+        assert!((v - e * eps).abs() < 1e-9 * e * eps, "{v}");
+    }
+
+    // Heat with a uniform source: T = q x (L - x) / (2 k).
+    let (l, k, q) = (4.0_f64, 2.0, 3.0);
+    let mesh = FeaMesh::box_3d_tet10(l, 1.0, 1.0, 2, 1, 1);
+    let heat = PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: k,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: q,
+    };
+    let cold = |g: &str| FeaBoundaryCondition::PrescribedTemperature {
+        group_name: g.into(),
+        temperature: 0.0,
+    };
+    let sol = FeaEngine::solve(&mesh, &heat, &[cold("left"), cold("right")]).unwrap();
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = q * p[0] * (l - p[0]) / (2.0 * k);
+        assert!(
+            (sol.nodal_values[i] - want).abs() < 1e-9,
+            "node {i}: {} vs {want}",
+            sol.nodal_values[i]
+        );
+    }
+
+    // A curved (non-midpoint) midside node is rejected.
+    let mut curved = FeaMesh::box_3d_tet10(1.0, 1.0, 1.0, 1, 1, 1);
+    let mid = curved.elements[0][5];
+    curved.nodes[mid][0] += 0.1;
+    assert!(
+        FeaEngine::solve(
+            &curved,
+            &elastic(0.3, vec![0.0; 3]),
+            &[
+                fix("left", 0, 0.0),
+                fix("left", 1, 0.0),
+                fix("left", 2, 0.0)
+            ]
+        )
+        .is_err()
+    );
+}

@@ -1298,3 +1298,98 @@ fn gear_teeth_have_the_involute_thickness_and_profile_shift_thickens_them() {
     };
     assert!(area(0.5) > area(0.0));
 }
+
+#[test]
+fn cycloidal_gears_are_closed_star_shaped_solids_with_the_right_tooth_thickness() {
+    use algebra_engine::cad::CycloidalGear;
+    use std::f64::consts::PI;
+
+    for (module, z, ratio) in [(2.0, 24usize, 0.3), (1.5, 18, 0.25), (2.0, 30, 0.4)] {
+        let mut gear = CycloidalGear::new(module, z, 6.0);
+        gear.rolling_ratio = ratio;
+        let r = gear.pitch_radius();
+
+        // Star-shaped: the polar angle of the outline only increases, by exactly one turn.
+        let profile = gear.generate_2d_profile(12);
+        let mut total = 0.0;
+        let mut previous = profile[0][1].atan2(profile[0][0]);
+        for p in profile.iter().skip(1).chain(std::iter::once(&profile[0])) {
+            let angle = p[1].atan2(p[0]);
+            let mut delta = angle - previous;
+            while delta < -PI {
+                delta += 2.0 * PI;
+            }
+            while delta > PI {
+                delta -= 2.0 * PI;
+            }
+            assert!(delta >= -1e-12, "z={z}: outline turns back by {delta}");
+            total += delta;
+            previous = angle;
+        }
+        assert!((total - 2.0 * PI).abs() < 1e-9, "z={z}: winds {total}");
+
+        // Radii stay between the root and the tip circle.
+        for p in &profile {
+            let radius = p[0].hypot(p[1]);
+            assert!(radius <= gear.tip_radius() + 1e-9 && radius >= gear.root_radius() - 1e-9);
+        }
+
+        // Tooth thickness on the pitch circle is pi m / 2: the two flank points nearest the
+        // pitch circle around tooth 0 are separated by that arc (fine sampling).
+        let fine = gear.generate_2d_profile(500);
+        let near = |sign: f64| {
+            fine.iter()
+                .filter(|p| {
+                    p[0] > 0.0 && p[1] * sign >= 0.0 && p[1].atan2(p[0]).abs() < PI / z as f64
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - PI * module / 2.0).abs() < 2e-3,
+            "z={z}: thickness {width}"
+        );
+
+        // A closed, outward-oriented solid whose volume is outline area (minus bore) x width.
+        let mesh = gear.generate_3d_mesh();
+        assert_closed_and_oriented(&mesh);
+        let bore = gear.bore_radius.min(0.8 * gear.root_radius());
+        let n = 48.0;
+        let bore_area = 0.5 * n * bore * bore * (2.0 * PI / n).sin();
+        let expected = (shoelace(&gear.generate_2d_profile(8)).abs() - bore_area) * gear.face_width;
+        assert!(
+            (mesh.compute_volume() - expected).abs() < 1e-6 * expected,
+            "z={z}"
+        );
+    }
+
+    // With a rolling circle of half the pitch radius the hypocycloid is a radial line: every
+    // dedendum flank point shares one polar angle.
+    let mut gear = CycloidalGear::new(2.0, 24, 6.0);
+    gear.rolling_ratio = 0.5;
+    let r = gear.pitch_radius();
+    let psi = PI / (2.0 * 24.0);
+    let profile = gear.generate_2d_profile(12);
+    let radial: Vec<f64> = profile
+        .iter()
+        .filter(|p| {
+            let radius = p[0].hypot(p[1]);
+            let angle = p[1].atan2(p[0]);
+            // Tooth 0 leading flank only (other teeth sit at other angles).
+            angle < 0.0
+                && angle > -PI / 24.0
+                && radius > gear.root_radius() + 1e-6
+                && radius < r - 1e-6
+        })
+        .map(|p| p[1].atan2(p[0]))
+        .collect();
+    assert!(radial.len() > 3);
+    assert!(radial.iter().all(|a| (a + psi).abs() < 1e-6), "{radial:?}");
+}

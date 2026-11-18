@@ -229,6 +229,48 @@ impl SymbolicForm {
         Ok(out)
     }
 
+    /// Hodge star for a *diagonal* metric `g = diag(g_00, ..., g_{n-1,n-1})` whose entries are
+    /// expressions in the coordinates (polar, spherical, Minkowski, ...), with the orientation
+    /// `dx^0 ^ ... ^ dx^{n-1}`:
+    ///
+    /// `star(f dx^I) = sqrt(|det g|) (prod_{i in I} 1 / g_ii) * sign(I, J) f dx^J`.
+    ///
+    /// With `g = diag(1, ..., 1)` this is [`SymbolicForm::hodge_star`]; with `diag(-1, 1, ..., 1)`
+    /// it reproduces the Minkowski convention of that function.
+    pub fn hodge_star_diagonal(&self, g: &ExprGraph, metric: &[ExprId]) -> AlgebraResult<Self> {
+        let n = self.coords.len();
+        if metric.len() != n {
+            return Err(error("a diagonal metric needs one entry per coordinate"));
+        }
+        let det = g.mul(metric.iter().copied());
+        let volume = g.function("sqrt", [g.function("abs", [det])]);
+        let mut out = Self::zero(&self.coords, n - self.degree);
+        for (basis, &c) in &self.terms {
+            let complement: Vec<usize> = (0..n).filter(|i| !basis.indices.contains(i)).collect();
+            let mut full = basis.indices.clone();
+            full.extend(&complement);
+            let (_, sign) = FormBasis::new(full);
+            let inverse = if basis.indices.is_empty() {
+                g.integer(1)
+            } else {
+                g.div(
+                    g.integer(1),
+                    g.mul(basis.indices.iter().map(|&i| metric[i])),
+                )
+            };
+            let term = signed(g, g.mul([c, volume, inverse]), sign);
+            let key = FormBasis {
+                indices: complement,
+            };
+            let merged = match out.terms.get(&key) {
+                Some(&existing) => g.add([existing, term]),
+                None => term,
+            };
+            out.terms.insert(key, merged);
+        }
+        Ok(out)
+    }
+
     /// Codifferential `delta = (-1)^{n(k+1)+1} star d star` (Euclidean metric): it lowers the
     /// degree by one, and `delta` of a 1-form is minus the divergence.
     pub fn codifferential(&self, g: &ExprGraph) -> AlgebraResult<Self> {
@@ -510,6 +552,7 @@ fn evaluate_expr(
                 Some("tan") => x.tan(),
                 Some("ln") | Some("log") => x.ln(),
                 Some("sqrt") => x.sqrt(),
+                Some("abs") => x.abs(),
                 other => return Err(error(&format!("unsupported function {other:?}"))),
             }
         }

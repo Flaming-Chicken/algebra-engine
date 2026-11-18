@@ -267,13 +267,6 @@ fn toothed_gear_solid(
     // by which that layer's outline is rotated (the bore ring is not rotated), and `up`
     // selects the winding (counter-clockwise seen from +z for the top cap).
     let mut cap = |layer_base: usize, up: bool, twist: f64| {
-        let mut push = |a: usize, b: usize, c: usize| {
-            if up {
-                mesh.add_triangle(a, b, c);
-            } else {
-                mesh.add_triangle(a, c, b);
-            }
-        };
         if n_bore == 0 {
             // No bore: the solid-disc fans below close the ends.
             return;
@@ -285,24 +278,47 @@ fn toothed_gear_solid(
         let bore_index = |k: i64| (first_bore + k).rem_euclid(n_bore as i64) as usize;
         let (mut i, mut k) = (0usize, 0i64);
         while i < n_prof || k < n_bore as i64 {
-            let advance_outer = if i >= n_prof {
-                false
-            } else if k >= n_bore as i64 {
-                true
-            } else {
-                outline_angles[i + 1] + twist <= bore_angle(k + 1)
-            };
             let (outer, outer_next) = (layer_base + i % n_prof, layer_base + (i + 1) % n_prof);
             let (inner, inner_next) = (
                 layer_base + n_prof + bore_index(k),
                 layer_base + n_prof + bore_index(k + 1),
             );
-            if advance_outer {
-                push(outer, outer_next, inner);
-                i += 1;
+            // Signed area (counter-clockwise positive) of the triangle (a, b, c) in the plane.
+            let area = |a: usize, b: usize, c: usize| {
+                let (pa, pb, pc) = (mesh.vertices[a], mesh.vertices[b], mesh.vertices[c]);
+                let cross = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
+                // For an inside-out ring the outline is the inner boundary, so the "correct"
+                // orientation of these triangles is the opposite one.
+                if inside_out { -cross } else { cross }
+            };
+            let advance_outer = if i >= n_prof {
+                false
+            } else if k >= n_bore as i64 {
+                true
             } else {
-                push(outer, inner_next, inner);
+                // Sweep by angle, but never emit a folded triangle: an outline edge that is
+                // (nearly) radial has the axis almost on its line, so a bore vertex angularly
+                // behind it lies on the wrong side. Then the bore advances first.
+                let preferred = outline_angles[i + 1] + twist <= bore_angle(k + 1);
+                let outer_ok = area(outer, outer_next, inner) > 1e-12;
+                let inner_ok = area(outer, inner_next, inner) > 1e-12;
+                match (preferred, outer_ok, inner_ok) {
+                    (true, false, true) => false,
+                    (false, true, false) => true,
+                    _ => preferred,
+                }
+            };
+            let tri = if advance_outer {
+                i += 1;
+                [outer, outer_next, inner]
+            } else {
                 k += 1;
+                [outer, inner_next, inner]
+            };
+            if up {
+                mesh.add_triangle(tri[0], tri[1], tri[2]);
+            } else {
+                mesh.add_triangle(tri[0], tri[2], tri[1]);
             }
         }
     };

@@ -1598,3 +1598,71 @@ fn screw_heads_can_be_chamfered_and_have_a_key_socket() {
     stud.head_chamfer = 1.0;
     assert!(stud.effective_socket().is_none() && stud.effective_chamfer() == 0.0);
 }
+
+#[test]
+fn gear_end_caps_are_unfolded_triangulations() {
+    // Every triangle of an end cap has the same orientation, so the cap tiles the annulus without
+    // overlaps (a folded triangle cancels out in a signed volume and hides itself there). Small
+    // pinions have radial root segments, which used to produce one folded triangle per tooth.
+    use algebra_engine::cad::{CycloidalGear, InternalGear, InvoluteGear, Mesh3D};
+    fn assert_unfolded(name: &str, mesh: &Mesh3D) {
+        let cap_area = |z: f64| -> Vec<f64> {
+            mesh.triangles
+                .iter()
+                .filter(|t| t.iter().all(|&i| (mesh.vertices[i][2] - z).abs() < 1e-9))
+                .map(|t| {
+                    let (a, b, c) = (
+                        mesh.vertices[t[0]],
+                        mesh.vertices[t[1]],
+                        mesh.vertices[t[2]],
+                    );
+                    0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+                })
+                .collect()
+        };
+        let top = mesh.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
+        for (label, z, sign) in [("bottom", 0.0, -1.0), ("top", top, 1.0)] {
+            let areas = cap_area(z);
+            assert!(!areas.is_empty(), "{name}: no {label} cap");
+            let wrong = areas.iter().filter(|a| **a * sign <= 1e-12).count();
+            assert_eq!(
+                wrong, 0,
+                "{name}: {wrong} folded or degenerate {label}-cap triangles"
+            );
+        }
+    }
+    for gear in [
+        InvoluteGear::spur(2.0, 12, 8.0),
+        InvoluteGear::spur(2.0, 17, 8.0),
+        InvoluteGear::spur(2.0, 30, 8.0),
+    ] {
+        assert_unfolded(
+            &format!("involute z={}", gear.teeth),
+            &gear.generate_3d_mesh(),
+        );
+    }
+    assert_unfolded(
+        "cycloidal",
+        &CycloidalGear::new(2.0, 24, 6.0).generate_3d_mesh(),
+    );
+    // The inside-out ring's caps face outwards as well (bottom down, top up).
+    let ring = InternalGear::new(2.0, 40, 5.0).generate_3d_mesh();
+    let top = ring.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
+    for (z, sign) in [(0.0, -1.0), (top, 1.0)] {
+        let wrong = ring
+            .triangles
+            .iter()
+            .filter(|t| t.iter().all(|&i| (ring.vertices[i][2] - z).abs() < 1e-9))
+            .filter(|t| {
+                let (a, b, c) = (
+                    ring.vertices[t[0]],
+                    ring.vertices[t[1]],
+                    ring.vertices[t[2]],
+                );
+                let area = 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+                area * sign <= 1e-12
+            })
+            .count();
+        assert_eq!(wrong, 0, "internal gear cap at z={z}");
+    }
+}

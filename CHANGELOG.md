@@ -46,6 +46,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `CycloidalGear`: cycloidal spur gears with a closed, oriented solid (shared generator with the involute gear).
 - `InternalGear`: internal (ring) involute spur gears as closed solids.
 - `ThreadedScrew`: optional head chamfer and hexagonal key socket (closed solids, volumes verified).
+- Gear end caps no longer contain folded triangles (one per radial root segment on small pinions); `gear_to_fea` meshes a bored gear as a solid of linear tetrahedra for real 3-D elasticity.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

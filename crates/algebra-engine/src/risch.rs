@@ -489,10 +489,14 @@ impl RischIntegrator {
                         return Ok(graph.mul([coefficient, graph.function("ln", [ratio])]));
                     }
                 }
-                let a = graph.function("sqrt", [a_sq]);
-                let inv_a = graph.div(num, a);
-                let x_over_a = graph.div(x, a);
-                let arctan_term = graph.function("arctan", [x_over_a]);
+                // num/(x^2 + a^2) = num/a * atan(x/a); simplify so that a perfect square gives
+                // `1/2 atan(x/2)` and not `1/sqrt(4) atan(x/sqrt(4))`.
+                let simplify =
+                    |e: ExprId| crate::simplify::Simplifier::simplify(graph, e).unwrap_or(e);
+                let a = simplify(graph.function("sqrt", [a_sq]));
+                let inv_a = simplify(graph.div(num, a));
+                let x_over_a = simplify(graph.div(x, a));
+                let arctan_term = graph.function("atan", [x_over_a]);
                 return Ok(graph.mul([inv_a, arctan_term]));
             }
         }

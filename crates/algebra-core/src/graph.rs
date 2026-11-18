@@ -357,7 +357,7 @@ impl ExprGraph {
 
     /// Call a symbolic function with arguments.
     pub fn function<I: IntoIterator<Item = ExprId>>(&self, name: &str, args: I) -> ExprId {
-        let sym_id = self.symbols.get_or_intern(name);
+        let sym_id = self.symbols.get_or_intern(canonical_function_name(name));
         let arg_vec: SmallVec<[ExprId; 2]> = args.into_iter().collect();
         let domain = self.infer_poly_domain(&arg_vec);
         self.intern(ExprNode::new(
@@ -617,5 +617,23 @@ impl ExprGraph {
             }
         }
         dom
+    }
+}
+
+/// The canonical spelling of an inverse trigonometric or hyperbolic function name: the long forms
+/// `arcsin`, `arccos`, `arctan`, `arcsinh`, `arccosh` and `arctanh` are the same functions as
+/// `asin`, `acos`, `atan`, `asinh`, `acosh` and `atanh`. Building every function node with the
+/// canonical name means differentiation, simplification and evaluation see one spelling (the
+/// parser used to keep whatever was typed, and the integrator emitted `arctan` while `diff` only
+/// knew `atan`, so the derivative of `arctan(x)` stayed unevaluated).
+pub fn canonical_function_name(name: &str) -> &str {
+    match name {
+        "arcsin" => "asin",
+        "arccos" => "acos",
+        "arctan" => "atan",
+        "arcsinh" => "asinh",
+        "arccosh" => "acosh",
+        "arctanh" => "atanh",
+        other => other,
     }
 }

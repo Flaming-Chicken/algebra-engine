@@ -588,12 +588,16 @@ impl GeometricConstraintSolver {
                         solved_coords.get(p1_name).cloned(),
                         solved_coords.get(p2_name),
                     ) {
-                        solved_coords.insert(p2_name.clone(), vec![p1[0] + target_dist, p1[1]]);
+                        let mut placed = p1.clone();
+                        placed[0] += target_dist;
+                        solved_coords.insert(p2_name.clone(), placed);
                     } else if let (None, Some(p2)) = (
                         solved_coords.get(p1_name),
                         solved_coords.get(p2_name).cloned(),
                     ) {
-                        solved_coords.insert(p1_name.clone(), vec![p2[0] - target_dist, p2[1]]);
+                        let mut placed = p2.clone();
+                        placed[0] -= target_dist;
+                        solved_coords.insert(p1_name.clone(), placed);
                     }
                 }
                 GeometricConstraint::Coincident(e1_name, e2_name) => {
@@ -616,14 +620,37 @@ impl GeometricConstraintSolver {
     fn residuals_2d(
         &self,
         constraint: &GeometricConstraint,
-        points: &HashMap<String, [f64; 2]>,
+        points: &HashMap<String, Vec<f64>>,
     ) -> AlgebraResult<Vec<f64>> {
         let fail = |why: String| AlgebraError::EvaluationError(format!("constraint solver: {why}"));
-        let point = |name: &str| -> AlgebraResult<[f64; 2]> {
+        // A point of any dimension (2-D or 3-D).
+        let point_any = |name: &str| -> AlgebraResult<&Vec<f64>> {
             points
                 .get(name)
-                .copied()
-                .ok_or_else(|| fail(format!("`{name}` is not a 2D point of this solver")))
+                .ok_or_else(|| fail(format!("`{name}` is not a point of this solver")))
+        };
+        // A planar point, for the line-based constraints.
+        let point = |name: &str| -> AlgebraResult<[f64; 2]> {
+            let v = point_any(name)?;
+            if v.len() == 2 {
+                Ok([v[0], v[1]])
+            } else {
+                Err(fail(format!(
+                    "`{name}` is a {}-D point; line constraints need 2-D points",
+                    v.len()
+                )))
+            }
+        };
+        let same_dimension = |a: &str, b: &str| -> AlgebraResult<(Vec<f64>, Vec<f64>)> {
+            let (pa, pb) = (point_any(a)?, point_any(b)?);
+            if pa.len() != pb.len() {
+                return Err(fail(format!(
+                    "`{a}` ({}-D) and `{b}` ({}-D) have different dimensions",
+                    pa.len(),
+                    pb.len()
+                )));
+            }
+            Ok((pa.clone(), pb.clone()))
         };
         // A line entity gives the direction p2 - p1; a point name is not a line.
         let line = |name: &str| -> AlgebraResult<([f64; 2], [f64; 2])> {
@@ -637,12 +664,18 @@ impl GeometricConstraintSolver {
         let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
         match constraint {
             GeometricConstraint::Coincident(a, b) => {
-                let (pa, pb) = (point(a)?, point(b)?);
-                Ok(vec![pa[0] - pb[0], pa[1] - pb[1]])
+                let (pa, pb) = same_dimension(a, b)?;
+                Ok(pa.iter().zip(&pb).map(|(u, v)| u - v).collect())
             }
             GeometricConstraint::Distance(a, b, d) => {
-                let (pa, pb) = (point(a)?, point(b)?);
-                Ok(vec![(pa[0] - pb[0]).hypot(pa[1] - pb[1]) - d])
+                let (pa, pb) = same_dimension(a, b)?;
+                let dist = pa
+                    .iter()
+                    .zip(&pb)
+                    .map(|(u, v)| (u - v).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                Ok(vec![dist - d])
             }
             GeometricConstraint::Parallel(a, b) => {
                 Ok(vec![cross(direction(line(a)?), direction(line(b)?))])
@@ -707,30 +740,33 @@ impl GeometricConstraintSolver {
         let mut free: Vec<(String, usize)> = Vec::new();
         let mut names: Vec<&String> = self.entities.keys().collect();
         names.sort();
-        let mut points: HashMap<String, [f64; 2]> = HashMap::new();
+        let mut points: HashMap<String, Vec<f64>> = HashMap::new();
         for name in names {
-            if let Some(GeometricEntity::Point2D { x, y, .. }) = self.entities.get(name) {
-                let start = solved.get(name).cloned();
-                let value = |known: &Option<f64>, axis: usize, free: &mut Vec<(String, usize)>| {
-                    match known {
-                        Some(v) => *v,
-                        None => {
-                            free.push((name.clone(), axis));
-                            // Keep a placement from step 2; otherwise a small distinct offset
-                            // so the Jacobian is not degenerate at the origin.
-                            start
-                                .as_ref()
-                                .map_or(0.1 * (free.len() as f64), |s| s[axis])
-                        }
+            let known: Vec<Option<f64>> = match self.entities.get(name) {
+                Some(GeometricEntity::Point2D { x, y, .. }) => vec![*x, *y],
+                Some(GeometricEntity::Point3D { coords, .. }) => coords.to_vec(),
+                _ => continue,
+            };
+            let start = solved.get(name).cloned();
+            let mut position = Vec::with_capacity(known.len());
+            for (axis, k) in known.iter().enumerate() {
+                position.push(match k {
+                    Some(v) => *v,
+                    None => {
+                        free.push((name.clone(), axis));
+                        // Keep a placement from step 2; otherwise a small distinct offset
+                        // so the Jacobian is not degenerate at the origin.
+                        start
+                            .as_ref()
+                            .filter(|s| s.len() == known.len())
+                            .map_or(0.1 * (free.len() as f64), |s| s[axis])
                     }
-                };
-                let px = value(x, 0, &mut free);
-                let py = value(y, 1, &mut free);
-                points.insert(name.clone(), [px, py]);
+                });
             }
+            points.insert(name.clone(), position);
         }
 
-        let evaluate = |points: &HashMap<String, [f64; 2]>| -> AlgebraResult<Vec<f64>> {
+        let evaluate = |points: &HashMap<String, Vec<f64>>| -> AlgebraResult<Vec<f64>> {
             let mut all = Vec::new();
             for constraint in &self.constraints {
                 all.extend(self.residuals_2d(constraint, points)?);
@@ -738,13 +774,13 @@ impl GeometricConstraintSolver {
             Ok(all)
         };
         let norm = |r: &[f64]| r.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        let set = |points: &mut HashMap<String, [f64; 2]>, k: usize, value: f64| {
+        let set = |points: &mut HashMap<String, Vec<f64>>, k: usize, value: f64| {
             let (name, axis) = &free[k];
             if let Some(p) = points.get_mut(name) {
                 p[*axis] = value;
             }
         };
-        let get = |points: &HashMap<String, [f64; 2]>, k: usize| -> f64 {
+        let get = |points: &HashMap<String, Vec<f64>>, k: usize| -> f64 {
             let (name, axis) = &free[k];
             points.get(name).map_or(0.0, |p| p[*axis])
         };
@@ -859,14 +895,14 @@ impl GeometricConstraintSolver {
             )));
         }
         for (name, p) in points {
-            solved.insert(name, vec![p[0], p[1]]);
+            solved.insert(name, p);
         }
         Ok(())
     }
 }
 
 /// Point positions and the constraint residuals they leave.
-type SolveAttempt = (HashMap<String, [f64; 2]>, Vec<f64>);
+type SolveAttempt = (HashMap<String, Vec<f64>>, Vec<f64>);
 
 /// Solve the dense system `A x = b` by Gaussian elimination with partial pivoting.
 fn solve_dense(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {

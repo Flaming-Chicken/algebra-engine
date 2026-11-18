@@ -170,19 +170,22 @@ impl WeylSpinor {
         let pz = p[3];
 
         let p_plus = (e + pz).max(0.0);
-        let sqrt_p_plus = p_plus.sqrt().max(1e-12);
-
-        // lambda = [sqrt(E + pz), (px + i py)/sqrt(E + pz)]
-        let l1_re = sqrt_p_plus;
+        // lambda = [sqrt(E + pz), (px + i py)/sqrt(E + pz)] with |lambda_1|^2 = E + pz and
+        // |lambda_2|^2 = E - pz. For a momentum along -z, E + pz vanishes and the division is
+        // singular; the spinor is then [0, sqrt(E - pz)] (the same relations hold).
+        let (l1_re, l2_re, l2_im) = if p_plus > 1e-12 * e.abs().max(1.0) {
+            let root = p_plus.sqrt();
+            (root, px / root, py / root)
+        } else {
+            (0.0, (e - pz).max(0.0).sqrt(), 0.0)
+        };
         let l1_im = 0.0;
-        let l2_re = px / sqrt_p_plus;
-        let l2_im = py / sqrt_p_plus;
 
-        // tilde_lambda = [sqrt(E + pz), (px - i py)/sqrt(E + pz)]
-        let tl1_re = sqrt_p_plus;
+        // tilde_lambda is the complex conjugate of lambda.
+        let tl1_re = l1_re;
         let tl1_im = 0.0;
-        let tl2_re = px / sqrt_p_plus;
-        let tl2_im = -py / sqrt_p_plus;
+        let tl2_re = l2_re;
+        let tl2_im = -l2_im;
 
         Self {
             lambda_1_re: l1_re,
@@ -228,10 +231,16 @@ impl SpinorHelicity {
         (prod1_re - prod2_re, prod1_im - prod2_im)
     }
 
-    /// Mandelstam kinematic invariant $s_{ij} = (p_i + p_j)^2 = \langle i j \rangle [j i]$.
+    /// Mandelstam invariant $s_{ij} = (p_i + p_j)^2 = 2 p_i \cdot p_j = \langle i j \rangle [i j]$.
+    ///
+    /// In this crate $[i j]$ is the complex conjugate of $\langle i j \rangle$, so
+    /// $\langle i j \rangle [i j] = |\langle i j \rangle|^2 = 2 p_i \cdot p_j$ (positive for two
+    /// positive-energy massless momenta). The textbook form $\langle i j \rangle [j i]$ equals this
+    /// only under the opposite sign convention for the square bracket; with the brackets as defined
+    /// here it would be the negative, which this function used to return.
     pub fn mandelstam_s(si: &WeylSpinor, sj: &WeylSpinor) -> f64 {
         let (ang_re, ang_im) = Self::angle_bracket(si, sj);
-        let (sq_re, sq_im) = Self::square_bracket(sj, si);
+        let (sq_re, sq_im) = Self::square_bracket(si, sj);
         ang_re * sq_re - ang_im * sq_im
     }
 

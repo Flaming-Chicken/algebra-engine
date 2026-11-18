@@ -419,3 +419,133 @@ fn a_circle_radius_can_be_an_unknown() {
     .solve();
     assert!(bad.is_err());
 }
+
+fn line3(name: &str, a: &str, b: &str) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Line3D {
+            name: name.to_string(),
+            p1: a.to_string(),
+            p2: b.to_string(),
+        },
+    )
+}
+
+#[test]
+fn lines_in_space_can_be_parallel_perpendicular_or_at_an_angle() {
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+
+    // Perpendicular: the line from O to P is perpendicular to the x axis at distance 2, in the
+    // plane z = 0: P = (0, +-2, 0).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [None, None, Some(0.0)]),
+            line3("axis", "O", "X"),
+            line3("ray", "O", "P"),
+        ],
+        vec![
+            C::Perpendicular("axis".into(), "ray".into()),
+            C::Distance("O".into(), "P".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert!(
+        p[0].abs() < 1e-7 && (p[1].abs() - 2.0).abs() < 1e-7 && p[2].abs() < 1e-12,
+        "{p:?}"
+    );
+
+    // Parallel with every coordinate unknown: Q = A +- 3 e_x (parallel to the x axis, 3 away).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("A", 1.0, 1.0, 1.0),
+            point3("Q", [None, None, None]),
+            line3("axis", "O", "X"),
+            line3("other", "A", "Q"),
+        ],
+        vec![
+            C::Parallel("axis".into(), "other".into()),
+            C::Distance("A".into(), "Q".into(), 3.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        (q[0] - 1.0).abs().max(0.0) > 2.9 && (q[0] - 1.0).abs() < 3.1,
+        "{q:?}"
+    );
+    assert!(
+        (q[1] - 1.0).abs() < 1e-6 && (q[2] - 1.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // Angle: 60 degrees between the x axis and the ray O -> P with |OP| = 2, P in the plane z = 0:
+    // P = (1, +-sqrt 3, 0).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [None, None, Some(0.0)]),
+            line3("axis", "O", "X"),
+            line3("ray", "O", "P"),
+        ],
+        vec![
+            C::Angle("axis".into(), "ray".into(), std::f64::consts::FRAC_PI_3),
+            C::Distance("O".into(), "P".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert!(
+        (p[0] - 1.0).abs() < 1e-7 && (p[1].abs() - 3.0_f64.sqrt()).abs() < 1e-7,
+        "{p:?}"
+    );
+
+    // Parallel and perpendicular at once is inconsistent for a line of non-zero length (a
+    // zero-length line would satisfy both); mixing Line2D with Line3D is an error.
+    let contradiction = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("A", 0.0, 1.0, 0.0),
+            point3("B", [None, None, None]),
+            line3("l1", "O", "X"),
+            line3("l2", "A", "B"),
+        ],
+        vec![
+            C::Parallel("l1".into(), "l2".into()),
+            C::Perpendicular("l1".into(), "l2".into()),
+            C::Distance("A".into(), "B".into(), 1.0),
+        ],
+    )
+    .solve();
+    assert!(contradiction.is_err());
+    let mixed = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            fixed("a", 0.0, 0.0),
+            fixed("b", 1.0, 0.0),
+            line3("l3", "O", "X"),
+            line("l2", "a", "b"),
+        ],
+        vec![C::Parallel("l3".into(), "l2".into())],
+    )
+    .solve();
+    assert!(mixed.is_err());
+}
+
+/// A solver from entity and constraint lists (the 2-D tests' `solver` helper, reused for 3-D).
+fn solver3(
+    entities: Vec<(String, GeometricEntity)>,
+    constraints: Vec<C>,
+) -> GeometricConstraintSolver {
+    solver(entities, constraints)
+}

@@ -586,3 +586,53 @@ fn hodge_star_for_a_diagonal_metric_in_curvilinear_coordinates() {
     // A wrong-length metric is an error.
     assert!(form.hodge_star_diagonal(&g, &metric[..2]).is_err());
 }
+
+#[test]
+fn the_cartan_operation_takes_a_metric_for_the_hodge_star() {
+    use algebra_core::operation::CartanOpKind::HodgeStarMetric;
+    let metric = |m: &[&str]| m.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    // Spherical coordinates (x = r, y = theta, z = phi): star dr is r^2 sin(theta) dtheta^dphi.
+    let out = run(HodgeStarMetric {
+        form_str: "dx".into(),
+        metric: metric(&["1", "x^2", "x^2*sin(y)^2"]),
+        dim: 3,
+    });
+    assert!(
+        !out.starts_with("ERROR") && out.contains("(degree 2)") && out.contains("dy∧dz"),
+        "{out}"
+    );
+    assert!(
+        out.contains("sin") && out.contains("x"),
+        "the coefficient depends on r and theta: {out}"
+    );
+
+    // The Euclidean metric gives the flat star: star dx = dy^dz.
+    let flat = run(HodgeStarMetric {
+        form_str: "dx".into(),
+        metric: metric(&["1", "1", "1"]),
+        dim: 3,
+    });
+    assert!(
+        flat.contains("dy∧dz") && flat.contains("(degree 2)"),
+        "{flat}"
+    );
+
+    // A metric of the wrong length or with an unreadable entry is an error.
+    assert!(
+        run(HodgeStarMetric {
+            form_str: "dx".into(),
+            metric: metric(&["1", "1"]),
+            dim: 3
+        })
+        .starts_with("ERROR")
+    );
+    assert!(
+        run(HodgeStarMetric {
+            form_str: "dx".into(),
+            metric: metric(&["1", "x +", "1"]),
+            dim: 3
+        })
+        .starts_with("ERROR")
+    );
+}

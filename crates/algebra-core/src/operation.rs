@@ -373,6 +373,13 @@ pub enum CartanOpKind {
         vector_field: Vec<String>,
         dim: usize,
     },
+    /// Hodge star for a diagonal metric whose entries are expressions in the coordinates
+    /// (`x`, `y`, `z`, `t`), such as `["1", "x^2", "x^2 * sin(y)^2"]` for spherical coordinates.
+    HodgeStarMetric {
+        form_str: String,
+        metric: Vec<String>,
+        dim: usize,
+    },
     HodgeStar {
         form_str: String,
         dim: usize,

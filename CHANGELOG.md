@@ -60,6 +60,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Cartan operations with symbolic vector fields (`InteriorProductSymbolic`, `LieDerivativeSymbolic`).
 - `guess::{guess_recurrence, guess_minimal_recurrence}`: P-recursive recurrences guessed from exact sequence values (a conjecture, not a proof).
 - `SymbolicForm::hodge_star_diagonal`: Hodge star for a diagonal metric with symbolic entries (spherical, Minkowski, ...).
+- Cartan operation `HodgeStarMetric`: Hodge star for a diagonal metric given as expressions.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

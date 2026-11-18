@@ -432,3 +432,71 @@ fn juxtaposed_coefficient_factors_multiply() {
     });
     assert!(out.contains("= 0 (degree 2)"), "{out}");
 }
+
+#[test]
+fn the_cartan_operation_accepts_vector_fields_with_expression_components() {
+    use algebra_core::operation::CartanOpKind::{InteriorProductSymbolic, LieDerivativeSymbolic};
+    let field = |c: &[&str]| c.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    // i_X(dx^dy) for the rotation field X = y d/dx - x d/dy is y dy + x dx.
+    let out = run(InteriorProductSymbolic {
+        form_str: "dx^dy".into(),
+        vector_field: field(&["y", "-x"]),
+        dim: 2,
+    });
+    assert!(
+        !out.starts_with("ERROR") && out.contains("(degree 1)"),
+        "{out}"
+    );
+    assert!(out.contains("dx") && out.contains("dy"), "{out}");
+
+    // L_X (x^2 y) = X(f) = y 2xy - x x^2 (a function, degree 0); L_X(x^2 + y^2) = 0.
+    let lie = run(LieDerivativeSymbolic {
+        form_str: "x^2*y".into(),
+        vector_field: field(&["y", "-x"]),
+        dim: 2,
+    });
+    assert!(
+        !lie.starts_with("ERROR") && lie.contains("(degree 0)"),
+        "{lie}"
+    );
+    let invariant = run(LieDerivativeSymbolic {
+        form_str: "x^2 + y^2".into(),
+        vector_field: field(&["y", "-x"]),
+        dim: 2,
+    });
+    assert!(
+        invariant.contains("= 0 (degree 0)"),
+        "rotation leaves x^2 + y^2 unchanged: {invariant}"
+    );
+
+    // L_X dx = d(X^x) = d(y) = dy for the rotation field, and a non-constant field works too:
+    // X = x^2 d/dx gives L_X (dx) = d(x^2) = 2x dx.
+    let ldx = run(LieDerivativeSymbolic {
+        form_str: "dx".into(),
+        vector_field: field(&["x^2", "0"]),
+        dim: 2,
+    });
+    assert!(
+        ldx.contains("dx") && ldx.contains("(degree 1)") && !ldx.starts_with("ERROR"),
+        "{ldx}"
+    );
+
+    // Unreadable components and a field of the wrong length are errors.
+    assert!(
+        run(InteriorProductSymbolic {
+            form_str: "dx".into(),
+            vector_field: field(&["x +", "1"]),
+            dim: 2
+        })
+        .starts_with("ERROR")
+    );
+    assert!(
+        run(LieDerivativeSymbolic {
+            form_str: "dx".into(),
+            vector_field: field(&["1"]),
+            dim: 2
+        })
+        .starts_with("ERROR")
+    );
+}

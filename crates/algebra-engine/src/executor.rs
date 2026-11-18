@@ -2003,6 +2003,36 @@ impl OperationExecutor {
                             Err(e) => OperationResult::error(e),
                         }
                     }
+                    CartanOpKind::HodgeStarMatrix {
+                        form_str,
+                        metric,
+                        dim,
+                    } => {
+                        let entries: Result<Vec<Vec<algebra_core::ExprId>>, String> = metric
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|c| {
+                                        parser
+                                            .parse(c)
+                                            .map_err(|e| format!("metric entry `{c}`: {e:?}"))
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+                        let result = sym_parse(form_str, *dim).and_then(|f| {
+                            f.hodge_star_metric(graph, &entries?)
+                                .map_err(|e| e.to_string())
+                        });
+                        match result {
+                            Ok(star) => sym_report(
+                                format!("Hodge Star ⋆({form_str}) for the given metric g"),
+                                &star,
+                                r"\star_g\omega",
+                            ),
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
                     CartanOpKind::HodgeStarMetric {
                         form_str,
                         metric,

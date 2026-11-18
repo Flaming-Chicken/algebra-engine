@@ -741,3 +741,57 @@ fn hodge_star_for_a_general_symmetric_metric() {
         .is_err()
     );
 }
+
+#[test]
+fn the_cartan_operation_takes_a_full_metric_matrix_for_the_hodge_star() {
+    use algebra_core::operation::CartanOpKind::HodgeStarMatrix;
+    let matrix = |rows: &[&[&str]]| -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|r| r.iter().map(|s| s.to_string()).collect())
+            .collect()
+    };
+    // g = [[2, 1], [1, 2]] (det 3): star dx = sqrt 3 (g^{00} dy - g^{01} dx...) i.e. a 1-form in 2-D.
+    let out = run(HodgeStarMatrix {
+        form_str: "dx".into(),
+        metric: matrix(&[&["2", "1"], &["1", "2"]]),
+        dim: 2,
+    });
+    assert!(
+        !out.starts_with("ERROR") && out.contains("(degree 1)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("dx") && out.contains("dy"),
+        "a non-diagonal metric mixes dx and dy: {out}"
+    );
+
+    // With the identity matrix it is the flat star: star dx = dy in the plane.
+    let flat = run(HodgeStarMatrix {
+        form_str: "dx".into(),
+        metric: matrix(&[&["1", "0"], &["0", "1"]]),
+        dim: 2,
+    });
+    let flat_result = flat.split_once(" = ").map(|(_, r)| r).unwrap_or(&flat);
+    assert!(
+        flat_result.contains("dy") && !flat_result.contains("dx"),
+        "{flat}"
+    );
+
+    // A non-square or wrong-sized matrix and an unreadable entry are errors.
+    assert!(
+        run(HodgeStarMatrix {
+            form_str: "dx".into(),
+            metric: matrix(&[&["1", "0"]]),
+            dim: 2
+        })
+        .starts_with("ERROR")
+    );
+    assert!(
+        run(HodgeStarMatrix {
+            form_str: "dx".into(),
+            metric: matrix(&[&["1", "x +"], &["0", "1"]]),
+            dim: 2
+        })
+        .starts_with("ERROR")
+    );
+}

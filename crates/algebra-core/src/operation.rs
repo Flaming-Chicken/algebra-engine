@@ -380,6 +380,13 @@ pub enum CartanOpKind {
         metric: Vec<String>,
         dim: usize,
     },
+    /// Hodge star for a general symmetric metric given as a matrix of expressions in the
+    /// coordinates (up to four), e.g. `[["2", "1"], ["1", "2"]]`.
+    HodgeStarMatrix {
+        form_str: String,
+        metric: Vec<Vec<String>>,
+        dim: usize,
+    },
     HodgeStar {
         form_str: String,
         dim: usize,

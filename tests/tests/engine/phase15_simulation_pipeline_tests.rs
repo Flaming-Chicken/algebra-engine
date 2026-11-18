@@ -509,3 +509,86 @@ fn a_spring_is_meshed_as_a_solid_and_compresses_under_an_axial_load() {
     let ratio = (load / deflection) / k_formula;
     assert!(ratio > 0.8 && ratio < 10.0, "stiffness ratio {ratio}");
 }
+
+#[test]
+fn a_screw_without_a_socket_is_meshed_as_a_solid_and_stretches_like_a_bar() {
+    use algebra_engine::cad::ThreadedScrew;
+    use algebra_engine::pde::ElementType;
+    let screw = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    let cad = screw.generate_3d_mesh();
+    let fea = CadFeaBridge::screw_to_fea(&screw);
+    assert_eq!(
+        fea.element_type,
+        ElementType::Tet4,
+        "a plain bolt is a solid"
+    );
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u), "every node belongs to an element");
+    // The tetrahedra fill the bolt; the lowered step rows only add a thin cone each.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.03 * solid && tets >= solid * 0.999,
+        "tets {tets} vs solid {solid}"
+    );
+
+    // A bolt with a socket keeps the surface mesh (a cavity is not a star-shaped stack).
+    let mut socketed = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    socketed.socket_depth = 2.0;
+    assert_ne!(
+        CadFeaBridge::screw_to_fea(&socketed).element_type,
+        ElementType::Tet4
+    );
+
+    // Tension: tip clamped, the head pulled along +z. The shank is a bar of cross-section between
+    // the minor and the major circle, so the stiffness is bracketed by those two areas.
+    let (e_mod, load) = (200_000.0, 1000.0);
+    let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+    pipeline.fea_mesh = fea;
+    pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: e_mod,
+        poissons_ratio: 0.3,
+        density: 7850.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "shank_tip".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "bolt_head".into(),
+        force_vector: vec![0.0, 0.0, load],
+    });
+    let result = pipeline.run_analysis().expect("screw analysis");
+    let head = &result.fea_mesh.boundary_groups["bolt_head"];
+    let stretch = head
+        .iter()
+        .map(|&n| result.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / head.len() as f64;
+    assert!(stretch > 0.0, "the bolt lengthens under tension");
+    let tip = &result.fea_mesh.boundary_groups["shank_tip"];
+    let reaction: f64 = tip
+        .iter()
+        .map(|&n| result.solution.reaction_forces[n * 3 + 2])
+        .sum();
+    assert!((reaction + load).abs() < 1e-4 * load, "reaction {reaction}");
+    let (r_minor, r_major) = (screw.minor_radius(), screw.nominal_diameter / 2.0);
+    let k = load / stretch;
+    let k_soft = e_mod * std::f64::consts::PI * r_minor * r_minor / screw.total_length;
+    let k_stiff = e_mod * std::f64::consts::PI * r_major * r_major / screw.total_length;
+    assert!(
+        k > 0.9 * k_soft && k < 1.2 * k_stiff,
+        "k {k} not in [{k_soft}, {k_stiff}]"
+    );
+}

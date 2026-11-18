@@ -10,6 +10,8 @@ mod limits_series_audit_tests;
 mod radical_integrals_tests;
 #[path = "engine/solve_known_roots_tests.rs"]
 mod solve_known_roots_tests;
+#[path = "engine/special_functions_tests.rs"]
+mod special_functions_tests;
 #[path = "engine/zeilberger_proof_tests.rs"]
 mod zeilberger_proof_tests;
 

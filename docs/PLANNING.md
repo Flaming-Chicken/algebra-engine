@@ -152,7 +152,7 @@ The entries below record what was checked and changed for each item.
 
 **Track F, verified.** Reproduced on `dev` (19 Nov 2026), each a wrong answer today:
 
-- **F4** special functions: `Ai(1)` is `0.14504` (true `0.13529`); `Y0(1)` is `-0.4401` (true `0.0883`); `Y1(2)` is `-0.0645` (true `-0.1070`); `K0(1)` is `1.9887` (true `0.4210`); `K1(2)` is `2.0400` (true `0.1399`); `ζ(0.5)` is `-1.4334` (true `-1.4604`) and `ζ(0.01)` is `-0.0394` (true `-0.5092`); `B(200, 200)` is `NaN`; `J0(40)` is `-1.46e8` (true `0.00737`). Only `Ai(0)` and small-argument `J` are right.
+- **F4 Fixed (19 Nov 2026).** `Ai`, `Y_n`, `K_n`, `J_n` for large arguments, `ζ`, `B(a, b)`, `ln Γ`, `erf` and `erfc` were wrong: `Ai(1)` was `0.14504` (true `0.13529`), `Y0(1)` `-0.4401` (true `0.0883`), `K0(1)` `1.9887` (true `0.4210`), `ζ(0.5)` `-1.4334` (true `-1.4604`), `ζ(0.01)` `-0.0394` (true about `-0.5093`), `B(200, 200)` `NaN`, `J0(40)` `-1.46e8` (true `0.00737`), and `erf` was the 1.5e-7 Abramowitz–Stegun fit labelled high-precision. Now: `J_n` by Bessel's integral with the trapezoid rule (Hankel's expansion beyond 2000), `Y_n`, `K_n` and non-integer-order `J`/`K` by Gauss–Legendre quadrature of their integral representations, `Ai` from `K_{1/3}`/`J_{±1/3}` (asymptotic series beyond 10), `ζ` by Euler–Maclaurin with the functional equation, `ln Γ` by Stirling with an argument shift (so `B` no longer overflows), `erf` by its series and `erfc` by a continued fraction. Verified by tabulated values (15 digits) and exact identities (the Neumann sum for `J`, the `J`/`Y` and `I`/`K` Wronskians, the Airy equation, the beta recurrence), in `special_functions_tests`. Accuracy is about 1e-12 relative (1e-9 for `Y_n` at tiny `x` with `n >= 3`).
 - **F5** `Number::Float` hashes the raw bits, so `0.0` and `-0.0` hash differently (interval outward rounding not checked).
 - **F7** `solve_poisson_fem_1d` with `u(0) = 1, u(1) = 3` and no source returns `[1, 0, 0, 0, 3]`, not the line `1, 1.5, 2, 2.5, 3`: the Dirichlet values are not lifted into the load.
 - **F8** the clamped quadratic B-spline basis at `u = 1` is `[0, 0, 0]`, not `[0, 0, 1]`.
@@ -179,8 +179,7 @@ eight waves, section 22) is the long-range target and starts only once its own W
 which is priority 1 below. Every fix needs a test that fails on the old code, and every claim in a document needs a
 verdict in this ledger. A release is cut when a priority-1 batch is merged.
 
-1. **Reproduced wrong answers (fix first, one test each).** `F4` special functions (`Ai`, `Y`, `K`, `ζ`, `B`, `J` for
-   large arguments: compare with tabulated values), `F7` non-zero Dirichlet lifting in the 1-D Poisson solver, `F8` the
+1. **Reproduced wrong answers (fix first, one test each).** `F4` is fixed. Open: `F7` non-zero Dirichlet lifting in the 1-D Poisson solver, `F8` the
    clamped B-spline endpoint (and `C1`, the placeholder IGA stiffness), `F10` `matrix_rank`, `F5` the `±0` hash,
    `B13` Smith normal form, `B16` surreal order, `C16` polynomial systems with non-Shape-Lemma bases, then the
    read-confirmed `B15` (one line), `B17`–`B19`, `A13`, `A14`, `C17`.

@@ -398,3 +398,37 @@ fn the_cartan_operation_computes_a_symbolic_hodge_star() {
         "{out}"
     );
 }
+
+#[test]
+fn juxtaposed_coefficient_factors_multiply() {
+    let g = ExprGraph::new();
+    let names: Vec<String> = ["x", "y", "z"].iter().map(|s| s.to_string()).collect();
+    let p = [2.0, 3.0, 0.5];
+    let value = |text: &str, blade: &[usize]| {
+        SymbolicForm::parse(&g, text, &names)
+            .unwrap()
+            .evaluate(&g, &p)
+            .unwrap()
+            .get(&FormBasis {
+                indices: blade.to_vec(),
+            })
+            .copied()
+            .unwrap_or(0.0)
+    };
+    assert!((value("x^2 y dx", &[0]) - 12.0).abs() < 1e-12);
+    assert!((value("2 x y dz", &[2]) - 12.0).abs() < 1e-12);
+    assert!((value("(x + 1) (y - 1) dy", &[1]) - 6.0).abs() < 1e-12);
+    // Functions, powers and spaced operators are not split.
+    assert!((value("sin(z) dx", &[0]) - 0.5_f64.sin()).abs() < 1e-12);
+    assert!((value("x + y", &[]) - 5.0).abs() < 1e-12);
+    assert!((value("x ^ 2 dy", &[1]) - 4.0).abs() < 1e-12);
+    assert!((value("2 (y + 1) z dx", &[0]) - 4.0).abs() < 1e-12);
+
+    // The notebook operation now reads `x^2 y dx` too.
+    use algebra_core::operation::CartanOpKind::ExteriorDerivative;
+    let out = run(ExteriorDerivative {
+        form_str: "2 x y dx + x^2 dy".into(),
+        dim: 2,
+    });
+    assert!(out.contains("= 0 (degree 2)"), "{out}");
+}

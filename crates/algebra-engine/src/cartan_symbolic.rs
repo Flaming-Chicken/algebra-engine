@@ -377,7 +377,7 @@ impl SymbolicForm {
                 g.integer(1)
             } else {
                 parser
-                    .parse(&coef_text)
+                    .parse(&insert_implicit_products(&coef_text))
                     .map_err(|e| fail(format!("cannot read coefficient `{coef_text}`: {e:?}")))?
             };
             let mut indices = Vec::new();
@@ -515,4 +515,35 @@ fn evaluate_expr(
         }
         other => return Err(error(&format!("unsupported expression node {other:?}"))),
     })
+}
+
+/// Make a product written by juxtaposition explicit: whitespace between two operands becomes `*`,
+/// so `2 x y` reads as `2*x*y` and `(a + b) (c - d)` as `(a + b)*(c - d)`. Only whitespace
+/// triggers it: `sin(x)` and `x^2` are untouched, and so is whitespace next to an operator
+/// (`x + 1`, `x ^ 2`).
+fn insert_implicit_products(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let ends_operand = |c: char| c.is_alphanumeric() || c == '_' || c == ')' || c == '.';
+    let starts_operand = |c: char| c.is_alphanumeric() || c == '_' || c == '(' || c == '.';
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_whitespace() {
+            let mut j = i;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            let prev = out.chars().last();
+            let next = chars.get(j).copied();
+            match (prev, next) {
+                (Some(p), Some(n)) if ends_operand(p) && starts_operand(n) => out.push('*'),
+                _ => {}
+            }
+            i = j;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }

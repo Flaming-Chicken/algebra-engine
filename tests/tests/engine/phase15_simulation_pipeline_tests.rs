@@ -177,3 +177,103 @@ fn test_under_constrained_structures_are_reported_not_solved_with_zeros() {
     let error = pipeline.run_analysis().unwrap_err();
     assert!(error.to_string().contains("singular"), "{error}");
 }
+
+fn tet_volume(mesh: &algebra_engine::pde::FeaMesh, e: &[usize]) -> f64 {
+    let p: Vec<&Vec<f64>> = e.iter().map(|&i| &mesh.nodes[i]).collect();
+    let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+    let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+    let c = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
+    (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+        + a[2] * (b[0] * c[1] - b[1] * c[0]))
+        .abs()
+        / 6.0
+}
+
+#[test]
+fn a_bored_gear_is_meshed_as_a_solid_and_analysed_with_real_elasticity() {
+    use algebra_engine::pde::ElementType;
+    let gear = InvoluteGear::spur(2.0, 12, 8.0);
+    let fea = CadFeaBridge::gear_to_fea(&gear);
+    let cad = gear.generate_3d_mesh();
+
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    assert_eq!(
+        fea.nodes.len(),
+        cad.vertices.len(),
+        "FEA nodes are the CAD vertices"
+    );
+    // The tetrahedra fill the solid exactly: their volumes add up to the closed mesh's volume.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 1e-8 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    assert!(
+        fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12),
+        "no degenerate tetrahedra"
+    );
+
+    // Real 3-D elasticity: clamp the bore, load the teeth; the bore carries exactly the load.
+    let force = [500.0, -200.0, 30.0];
+    let mut pipeline =
+        SimulationPipeline::from_gear(&gear).with_physics(PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: 200_000.0,
+            poissons_ratio: 0.29,
+            density: 7850.0,
+            body_force: vec![0.0, 0.0, 0.0],
+            plane_stress: false,
+        });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "bore_hole".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "teeth_flanks".into(),
+        force_vector: force.to_vec(),
+    });
+    let result = pipeline.run_analysis().expect("solid gear analysis");
+    assert_eq!(result.fea_mesh.element_type, ElementType::Tet4);
+    assert!(result.max_magnitude() > 0.0);
+    assert!(result.max_von_mises_stress() > 0.0);
+    let bore = &result.fea_mesh.boundary_groups["bore_hole"];
+    for (dof, f) in force.iter().enumerate() {
+        let reaction: f64 = bore
+            .iter()
+            .map(|&n| result.solution.reaction_forces[n * 3 + dof])
+            .sum();
+        assert!(
+            (reaction + f).abs() < 1e-6 * f.abs().max(1.0),
+            "dof {dof}: reaction {reaction} vs load {f}"
+        );
+    }
+
+    // A gently twisted helical gear is still meshed as a solid with nearly the same volume; a
+    // strongly twisted one would fold the stacked prisms (the outline turns against the bore
+    // ring), so it keeps the surface fallback instead of producing inverted tetrahedra.
+    let gentle = InvoluteGear::helical(1.5, 50, 8.0, 3.0);
+    let fea = CadFeaBridge::gear_to_fea(&gentle);
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = gentle.generate_3d_mesh().compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.01 * solid,
+        "gentle helical tets {tets} vs solid {solid}"
+    );
+    let steep = InvoluteGear::helical(1.5, 14, 8.0, 20.0);
+    assert_eq!(
+        CadFeaBridge::gear_to_fea(&steep).element_type,
+        ElementType::Tri3
+    );
+
+    // Without a bore there is no annular cap to extrude: the surface fallback is used.
+    let mut plain = InvoluteGear::spur(2.0, 12, 8.0);
+    plain.bore_radius = 0.0;
+    assert_eq!(
+        CadFeaBridge::gear_to_fea(&plain).element_type,
+        ElementType::Tri3
+    );
+}

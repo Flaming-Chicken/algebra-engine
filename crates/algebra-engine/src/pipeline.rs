@@ -94,10 +94,83 @@ impl CadFeaBridge {
         fea
     }
 
+    /// Tetrahedral solid mesh of a bored gear, or `None` when the gear mesh is not a stack of
+    /// identical layers (no bore).
+    fn extruded_gear_solid(gear: &InvoluteGear, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let bore = gear
+            .bore_radius
+            .min(0.8 * gear.root_diameter() / 2.0)
+            .max(0.0);
+        if bore <= 1e-9 {
+            return None;
+        }
+        let per_layer = gear.generate_2d_profile(6).len() + 48;
+        let total = mesh_3d.vertices.len();
+        if !total.is_multiple_of(per_layer) || total / per_layer < 2 {
+            return None;
+        }
+        let layers = total / per_layer;
+        // The bottom cap: triangles lying entirely in the first layer (the walls span two layers).
+        let bottom: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .copied()
+            .filter(|t| t.iter().all(|&i| i < per_layer))
+            .collect();
+        if bottom.is_empty() {
+            return None;
+        }
+        // The same triangle at every layer must keep its orientation: a strong helical twist
+        // rotates the outline against the (unrotated) bore ring and can fold a triangle, which
+        // would give inverted tetrahedra. Then the solid mesh is not used.
+        let area = |layer: usize, t: &[usize; 3]| {
+            let v = |i: usize| mesh_3d.vertices[i + layer * per_layer];
+            let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        };
+        for tri in &bottom {
+            let reference = area(0, tri);
+            if reference.abs() < 1e-12 {
+                return None;
+            }
+            if (1..layers).any(|l| area(l, tri) * reference <= 1e-12) {
+                return None;
+            }
+        }
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        for layer in 0..layers - 1 {
+            let (lo, hi) = (layer * per_layer, (layer + 1) * per_layer);
+            for tri in &bottom {
+                // Sort by vertex index so neighbouring prisms cut their shared quad faces along
+                // the same diagonal (a conforming mesh).
+                let mut v = *tri;
+                v.sort_unstable();
+                let (p0, p1, p2) = (v[0], v[1], v[2]);
+                let up = |i: usize| i + (hi - lo);
+                let base = |i: usize| i + lo;
+                fea.add_element(vec![base(p0), base(p1), base(p2), up(base(p2))]);
+                fea.add_element(vec![base(p0), base(p1), up(base(p1)), up(base(p2))]);
+                fea.add_element(vec![base(p0), up(base(p0)), up(base(p1)), up(base(p2))]);
+            }
+        }
+        Some(fea)
+    }
+
     /// Convert an Involute Gear to a specialized simulation `FeaMesh` with named `"bore_hole"` and `"teeth_flanks"`.
+    ///
+    /// A gear with a bore is meshed as a **solid** of linear tetrahedra (`Tet4`): the bottom cap's
+    /// triangles are extruded through the layers of the gear mesh and each triangular prism is cut
+    /// into three tetrahedra, so the analysis is real 3-D elasticity and the FEA nodes are exactly
+    /// the CAD vertices (displacements map straight onto the deformed shape). A gear without a
+    /// bore has no annular cap to extrude and falls back to the surface triangulation, whose 3-D
+    /// `Tri3` element is only a pseudo-stiffness (see ledger C11).
     pub fn gear_to_fea(gear: &InvoluteGear) -> FeaMesh {
         let mesh_3d = gear.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_gear_solid(gear, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
         let min_r = mesh_3d
             .vertices

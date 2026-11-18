@@ -379,16 +379,105 @@ impl CadFeaBridge {
         fea
     }
 
+    /// Tetrahedral solid mesh of a screw. The CAD mesh is one grid of star-shaped rows (closed
+    /// polar curves `r(theta)` at a height); the cross-section is a fan from the axis, extruded
+    /// through the rows by the shared prism stacker. A radius step is a pair of rows at the same
+    /// height, which would give zero-thickness (degenerate) tetrahedra, so the lower row of the
+    /// pair is moved down by `0.05 pitch` (at most half the gap below it): the step becomes a
+    /// thin conical face, adding under 1% to the volume. The FEA nodes are therefore the CAD
+    /// vertices with those rows lowered, plus one axis node per intermediate row.
+    ///
+    /// `None` (surface fallback) for a screw with a key socket, whose cavity is not a star-shaped
+    /// stack, or if the rows are not in increasing height.
+    fn extruded_screw_solid(screw: &ThreadedScrew, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        const N_THETA: usize = 96;
+        if screw.effective_socket().is_some() || mesh_3d.vertices.len() < 2 * N_THETA + 2 {
+            return None;
+        }
+        let rows = (mesh_3d.vertices.len() - 2) / N_THETA;
+        if rows * N_THETA + 2 != mesh_3d.vertices.len() {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (rows * N_THETA, rows * N_THETA + 1);
+        // Row heights, with the lower row of every equal-height pair lowered.
+        let mut z: Vec<f64> = (0..rows)
+            .map(|j| mesh_3d.vertices[j * N_THETA][2])
+            .collect();
+        let original = z.clone();
+        for j in 0..rows - 1 {
+            if (original[j + 1] - original[j]).abs() < 1e-9 {
+                let gap = if j > 0 {
+                    original[j] - original[j - 1]
+                } else {
+                    f64::INFINITY
+                };
+                z[j] -= (0.05 * screw.pitch).min(0.5 * gap);
+            }
+        }
+        if z.windows(2).any(|w| w[1] - w[0] < 1e-9) {
+            return None;
+        }
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for (idx, v) in mesh_3d.vertices.iter().enumerate() {
+            let height = if idx < rows * N_THETA {
+                z[idx / N_THETA]
+            } else {
+                v[2]
+            };
+            fea.add_node(vec![v[0], v[1], height]);
+        }
+        let first_extra = fea.nodes.len();
+        for zj in &z[1..rows - 1] {
+            fea.add_node(vec![0.0, 0.0, *zj]);
+        }
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { N_THETA } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < N_THETA {
+                layer * N_THETA + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == rows - 1 {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        let node_of = &node;
+        Self::stack_prisms(
+            &mut fea,
+            &base,
+            rows,
+            &node,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
+        // The surface mesh has the bottom and top centres at the end rows' heights; keep them.
+        Some(fea)
+    }
+
     /// Convert a Threaded Fastener to a simulation `FeaMesh` with `"bolt_head"` and `"shank_tip"`.
+    ///
+    /// A screw without a key socket is meshed as a **solid** of linear tetrahedra (see
+    /// [`CadFeaBridge::extruded_screw_solid`]); a screw with a socket keeps the surface
+    /// triangulation (ledger D1).
     pub fn screw_to_fea(screw: &ThreadedScrew) -> FeaMesh {
         let mesh_3d = screw.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_screw_solid(screw, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
         let head_z = screw.total_length;
         let mut head_nodes = Vec::new();
         let mut tip_nodes = Vec::new();
 
-        for (idx, v) in mesh_3d.vertices.iter().enumerate() {
+        for (idx, v) in fea.nodes.iter().enumerate() {
             if v[2] >= head_z - 1e-3 {
                 head_nodes.push(idx);
             } else if v[2] <= 1e-3 {

@@ -4,6 +4,8 @@
 
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
+#[path = "engine/limits_series_audit_tests.rs"]
+mod limits_series_audit_tests;
 
 #[path = "engine/branch_tests.rs"]
 mod branch_tests;

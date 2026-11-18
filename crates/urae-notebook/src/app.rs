@@ -1336,6 +1336,12 @@ impl eframe::App for UraeNotebookApp {
                             self.export_notice = Some("Exported to 'notebook_export.py'".to_string());
                             ui.close();
                         }
+                        if ui.button("HTML report (.html)").clicked() {
+                            let html = self.presentation_report_html();
+                            self.trigger_file_download("notebook_report.html", html.as_bytes(), "text/html");
+                            self.export_notice = Some("Exported to 'notebook_report.html'".to_string());
+                            ui.close();
+                        }
                         if ui.button("Lean 4 Proof (.lean)").clicked() {
                             let lean = crate::export::to_lean(&self.state.session.raw_document_text);
                             self.trigger_file_download("notebook_export.lean", lean.as_bytes(), "text/plain");
@@ -6380,6 +6386,23 @@ impl UraeNotebookApp {
         });
     }
 
+    /// The printable HTML report of the current document: each formula line is followed by its
+    /// evaluated output when the line evaluated without an error.
+    fn presentation_report_html(&self) -> String {
+        let doc = &self.state.session.raw_document_text;
+        let mut results: Vec<Option<String>> = vec![None; doc.lines().count()];
+        for pl in &self.state.parsed_lines {
+            if matches!(pl.kind, LineKind::Formula)
+                && pl.error_msg.is_none()
+                && !pl.output_unicode.is_empty()
+                && let Some(slot) = results.get_mut(pl.line_idx)
+            {
+                *slot = Some(pl.output_unicode.clone());
+            }
+        }
+        crate::export::to_html_report(&self.active_notebook, doc, &results)
+    }
+
     /// Render clean, publishable presentation / report view
     pub fn render_presentation_report_view(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         let palette = self.theme.palette();
@@ -6393,7 +6416,16 @@ impl UraeNotebookApp {
                     self.view_mode = ViewMode::SmartStream;
                 }
                 if ui.button("🖨 Print / Export").clicked() {
-                    self.export_notice = Some("Exporting presentation document...".to_string());
+                    let html = self.presentation_report_html();
+                    self.trigger_file_download(
+                        "notebook_report.html",
+                        html.as_bytes(),
+                        "text/html",
+                    );
+                    self.export_notice = Some(
+                        "Exported 'notebook_report.html' (open it and use Print to PDF)"
+                            .to_string(),
+                    );
                 }
             });
         });

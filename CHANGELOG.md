@@ -36,6 +36,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - FEA: trilinear hexahedral elements (`Hex8`, `FeaMesh::box_3d_hex`) for elasticity and heat conduction.
 - The Cartan operation accepts symbolic coefficients (`d(x^2*y dx)`, wedge, interior product, Lie derivative) via `SymbolicForm::parse`.
 - `SymbolicForm::{hodge_star, codifferential, laplace_de_rham}`; the Cartan operation's Hodge star accepts symbolic coefficients.
+- Notebook: "Print / Export" in the presentation view now produces a printable HTML report (`export::to_html_report`); it only set a status message before.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

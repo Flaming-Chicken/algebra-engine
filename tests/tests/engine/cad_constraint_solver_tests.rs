@@ -549,3 +549,91 @@ fn solver3(
 ) -> GeometricConstraintSolver {
     solver(entities, constraints)
 }
+
+#[test]
+fn a_point_can_be_at_a_given_distance_from_a_line() {
+    // 3-D: the point (3, y, 0) is 2 away from the x axis: y = +-2.
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+    let solved = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [Some(3.0), None, Some(0.0)]),
+            line3("axis", "O", "X"),
+        ],
+        vec![C::Distance("P".into(), "axis".into(), 2.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["P"][1].abs() - 2.0).abs() < 1e-7,
+        "{:?}",
+        solved["P"]
+    );
+    assert!(
+        !solved.contains_key("axis"),
+        "a line is not a point: {solved:?}"
+    );
+
+    // The argument order does not matter, and a distance of zero puts the point on the line:
+    // the line through (0,0,0) and (1,1,0) contains (2, 2, 0).
+    let solved = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("D", 1.0, 1.0, 0.0),
+            point3("Q", [None, Some(2.0), Some(0.0)]),
+            line3("diag", "O", "D"),
+        ],
+        vec![C::Distance("diag".into(), "Q".into(), 0.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!((solved["Q"][0] - 2.0).abs() < 1e-6, "{:?}", solved["Q"]);
+
+    // 2-D: the point (2, y) is sqrt 2 from the line y = x when |2 - y| = 2, i.e. y = 0 or 4.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 1.0, 1.0),
+            (
+                "P".to_string(),
+                GeometricEntity::Point2D {
+                    name: "P".to_string(),
+                    x: Some(2.0),
+                    y: None,
+                },
+            ),
+            line("diag", "A", "B"),
+        ],
+        vec![C::Distance("P".into(), "diag".into(), 2.0_f64.sqrt())],
+    )
+    .solve()
+    .unwrap();
+    let y = solved["P"][1];
+    assert!(y.abs() < 1e-6 || (y - 4.0).abs() < 1e-6, "y = {y}");
+
+    // Two lines (not supported) and a dimension mismatch are errors.
+    let two_lines = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("Y", 0.0, 1.0, 0.0),
+            line3("l1", "O", "X"),
+            line3("l2", "O", "Y"),
+        ],
+        vec![C::Distance("l1".into(), "l2".into(), 1.0)],
+    )
+    .solve();
+    assert!(two_lines.is_err());
+    let mismatch = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            line3("axis", "O", "X"),
+            fixed("P", 1.0, 1.0),
+        ],
+        vec![C::Distance("P".into(), "axis".into(), 1.0)],
+    )
+    .solve();
+    assert!(mismatch.is_err());
+}

@@ -592,6 +592,16 @@ impl GeometricConstraintSolver {
         for constraint in &self.constraints {
             match constraint {
                 GeometricConstraint::Distance(p1_name, p2_name, target_dist) => {
+                    // Only point-to-point distances place a point (a point-line distance does not).
+                    let is_point = |n: &String| {
+                        matches!(
+                            self.entities.get(n),
+                            Some(GeometricEntity::Point2D { .. } | GeometricEntity::Point3D { .. })
+                        )
+                    };
+                    if !(is_point(p1_name) && is_point(p2_name)) {
+                        continue;
+                    }
                     if let (Some(p1), None) = (
                         solved_coords.get(p1_name).cloned(),
                         solved_coords.get(p2_name),
@@ -707,6 +717,44 @@ impl GeometricConstraintSolver {
                 Ok(pa.iter().zip(&pb).map(|(u, v)| u - v).collect())
             }
             GeometricConstraint::Distance(a, b, d) => {
+                // A point and a line (2-D or 3-D): the distance from the point to the infinite
+                // line, |(P - A) - ((P - A) . u) u| with u the unit direction of the line.
+                let line_ends = |name: &str| match self.entities.get(name) {
+                    Some(
+                        GeometricEntity::Line2D { p1, p2, .. }
+                        | GeometricEntity::Line3D { p1, p2, .. },
+                    ) => Some((p1.clone(), p2.clone())),
+                    _ => None,
+                };
+                let (point_name, ends) = match (line_ends(a), line_ends(b)) {
+                    (None, Some(e)) => (Some(a), Some(e)),
+                    (Some(e), None) => (Some(b), Some(e)),
+                    (Some(_), Some(_)) => {
+                        return Err(fail(
+                            "the distance between two lines is not supported".into(),
+                        ));
+                    }
+                    (None, None) => (None, None),
+                };
+                if let (Some(point_name), Some((e1, e2))) = (point_name, ends) {
+                    let (pt, l1, l2) = (point_any(point_name)?, point_any(&e1)?, point_any(&e2)?);
+                    if pt.len() != l1.len() || l1.len() != l2.len() {
+                        return Err(fail(format!(
+                            "`{point_name}` and the line must have the same dimension"
+                        )));
+                    }
+                    let dir: Vec<f64> = l1.iter().zip(l2).map(|(u, v)| v - u).collect();
+                    let len = dir.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-12);
+                    let rel: Vec<f64> = pt.iter().zip(l1).map(|(u, v)| u - v).collect();
+                    let along = rel.iter().zip(&dir).map(|(r, u)| r * u).sum::<f64>() / len;
+                    let perp: f64 = rel
+                        .iter()
+                        .zip(&dir)
+                        .map(|(r, u)| (r - along * u / len).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    return Ok(vec![perp - d]);
+                }
                 let (pa, pb) = same_dimension(a, b)?;
                 let dist = pa
                     .iter()

@@ -23,9 +23,10 @@
 //! **What is, and is not, established.** At each sampled `n` the telescoping identity is verified
 //! exactly (a polynomial identity in `k` over the rationals). The polynomials `c_i(n)` are
 //! interpolated from these samples; requiring more samples than unknowns makes the fit
-//! over-determined, but the recurrence is *proved* only at the sampled `n`, not for all `n`
-//! (that needs the system solved over `Q(n)`, which this module does not do). Tests check the
-//! recurrence against brute-force sums at `n` well beyond the samples.
+//! over-determined, but the recurrence is *proved* only at the sampled `n`. For a proof for all
+//! `n` see [`crate::zeilberger_proof`], which rebuilds the certificate as a rational function of
+//! `n` and checks the telescoping identity symbolically. Tests also check the recurrence against
+//! brute-force sums at `n` well beyond the samples.
 
 use crate::gosper::{QPoly, gosper_normal_form};
 use crate::guess::{Recurrence, null_space};
@@ -59,6 +60,37 @@ pub fn telescoping_at(
     n: i64,
     order: usize,
 ) -> Result<Vec<Vec<BigRational>>, String> {
+    let full = telescoping_full(term, n, order)?;
+    // Project onto the c part, keeping an independent set of non-zero vectors.
+    let basis: Vec<Vec<BigRational>> = full
+        .solutions
+        .iter()
+        .filter(|(c_part, _)| c_part.iter().any(|x| !x.is_zero()))
+        .map(|(c_part, _)| c_part.clone())
+        .collect();
+    // Reduce to a row-echelon basis of the span.
+    Ok(null_space_of_rowspace(&basis, order + 1))
+}
+
+/// The solutions of the telescoping system at one `n`, with the data needed to rebuild the
+/// certificate: `sum_i c_i F(n+i, k) = G(k+1) - G(k)` with `G = F * R` and
+/// `R(k) = b(k-1) x(k) / (c(k) bp(k))`.
+pub(crate) struct TelescopingSolutions {
+    /// Basis of the solution space: `(c_0..c_order, x(k))`.
+    pub solutions: Vec<(Vec<BigRational>, QPoly)>,
+    /// `b(k - 1)` of the Gosper normal form.
+    pub b_prev: QPoly,
+    /// The `c(k)` of the Gosper normal form.
+    pub normal_c: QPoly,
+    /// The common denominator `bp(k)` with `F(n+i, k) = F(n, k) N_i(k) / bp(k)`.
+    pub bp: QPoly,
+}
+
+pub(crate) fn telescoping_full(
+    term: &HypergeometricTerm,
+    n: i64,
+    order: usize,
+) -> Result<TelescopingSolutions, String> {
     let nq = rat(n);
     let (p, q) = (term.ratio_k)(&nq);
     // Shift ratios F(n+j+1, k) / F(n+j, k) = A_j / B_j for j < order.
@@ -115,18 +147,21 @@ pub fn telescoping_at(
         .map(|m| (0..unknowns).map(|j| columns[j][m].clone()).collect())
         .collect();
     let null = null_space(matrix, unknowns);
-    // Project onto the c part, keeping an independent set of non-zero vectors.
-    let mut basis: Vec<Vec<BigRational>> = Vec::new();
-    for v in null {
-        let c_part: Vec<BigRational> = v[degree_x + 1..].to_vec();
-        if c_part.iter().all(|x| x.is_zero()) {
-            continue;
-        }
-        basis.push(c_part);
-    }
-    // Reduce to a row-echelon basis of the span.
-    let reduced = null_space_of_rowspace(&basis, order + 1);
-    Ok(reduced)
+    let solutions = null
+        .into_iter()
+        .map(|v| {
+            (
+                v[degree_x + 1..].to_vec(),
+                QPoly::new(v[..=degree_x].to_vec()),
+            )
+        })
+        .collect();
+    Ok(TelescopingSolutions {
+        solutions,
+        b_prev,
+        normal_c: c,
+        bp,
+    })
 }
 
 /// An independent basis (reduced row echelon form) of the span of `vectors` in `Q^dim`.

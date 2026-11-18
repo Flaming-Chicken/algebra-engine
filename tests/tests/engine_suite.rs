@@ -8,6 +8,8 @@ mod analysis_tests;
 mod limits_series_audit_tests;
 #[path = "engine/solve_known_roots_tests.rs"]
 mod solve_known_roots_tests;
+#[path = "engine/zeilberger_proof_tests.rs"]
+mod zeilberger_proof_tests;
 
 #[path = "engine/branch_tests.rs"]
 mod branch_tests;

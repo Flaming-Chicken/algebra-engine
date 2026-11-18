@@ -44,6 +44,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Geometric constraint solver: a circle with no stated radius gets the radius solved from tangency.
 - FEA: quadratic tetrahedral elements (`Tet10`, `FeaMesh::box_3d_tet10`) for elasticity and heat conduction.
 - `CycloidalGear`: cycloidal spur gears with a closed, oriented solid (shared generator with the involute gear).
+- `InternalGear`: internal (ring) involute spur gears as closed solids.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

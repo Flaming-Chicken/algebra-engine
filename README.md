@@ -300,21 +300,18 @@ fn main() {
 All workspace integration and unit tests are centralized in the `tests/` directory:
 
 ```bash
-# Run all 740+ workspace unit, integration, and doc tests
+# Run all 890+ workspace unit, integration, and doc tests
 cargo test --workspace
 
-# Run specific integration suites
-cargo test --test notebook_suite    # GUI notepad, smart stream, plot bounds, sliders & inspector (100 tests)
-cargo test --test engine_suite      # Core symbolic engine & physics (281 tests)
-cargo test --test advanced_suite    # Category theory, proofs, CAD, IGA & quantum (50 tests)
-cargo test --test core_suite        # ExprGraph, intervals, numbers & formatters (31 tests)
-cargo test --test ecosystem_suite   # Python kernel, LSP & Jupyter integration (9 tests)
-cargo test --test cli_suite         # CLI and REPL tests (3 tests)
-cargo test --test facade_suite      # Umbrella facade & macro integration (11 tests)
-cargo test --test ffi_suite         # C ABI & foreign function interface (2 tests)
+# Run specific integration suites (counts as of 18 Nov 2026)
+cargo test --test notebook_suite    # GUI notepad, smart stream, plot bounds, sliders, exports & workspace routing (115 tests)
+cargo test --test engine_suite      # Symbolic engine, physics, CAD, FEA, summation & differential forms (484 tests, 1 ignored)
+cargo test --test advanced_suite    # Category theory, proofs, CAD, IGA & quantum (64 tests)
+cargo test --test core_suite        # ExprGraph, intervals, numbers & formatters (43 tests)
+cargo test --test ecosystem_suite   # Python kernel, LSP, Jupyter, CLI, C ABI & the umbrella facade and macros (36 tests)
 
 # Verify zero compiler warnings & zero clippy lints
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings   # CI uses --all-features; some lints only fire with it
 
 # Verify WebAssembly target compilation
 cargo check --target wasm32-unknown-unknown -p urae-wasm

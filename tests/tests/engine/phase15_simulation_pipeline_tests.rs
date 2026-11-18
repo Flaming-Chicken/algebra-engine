@@ -415,3 +415,97 @@ fn gear_boundary_groups_are_selected_by_geometry() {
         assert!(bore_nodes.iter().all(|i| !teeth_nodes.contains(i)));
     }
 }
+
+#[test]
+fn a_spring_is_meshed_as_a_solid_and_compresses_under_an_axial_load() {
+    use algebra_engine::cad::HelicalSpring;
+    use algebra_engine::pde::ElementType;
+    let spring = HelicalSpring::new(2.0, 16.0, 5.0, 2.0);
+    let cad = spring.generate_3d_mesh();
+    let fea = CadFeaBridge::spring_to_fea(&spring);
+
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    let rings = (cad.vertices.len() - 2) / 8;
+    assert_eq!(fea.nodes.len(), cad.vertices.len() + (rings - 2));
+    for (n, v) in fea.nodes.iter().zip(&cad.vertices) {
+        assert_eq!(n.as_slice(), v.as_slice());
+    }
+    // 8 fan triangles per ring step.
+    assert_eq!(fea.elements.len(), 8 * (rings - 1) * 3);
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    // The tetrahedra fill the wire: about pi r^2 times the wire length, and close to the closed
+    // mesh's own volume (the prisms between rings are slightly warped, so not exact).
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.03 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u));
+    assert_eq!(fea.boundary_groups["spring_bottom"].len(), 9);
+    assert_eq!(fea.boundary_groups["spring_top"].len(), 9);
+
+    // Axial compression: bottom end clamped, load on the top end along -z.
+    let (e_mod, nu, load) = (200_000.0, 0.3, 10.0);
+    let analyse = |force: f64| {
+        let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+        pipeline.fea_mesh = fea.clone();
+        pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: e_mod,
+            poissons_ratio: nu,
+            density: 7850.0,
+            body_force: vec![0.0, 0.0, 0.0],
+            plane_stress: false,
+        });
+        for dof in 0..3 {
+            pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+                group_name: "spring_bottom".into(),
+                dof_index: dof,
+                value: 0.0,
+            });
+        }
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+            group_name: "spring_top".into(),
+            force_vector: vec![0.0, 0.0, -force],
+        });
+        pipeline.run_analysis().expect("spring analysis")
+    };
+    let result = analyse(load);
+    let top = &result.fea_mesh.boundary_groups["spring_top"];
+    let deflection = -top
+        .iter()
+        .map(|&n| result.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / top.len() as f64;
+    assert!(deflection > 0.0, "the spring shortens under compression");
+    // Linear elasticity: doubling the load doubles the deflection.
+    let double = analyse(2.0 * load);
+    let top2 = -top
+        .iter()
+        .map(|&n| double.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / top.len() as f64;
+    assert!((top2 / deflection - 2.0).abs() < 1e-6);
+    // The clamp carries the whole load.
+    let bottom = &result.fea_mesh.boundary_groups["spring_bottom"];
+    let reaction: f64 = bottom
+        .iter()
+        .map(|&n| result.solution.reaction_forces[n * 3 + 2])
+        .sum();
+    assert!((reaction - load).abs() < 1e-5 * load, "reaction {reaction}");
+
+    // Stiffness against the coil formula k = G d^4 / (8 D^3 n). Linear tetrahedra over a wire only
+    // 8 elements around are much too stiff in bending/torsion, so the model is an upper bound; we
+    // require the right order of magnitude, never softer than the formula.
+    let g = e_mod / (2.0 * (1.0 + nu));
+    let k_formula = g * spring.wire_diameter.powi(4)
+        / (8.0 * spring.mean_diameter.powi(3) * spring.active_coils);
+    let ratio = (load / deflection) / k_formula;
+    assert!(ratio > 0.8 && ratio < 10.0, "stiffness ratio {ratio}");
+}

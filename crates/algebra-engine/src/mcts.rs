@@ -215,7 +215,37 @@ pub struct MctsPolicyHead;
 
 impl MctsPolicyHead {
     /// Generate candidate actions and their normalized prior probabilities $\pi(a \mid E)$.
+    ///
+    /// The logits are the fixed rule-based heuristic; see [`MctsPolicyHead::compute_policy_with`]
+    /// for the trainable policy that starts from the same logits.
     pub fn compute_policy(
+        graph: &ExprGraph,
+        expr_id: ExprId,
+        lemma_registry: Option<&LemmaRegistry>,
+    ) -> Vec<(MctsAction, f64)> {
+        Self::softmax(Self::heuristic_logits(graph, expr_id, lemma_registry))
+    }
+
+    /// Candidate actions for `expr_id` scored by the learned `model` and normalised.
+    pub fn compute_policy_with(
+        model: &LearnedPolicy,
+        graph: &ExprGraph,
+        expr_id: ExprId,
+        lemma_registry: Option<&LemmaRegistry>,
+    ) -> Vec<(MctsAction, f64)> {
+        let phi = PolicyFeatures::of(graph, expr_id);
+        let logits = Self::heuristic_logits(graph, expr_id, lemma_registry)
+            .into_iter()
+            .map(|(a, _)| {
+                let l = model.logit(&a, &phi);
+                (a, l)
+            })
+            .collect();
+        Self::softmax(logits)
+    }
+
+    /// The applicable candidate actions with the heuristic logit of each.
+    fn heuristic_logits(
         graph: &ExprGraph,
         expr_id: ExprId,
         lemma_registry: Option<&LemmaRegistry>,
@@ -277,7 +307,11 @@ impl MctsPolicyHead {
             }
         }
 
-        // Softmax normalization over action logits
+        candidates
+    }
+
+    /// Softmax normalisation over action logits.
+    fn softmax(candidates: Vec<(MctsAction, f64)>) -> Vec<(MctsAction, f64)> {
         let max_logit = candidates
             .iter()
             .map(|(_, l)| *l)
@@ -294,6 +328,172 @@ impl MctsPolicyHead {
         exps.into_iter()
             .map(|(a, e)| (a, if exp_sum > 0.0 { e / exp_sum } else { 0.0 }))
             .collect()
+    }
+}
+
+/// Features of an expression that the learned policy scores actions from.
+pub struct PolicyFeatures;
+
+impl PolicyFeatures {
+    /// Number of features.
+    pub const DIM: usize = 8;
+
+    /// `[1, commutative ring, non-commutative ring, trigonometric, division or rational constant,
+    /// fractional terms, log(1 + complexity) / 5, min(symbols, 3) / 3]`.
+    pub fn of(graph: &ExprGraph, expr_id: ExprId) -> Vec<f64> {
+        let features = DomainFeatureDetector::scan(graph, expr_id);
+        let mut has_div = false;
+        let mut stack = vec![expr_id];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(curr) = stack.pop() {
+            if !visited.insert(curr) {
+                continue;
+            }
+            let node = graph.get(curr);
+            if matches!(
+                node.kind,
+                ExprKind::Div(_, _) | ExprKind::Number(algebra_core::Number::Rational(_, _))
+            ) {
+                has_div = true;
+                break;
+            }
+            stack.extend(node.children());
+        }
+        let flag = |b: bool| if b { 1.0 } else { 0.0 };
+        let complexity = MctsValueHead::compute_complexity(graph, expr_id) as f64;
+        let symbols = ProbabilisticVerifier::extract_symbols(graph, expr_id).len() as f64;
+        vec![
+            1.0,
+            flag(features.is_commutative_ring),
+            flag(features.is_non_commutative_ring),
+            flag(features.has_trigonometric),
+            flag(has_div),
+            flag(features.has_fractional_terms),
+            (1.0 + complexity).ln() / 5.0,
+            symbols.min(3.0) / 3.0,
+        ]
+    }
+}
+
+/// A trainable linear policy: the logit of an action is `w_kind . phi(E)` with one weight vector
+/// per kind of action (`Expand`, `Together`, ..., every `Collect(_)` sharing one).
+///
+/// Which actions are *applicable* is still decided by the rules of the policy head; the model
+/// only scores them. [`LearnedPolicy::from_heuristic`] starts from weights that reproduce the
+/// heuristic logits exactly (a bias per kind), and [`LearnedPolicy::update`] moves them towards a
+/// target distribution by a cross-entropy gradient step, so the model can be trained from the
+/// engine's own search statistics ([`MctsSearchEngine::train_policy`]) without any external
+/// weights. No pretrained weights are shipped.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LearnedPolicy {
+    weights: std::collections::BTreeMap<String, Vec<f64>>,
+}
+
+impl LearnedPolicy {
+    /// The name of the weight vector used for `action`.
+    pub fn kind(action: &MctsAction) -> &'static str {
+        match action {
+            MctsAction::Expand => "Expand",
+            MctsAction::Together => "Together",
+            MctsAction::Cancel => "Cancel",
+            MctsAction::Collect(_) => "Collect",
+            MctsAction::FoldConstants => "FoldConstants",
+            MctsAction::TrigReduction => "TrigReduction",
+            MctsAction::GrobnerReduce => "GrobnerReduce",
+            MctsAction::ApplyLemma(_) => "ApplyLemma",
+        }
+    }
+
+    /// Weights equal to the heuristic logits of [`MctsPolicyHead::compute_policy`].
+    pub fn from_heuristic() -> Self {
+        let bias = [
+            ("Expand", 2.5),
+            ("Together", 3.0),
+            ("Cancel", 3.5),
+            ("Collect", 2.0),
+            ("FoldConstants", 1.0),
+            ("TrigReduction", 4.0),
+            ("GrobnerReduce", 2.0),
+            ("ApplyLemma", 2.2),
+        ];
+        let weights = bias
+            .iter()
+            .map(|&(k, b)| {
+                let mut w = vec![0.0; PolicyFeatures::DIM];
+                w[0] = b;
+                (k.to_string(), w)
+            })
+            .collect();
+        Self { weights }
+    }
+
+    /// The logit of `action` for the feature vector `phi`.
+    pub fn logit(&self, action: &MctsAction, phi: &[f64]) -> f64 {
+        self.weights
+            .get(Self::kind(action))
+            .map(|w| w.iter().zip(phi).map(|(a, b)| a * b).sum())
+            .unwrap_or(0.0)
+    }
+
+    /// One gradient step on the cross-entropy between `target` (a distribution over `actions`)
+    /// and the model's softmax over the same actions. Returns the loss before the step.
+    pub fn update(&mut self, phi: &[f64], actions: &[MctsAction], target: &[f64], lr: f64) -> f64 {
+        let logits: Vec<f64> = actions.iter().map(|a| self.logit(a, phi)).collect();
+        let max = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let exps: Vec<f64> = logits.iter().map(|l| (l - max).exp()).collect();
+        let total: f64 = exps.iter().sum();
+        let p: Vec<f64> = exps.iter().map(|e| e / total).collect();
+        let loss: f64 = p
+            .iter()
+            .zip(target)
+            .filter(|(_, q)| **q > 0.0)
+            .map(|(p, q)| -q * p.max(1e-12).ln())
+            .sum();
+        for (i, action) in actions.iter().enumerate() {
+            let gradient = p[i] - target[i];
+            let w = self
+                .weights
+                .entry(Self::kind(action).to_string())
+                .or_insert_with(|| vec![0.0; PolicyFeatures::DIM]);
+            for (wj, fj) in w.iter_mut().zip(phi) {
+                *wj -= lr * gradient * fj;
+            }
+        }
+        loss
+    }
+
+    /// Serialise the weights as JSON (`{"Expand": ["2.5", "0", ...], ...}`). Each weight is written
+    /// as the shortest decimal string that parses back to the same `f64`, so a round trip is
+    /// bit-exact (JSON numbers do not guarantee that).
+    pub fn to_json(&self) -> String {
+        let as_text: std::collections::BTreeMap<&String, Vec<String>> = self
+            .weights
+            .iter()
+            .map(|(k, w)| (k, w.iter().map(|x| x.to_string()).collect()))
+            .collect();
+        serde_json::to_string_pretty(&as_text).unwrap_or_default()
+    }
+
+    /// Load weights written by [`LearnedPolicy::to_json`].
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let raw: std::collections::BTreeMap<String, Vec<String>> =
+            serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let mut weights = std::collections::BTreeMap::new();
+        for (kind, values) in raw {
+            if values.len() != PolicyFeatures::DIM {
+                return Err(format!(
+                    "every weight vector needs {} entries",
+                    PolicyFeatures::DIM
+                ));
+            }
+            let parsed: Result<Vec<f64>, _> = values.iter().map(|v| v.parse::<f64>()).collect();
+            let parsed = parsed.map_err(|e| format!("bad weight for {kind}: {e}"))?;
+            if parsed.iter().any(|x| !x.is_finite()) {
+                return Err(format!("non-finite weight for {kind}"));
+            }
+            weights.insert(kind, parsed);
+        }
+        Ok(Self { weights })
     }
 }
 
@@ -361,6 +561,7 @@ pub struct MctsSearchEngine {
     config: MctsConfig,
     value_head: MctsValueHead,
     lemma_registry: Option<LemmaRegistry>,
+    policy: Option<LearnedPolicy>,
 }
 
 impl MctsSearchEngine {
@@ -374,7 +575,86 @@ impl MctsSearchEngine {
             config,
             value_head,
             lemma_registry,
+            policy: None,
         }
+    }
+
+    /// Use the learned `policy` for the priors and the rollouts instead of the fixed heuristic.
+    pub fn with_policy(mut self, policy: LearnedPolicy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    /// The learned policy in use, if any.
+    pub fn policy(&self) -> Option<&LearnedPolicy> {
+        self.policy.as_ref()
+    }
+
+    /// The prior over the applicable actions: learned if a policy is set, heuristic otherwise.
+    fn policy_for(&self, graph: &ExprGraph, expr_id: ExprId) -> Vec<(MctsAction, f64)> {
+        match &self.policy {
+            Some(model) => MctsPolicyHead::compute_policy_with(
+                model,
+                graph,
+                expr_id,
+                self.lemma_registry.as_ref(),
+            ),
+            None => MctsPolicyHead::compute_policy(graph, expr_id, self.lemma_registry.as_ref()),
+        }
+    }
+
+    /// Train the policy from the engine's own searches (expert iteration without a pretrained
+    /// model): for each root, search with the current policy and move the policy towards the
+    /// distribution of root visit counts (the search's improved policy), by `epochs` passes of
+    /// cross-entropy gradient steps with learning rate `lr`. Starts from the heuristic weights if
+    /// no policy is set. Returns the mean loss of the last epoch (zero if no root produced a
+    /// visited action).
+    pub fn train_policy(
+        &mut self,
+        graph: &ExprGraph,
+        roots: &[ExprId],
+        epochs: usize,
+        lr: f64,
+    ) -> f64 {
+        let mut model = self
+            .policy
+            .clone()
+            .unwrap_or_else(LearnedPolicy::from_heuristic);
+        let mut last_loss = 0.0;
+        for _ in 0..epochs {
+            let mut total = 0.0;
+            let mut count = 0usize;
+            self.policy = Some(model.clone());
+            for &root in roots {
+                let (_, visits) = self.search_with_root_stats(graph, root, None);
+                let sum: u32 = visits.iter().map(|(_, v)| *v).sum();
+                if sum == 0 {
+                    continue;
+                }
+                let actions: Vec<MctsAction> = self
+                    .policy_for(graph, root)
+                    .into_iter()
+                    .map(|(a, _)| a)
+                    .collect();
+                let target: Vec<f64> = actions
+                    .iter()
+                    .map(|a| {
+                        visits
+                            .iter()
+                            .find(|(b, _)| b == a)
+                            .map_or(0.0, |(_, v)| *v as f64 / sum as f64)
+                    })
+                    .collect();
+                let phi = PolicyFeatures::of(graph, root);
+                total += model.update(&phi, &actions, &target, lr);
+                count += 1;
+            }
+            if count > 0 {
+                last_loss = total / count as f64;
+            }
+        }
+        self.policy = Some(model);
+        last_loss
     }
 
     /// Apply an algebraic action to transform an expression into a successor.
@@ -531,7 +811,7 @@ impl MctsSearchEngine {
                 }
             }
 
-            let policy = MctsPolicyHead::compute_policy(graph, curr, self.lemma_registry.as_ref());
+            let policy = self.policy_for(graph, curr);
             if policy.is_empty() {
                 break;
             }
@@ -565,8 +845,17 @@ impl MctsSearchEngine {
         root_expr: ExprId,
         target: Option<ExprId>,
     ) -> MctsSearchResult {
-        let initial_policy =
-            MctsPolicyHead::compute_policy(graph, root_expr, self.lemma_registry.as_ref());
+        self.search_with_root_stats(graph, root_expr, target).0
+    }
+
+    /// [`MctsSearchEngine::search`] that also returns the visit count of every root action.
+    pub fn search_with_root_stats(
+        &self,
+        graph: &ExprGraph,
+        root_expr: ExprId,
+        target: Option<ExprId>,
+    ) -> (MctsSearchResult, Vec<(MctsAction, u32)>) {
+        let initial_policy = self.policy_for(graph, root_expr);
         let root_actions: Vec<MctsAction> = initial_policy.into_iter().map(|(a, _)| a).collect();
 
         let mut nodes = vec![MctsNode::new(root_expr, None, 1.0, 0, root_actions)];
@@ -600,11 +889,7 @@ impl MctsSearchEngine {
                     let parent_expr = nodes[curr_idx].expr_id;
 
                     if let Some(next_expr) = self.apply_action(graph, parent_expr, &action) {
-                        let child_policy = MctsPolicyHead::compute_policy(
-                            graph,
-                            next_expr,
-                            self.lemma_registry.as_ref(),
-                        );
+                        let child_policy = self.policy_for(graph, next_expr);
                         let mut child_actions = Vec::new();
                         let mut prior_prob = 0.5;
 
@@ -688,14 +973,22 @@ impl MctsSearchEngine {
             }
         }
 
-        MctsSearchResult {
-            root_expr: root_expr.index(),
-            best_expr: best_expr.index(),
-            trajectory,
-            best_value,
-            iterations: self.config.max_iterations,
-            is_target_reached: target_reached,
-        }
+        let root_visits: Vec<(MctsAction, u32)> = nodes[0]
+            .children
+            .iter()
+            .map(|(a, c)| (a.clone(), nodes[*c].visits))
+            .collect();
+        (
+            MctsSearchResult {
+                root_expr: root_expr.index(),
+                best_expr: best_expr.index(),
+                trajectory,
+                best_value,
+                iterations: self.config.max_iterations,
+                is_target_reached: target_reached,
+            },
+            root_visits,
+        )
     }
 
     /// Stream generated proof trajectories into `spodeian-lake` Parquet / JSON for MLOps re-training.

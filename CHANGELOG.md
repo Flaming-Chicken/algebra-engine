@@ -46,6 +46,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Cartan operation `HodgeStarMetric`: Hodge star for a diagonal metric given as expressions.
 - `SymbolicForm::hodge_star_metric`: Hodge star for a general symmetric metric with symbolic entries.
 - Cartan operation `HodgeStarMatrix`: Hodge star for a general symmetric metric matrix given as expressions.
+- `mcts::{LearnedPolicy, PolicyFeatures}`, `MctsPolicyHead::compute_policy_with`, `MctsSearchEngine::{with_policy, train_policy, search_with_root_stats}`: a trainable linear policy that starts equal to the heuristic and is trained from the engine's own search statistics; JSON persistence.
 - `zeilberger_proof::{prove_recurrence, check_certificate, Poly2, SymbolicTerm}`: proves a Zeilberger recurrence for all `n` by rebuilding the certificate as a rational function of `n` and checking the telescoping identity symbolically.
 - `zeilberger::{zeilberger, telescoping_at}`: creative telescoping by specialisation and interpolation (recurrences for binomial, squared-binomial and Delannoy sums, verified beyond the fitted range; not an all-n proof).
 - Fixed: the hard-coded Zeilberger certificates for the binomial and Vandermonde sums were wrong (sign; plus an extra factor for Vandermonde); a vacuous test (`valid || order == 1`) had hidden it. Both are now verified exactly.

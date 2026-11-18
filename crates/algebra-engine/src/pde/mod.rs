@@ -12,7 +12,8 @@ pub mod reduction;
 pub mod symbolic;
 
 pub use fea::{
-    ElementType, FeaBoundaryCondition, FeaEngine, FeaMesh, FeaSolution, PhysicsDiscipline,
+    CsrMatrix, ElementType, FeaBoundaryCondition, FeaEngine, FeaMesh, FeaSolution,
+    PhysicsDiscipline, SparseAssembly,
 };
 pub use numerical::{BoundaryCondition, NumericalPdeSolver, PdeGridSolution};
 pub use reduction::PdeTravelingWaveReduction;

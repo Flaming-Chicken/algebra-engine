@@ -359,6 +359,34 @@ pub enum CartanOpKind {
         vector_field: Vec<f64>,
         dim: usize,
     },
+    /// Interior product with a vector field whose components are expressions in the coordinates
+    /// (`x`, `y`, `z`, `t`), such as `["y", "-x", "0"]`; the form may have symbolic coefficients.
+    InteriorProductSymbolic {
+        form_str: String,
+        vector_field: Vec<String>,
+        dim: usize,
+    },
+    /// Lie derivative along a vector field with expression components (see
+    /// [`CartanOpKind::InteriorProductSymbolic`]).
+    LieDerivativeSymbolic {
+        form_str: String,
+        vector_field: Vec<String>,
+        dim: usize,
+    },
+    /// Hodge star for a diagonal metric whose entries are expressions in the coordinates
+    /// (`x`, `y`, `z`, `t`), such as `["1", "x^2", "x^2 * sin(y)^2"]` for spherical coordinates.
+    HodgeStarMetric {
+        form_str: String,
+        metric: Vec<String>,
+        dim: usize,
+    },
+    /// Hodge star for a general symmetric metric given as a matrix of expressions in the
+    /// coordinates (up to four), e.g. `[["2", "1"], ["1", "2"]]`.
+    HodgeStarMatrix {
+        form_str: String,
+        metric: Vec<Vec<String>>,
+        dim: usize,
+    },
     HodgeStar {
         form_str: String,
         dim: usize,

@@ -241,3 +241,620 @@ fn constraints_on_unknown_or_wrong_kind_entities_are_errors() {
     );
     assert!(s.solve().is_err());
 }
+
+fn point3(name: &str, c: [Option<f64>; 3]) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Point3D {
+            name: name.to_string(),
+            coords: c,
+        },
+    )
+}
+
+fn dist3(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(u, v)| (u - v).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
+#[test]
+fn three_dimensional_points_are_solved_from_distances() {
+    // Apex D at distance 1.2 from three base points of a right triangle: D = (0.5, 0.5, +-h) with
+    // h^2 = 1.44 - 0.5.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(0.0), Some(0.0), Some(0.0)]),
+        point3("B", [Some(1.0), Some(0.0), Some(0.0)]),
+        point3("C", [Some(0.0), Some(1.0), Some(0.0)]),
+        point3("D", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    for base in ["A", "B", "C"] {
+        solver.add_constraint(C::Distance(base.into(), "D".into(), 1.2));
+    }
+    let solved = solver.solve().unwrap();
+    let d = &solved["D"];
+    assert_eq!(d.len(), 3);
+    for base in ["A", "B", "C"] {
+        assert!(
+            (dist3(&solved[base], d) - 1.2).abs() < 1e-8,
+            "distance to {base}"
+        );
+    }
+    let h = (1.44_f64 - 0.5).sqrt();
+    assert!(
+        (d[0] - 0.5).abs() < 1e-6 && (d[1] - 0.5).abs() < 1e-6,
+        "{d:?}"
+    );
+    assert!((d[2].abs() - h).abs() < 1e-6, "{d:?}");
+
+    // A chain with a 3-4-5 style spatial step: P at distance 3 from the origin, Q at distance 4
+    // from P and 5 from the origin, with P pinned to the x axis through two known coordinates.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("O", [Some(0.0), Some(0.0), Some(0.0)]),
+        point3("P", [None, Some(0.0), Some(0.0)]),
+        point3("Q", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Distance("O".into(), "P".into(), 3.0));
+    solver.add_constraint(C::Distance("P".into(), "Q".into(), 4.0));
+    solver.add_constraint(C::Distance("O".into(), "Q".into(), 5.0));
+    let solved = solver.solve().unwrap();
+    assert!((dist3(&solved["O"], &solved["P"]) - 3.0).abs() < 1e-8);
+    assert!((dist3(&solved["P"], &solved["Q"]) - 4.0).abs() < 1e-8);
+    assert!((dist3(&solved["O"], &solved["Q"]) - 5.0).abs() < 1e-8);
+    assert!((solved["P"][1]).abs() < 1e-12 && (solved["P"][2]).abs() < 1e-12);
+
+    // Coincidence in 3-D.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(1.0), Some(-2.0), Some(3.0)]),
+        point3("B", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Coincident("A".into(), "B".into()));
+    let solved = solver.solve().unwrap();
+    assert!(dist3(&solved["A"], &solved["B"]) < 1e-9);
+}
+
+#[test]
+fn three_dimensional_constraints_report_what_they_cannot_do() {
+    // Inconsistent distances in 3-D (triangle inequality violated) are an error.
+    let mut solver = GeometricConstraintSolver::new();
+    for (n, e) in [
+        point3("A", [Some(0.0); 3]),
+        point3("B", [Some(1.0), Some(0.0), Some(0.0)]),
+        point3("D", [None, None, None]),
+    ] {
+        solver.add_entity(n, e);
+    }
+    solver.add_constraint(C::Distance("A".into(), "D".into(), 0.2));
+    solver.add_constraint(C::Distance("B".into(), "D".into(), 0.2));
+    assert!(solver.solve().is_err());
+
+    // A 2-D point cannot be related to a 3-D point.
+    let mut solver = GeometricConstraintSolver::new();
+    let (n, e) = point3("A", [Some(0.0); 3]);
+    solver.add_entity(n, e);
+    let (n, e) = fixed("B", 1.0, 1.0);
+    solver.add_entity(n, e);
+    solver.add_constraint(C::Distance("A".into(), "B".into(), 1.0));
+    assert!(solver.solve().is_err());
+}
+
+fn circle(name: &str, center: &str, radius: Option<f64>) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Circle2D {
+            name: name.to_string(),
+            center: center.to_string(),
+            radius,
+        },
+    )
+}
+
+#[test]
+fn a_circle_radius_can_be_an_unknown() {
+    // Radius from tangency: a circle centred at (2, 1.5) tangent to the x-axis has radius 1.5.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 4.0, 0.0),
+            fixed("Ctr", 2.0, 1.5),
+            line("axis", "A", "B"),
+            circle("c", "Ctr", None),
+        ],
+        vec![C::Tangent("axis".into(), "c".into())],
+    )
+    .solve()
+    .unwrap();
+    assert!((solved["c"][0] - 1.5).abs() < 1e-8, "{:?}", solved["c"]);
+
+    // A circle tangent to two parallel lines y = 0 and y = 2 with its centre 3 from a fixed
+    // point on the x-axis: the radius is 1 and the centre is at height 1.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 5.0, 0.0),
+            fixed("E", 0.0, 2.0),
+            fixed("F", 5.0, 2.0),
+            free("Ctr"),
+            line("low", "A", "B"),
+            line("high", "E", "F"),
+            circle("c", "Ctr", None),
+        ],
+        vec![
+            C::Tangent("low".into(), "c".into()),
+            C::Tangent("high".into(), "c".into()),
+            C::Distance("A".into(), "Ctr".into(), 3.0_f64.hypot(1.0)),
+        ],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["c"][0] - 1.0).abs() < 1e-7,
+        "radius {:?}",
+        solved["c"]
+    );
+    let centre = &solved["Ctr"];
+    assert!((centre[1] - 1.0).abs() < 1e-7, "{centre:?}");
+    assert!((centre[0].hypot(centre[1]) - 10.0_f64.sqrt()).abs() < 1e-7);
+
+    // A tangent to something that is not a circle is still an error.
+    let bad = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 1.0, 0.0),
+            line("l", "A", "B"),
+        ],
+        vec![C::Tangent("l".into(), "A".into())],
+    )
+    .solve();
+    assert!(bad.is_err());
+}
+
+fn line3(name: &str, a: &str, b: &str) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Line3D {
+            name: name.to_string(),
+            p1: a.to_string(),
+            p2: b.to_string(),
+        },
+    )
+}
+
+#[test]
+fn lines_in_space_can_be_parallel_perpendicular_or_at_an_angle() {
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+
+    // Perpendicular: the line from O to P is perpendicular to the x axis at distance 2, in the
+    // plane z = 0: P = (0, +-2, 0).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [None, None, Some(0.0)]),
+            line3("axis", "O", "X"),
+            line3("ray", "O", "P"),
+        ],
+        vec![
+            C::Perpendicular("axis".into(), "ray".into()),
+            C::Distance("O".into(), "P".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert!(
+        p[0].abs() < 1e-7 && (p[1].abs() - 2.0).abs() < 1e-7 && p[2].abs() < 1e-12,
+        "{p:?}"
+    );
+
+    // Parallel with every coordinate unknown: Q = A +- 3 e_x (parallel to the x axis, 3 away).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("A", 1.0, 1.0, 1.0),
+            point3("Q", [None, None, None]),
+            line3("axis", "O", "X"),
+            line3("other", "A", "Q"),
+        ],
+        vec![
+            C::Parallel("axis".into(), "other".into()),
+            C::Distance("A".into(), "Q".into(), 3.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        (q[0] - 1.0).abs().max(0.0) > 2.9 && (q[0] - 1.0).abs() < 3.1,
+        "{q:?}"
+    );
+    assert!(
+        (q[1] - 1.0).abs() < 1e-6 && (q[2] - 1.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // Angle: 60 degrees between the x axis and the ray O -> P with |OP| = 2, P in the plane z = 0:
+    // P = (1, +-sqrt 3, 0).
+    let solved = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [None, None, Some(0.0)]),
+            line3("axis", "O", "X"),
+            line3("ray", "O", "P"),
+        ],
+        vec![
+            C::Angle("axis".into(), "ray".into(), std::f64::consts::FRAC_PI_3),
+            C::Distance("O".into(), "P".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert!(
+        (p[0] - 1.0).abs() < 1e-7 && (p[1].abs() - 3.0_f64.sqrt()).abs() < 1e-7,
+        "{p:?}"
+    );
+
+    // Parallel and perpendicular at once is inconsistent for a line of non-zero length (a
+    // zero-length line would satisfy both); mixing Line2D with Line3D is an error.
+    let contradiction = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("A", 0.0, 1.0, 0.0),
+            point3("B", [None, None, None]),
+            line3("l1", "O", "X"),
+            line3("l2", "A", "B"),
+        ],
+        vec![
+            C::Parallel("l1".into(), "l2".into()),
+            C::Perpendicular("l1".into(), "l2".into()),
+            C::Distance("A".into(), "B".into(), 1.0),
+        ],
+    )
+    .solve();
+    assert!(contradiction.is_err());
+    let mixed = solver3(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            fixed("a", 0.0, 0.0),
+            fixed("b", 1.0, 0.0),
+            line3("l3", "O", "X"),
+            line("l2", "a", "b"),
+        ],
+        vec![C::Parallel("l3".into(), "l2".into())],
+    )
+    .solve();
+    assert!(mixed.is_err());
+}
+
+/// A solver from entity and constraint lists (the 2-D tests' `solver` helper, reused for 3-D).
+fn solver3(
+    entities: Vec<(String, GeometricEntity)>,
+    constraints: Vec<C>,
+) -> GeometricConstraintSolver {
+    solver(entities, constraints)
+}
+
+#[test]
+fn a_point_can_be_at_a_given_distance_from_a_line() {
+    // 3-D: the point (3, y, 0) is 2 away from the x axis: y = +-2.
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+    let solved = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            point3("P", [Some(3.0), None, Some(0.0)]),
+            line3("axis", "O", "X"),
+        ],
+        vec![C::Distance("P".into(), "axis".into(), 2.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["P"][1].abs() - 2.0).abs() < 1e-7,
+        "{:?}",
+        solved["P"]
+    );
+    assert!(
+        !solved.contains_key("axis"),
+        "a line is not a point: {solved:?}"
+    );
+
+    // The argument order does not matter, and a distance of zero puts the point on the line:
+    // the line through (0,0,0) and (1,1,0) contains (2, 2, 0).
+    let solved = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("D", 1.0, 1.0, 0.0),
+            point3("Q", [None, Some(2.0), Some(0.0)]),
+            line3("diag", "O", "D"),
+        ],
+        vec![C::Distance("diag".into(), "Q".into(), 0.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!((solved["Q"][0] - 2.0).abs() < 1e-6, "{:?}", solved["Q"]);
+
+    // 2-D: the point (2, y) is sqrt 2 from the line y = x when |2 - y| = 2, i.e. y = 0 or 4.
+    let solved = solver(
+        vec![
+            fixed("A", 0.0, 0.0),
+            fixed("B", 1.0, 1.0),
+            (
+                "P".to_string(),
+                GeometricEntity::Point2D {
+                    name: "P".to_string(),
+                    x: Some(2.0),
+                    y: None,
+                },
+            ),
+            line("diag", "A", "B"),
+        ],
+        vec![C::Distance("P".into(), "diag".into(), 2.0_f64.sqrt())],
+    )
+    .solve()
+    .unwrap();
+    let y = solved["P"][1];
+    assert!(y.abs() < 1e-6 || (y - 4.0).abs() < 1e-6, "y = {y}");
+
+    // Two lines (not supported) and a dimension mismatch are errors.
+    let two_lines = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("Y", 0.0, 1.0, 0.0),
+            line3("l1", "O", "X"),
+            line3("l2", "O", "Y"),
+        ],
+        vec![C::Distance("l1".into(), "l2".into(), 1.0)],
+    )
+    .solve();
+    assert!(two_lines.is_err());
+    let mismatch = solver(
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            line3("axis", "O", "X"),
+            fixed("P", 1.0, 1.0),
+        ],
+        vec![C::Distance("P".into(), "axis".into(), 1.0)],
+    )
+    .solve();
+    assert!(mismatch.is_err());
+}
+
+fn plane3(name: &str, a: &str, b: &str, c: &str) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::Plane3D {
+            name: name.to_string(),
+            p1: a.to_string(),
+            p2: b.to_string(),
+            p3: c.to_string(),
+        },
+    )
+}
+
+#[test]
+fn planes_in_space_give_distances_and_parallel_perpendicular_constraints() {
+    let known = |n: &str, x: f64, y: f64, z: f64| point3(n, [Some(x), Some(y), Some(z)]);
+    let base = || {
+        vec![
+            known("O", 0.0, 0.0, 0.0),
+            known("X", 1.0, 0.0, 0.0),
+            known("Y", 0.0, 1.0, 0.0),
+            plane3("floor", "O", "X", "Y"),
+        ]
+    };
+
+    // Distance to the plane z = 0: the point (1, 2, z) is 3 away at z = +-3, and on the plane at 0.
+    let mut entities = base();
+    entities.push(point3("P", [Some(1.0), Some(2.0), None]));
+    let solved = solver(entities, vec![C::Distance("P".into(), "floor".into(), 3.0)])
+        .solve()
+        .unwrap();
+    assert!(
+        (solved["P"][2].abs() - 3.0).abs() < 1e-7,
+        "{:?}",
+        solved["P"]
+    );
+    assert!(!solved.contains_key("floor"));
+    let mut entities = base();
+    entities.push(point3("P", [Some(1.0), Some(1.0), None]));
+    let solved = solver(entities, vec![C::Distance("floor".into(), "P".into(), 0.0)])
+        .solve()
+        .unwrap();
+    assert!(solved["P"][2].abs() < 1e-7, "{:?}", solved["P"]);
+
+    // A line from O to Q parallel to the plane (Q on it, at distance 2 from O) has Q.z = 0.
+    let mut entities = base();
+    entities.push(point3("Q", [None, None, None]));
+    entities.push(line3("ray", "O", "Q"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Parallel("ray".into(), "floor".into()),
+            C::Distance("O".into(), "Q".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        q[2].abs() < 1e-6 && (q[0].hypot(q[1]) - 2.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // A line perpendicular to the plane is along its normal: Q = (0, 0, +-2).
+    let mut entities = base();
+    entities.push(point3("Q", [None, None, None]));
+    entities.push(line3("ray", "O", "Q"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Perpendicular("ray".into(), "floor".into()),
+            C::Distance("O".into(), "Q".into(), 2.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let q = &solved["Q"];
+    assert!(
+        q[0].abs() < 1e-6 && q[1].abs() < 1e-6 && (q[2].abs() - 2.0).abs() < 1e-6,
+        "{q:?}"
+    );
+
+    // A second plane (the wall) through O, X and a point W = (0, y, z): perpendicular to the floor
+    // it must contain the z direction, so with |OW| = 1 the point is W = (0, 0, +-1).
+    let mut entities = base();
+    entities.push(point3("W", [Some(0.0), None, None]));
+    entities.push(plane3("wall", "O", "X", "W"));
+    let solved = solver(
+        entities,
+        vec![
+            C::Perpendicular("floor".into(), "wall".into()),
+            C::Distance("O".into(), "W".into(), 1.0),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let w = &solved["W"];
+    assert!(
+        w[1].abs() < 1e-6 && (w[2].abs() - 1.0).abs() < 1e-6,
+        "{w:?}"
+    );
+
+    // Mixing a planar line with a plane, and the distance between two planes, are errors.
+    let mut entities = base();
+    entities.push(fixed("a", 0.0, 0.0));
+    entities.push(fixed("b", 1.0, 0.0));
+    entities.push(line("flat", "a", "b"));
+    assert!(
+        solver(entities, vec![C::Parallel("flat".into(), "floor".into())])
+            .solve()
+            .is_err()
+    );
+    let mut entities = base();
+    entities.push(known("Z", 0.0, 0.0, 1.0));
+    entities.push(plane3("other", "O", "X", "Z"));
+    assert!(
+        solver(
+            entities,
+            vec![C::Distance("floor".into(), "other".into(), 1.0)]
+        )
+        .solve()
+        .is_err()
+    );
+}
+
+fn point_nd(name: &str, coords: &[Option<f64>]) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::PointND {
+            name: name.to_string(),
+            coords: coords.to_vec(),
+        },
+    )
+}
+
+#[test]
+fn points_in_any_dimension_are_solved_from_distances() {
+    // 4-D: P is 2 from the origin and sqrt 3 from e1, e2, e3, so P = (1, 1, 1, +-1).
+    let origin = [Some(0.0); 4];
+    let unit = |i: usize| {
+        let mut c = [Some(0.0); 4];
+        c[i] = Some(1.0);
+        c
+    };
+    let solved = solver(
+        vec![
+            point_nd("O", &origin),
+            point_nd("E1", &unit(0)),
+            point_nd("E2", &unit(1)),
+            point_nd("E3", &unit(2)),
+            point_nd("P", &[None, None, None, None]),
+        ],
+        vec![
+            C::Distance("O".into(), "P".into(), 2.0),
+            C::Distance("E1".into(), "P".into(), 3.0_f64.sqrt()),
+            C::Distance("E2".into(), "P".into(), 3.0_f64.sqrt()),
+            C::Distance("E3".into(), "P".into(), 3.0_f64.sqrt()),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert_eq!(p.len(), 4);
+    assert!(
+        (p[0] - 1.0).abs() < 1e-6
+            && (p[1] - 1.0).abs() < 1e-6
+            && (p[2] - 1.0).abs() < 1e-6
+            && (p[3].abs() - 1.0).abs() < 1e-6,
+        "{p:?}"
+    );
+
+    // 1-D: B is 3 from A = 1, so B = 4 or -2; and coincidence in 5-D.
+    let solved = solver(
+        vec![point_nd("A", &[Some(1.0)]), point_nd("B", &[None])],
+        vec![C::Distance("A".into(), "B".into(), 3.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["B"][0] - 4.0).abs() < 1e-8 || (solved["B"][0] + 2.0).abs() < 1e-8,
+        "{:?}",
+        solved["B"]
+    );
+    let solved = solver(
+        vec![
+            point_nd(
+                "A",
+                &[Some(1.0), Some(-2.0), Some(3.0), Some(0.5), Some(7.0)],
+            ),
+            point_nd("B", &[None; 5]),
+        ],
+        vec![C::Coincident("A".into(), "B".into())],
+    )
+    .solve()
+    .unwrap();
+    assert_eq!(solved["B"], solved["A"]);
+
+    // Different dimensions cannot be related, and an inconsistent set is reported.
+    let mismatch = solver(
+        vec![
+            point_nd("A", &[Some(0.0); 4]),
+            point_nd("B", &[Some(0.0); 3]),
+        ],
+        vec![C::Distance("A".into(), "B".into(), 1.0)],
+    )
+    .solve();
+    assert!(mismatch.is_err());
+    let impossible = solver(
+        vec![
+            point_nd("A", &[Some(0.0); 4]),
+            point_nd("B", &[Some(1.0), Some(0.0), Some(0.0), Some(0.0)]),
+            point_nd("P", &[None; 4]),
+        ],
+        vec![
+            C::Distance("A".into(), "P".into(), 0.1),
+            C::Distance("B".into(), "P".into(), 0.1),
+        ],
+    )
+    .solve();
+    assert!(impossible.is_err());
+}

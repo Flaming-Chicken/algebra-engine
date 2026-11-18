@@ -7,14 +7,17 @@
 //! - **Cylindrical Algebraic Decomposition**: Decomposes $\mathbb{R}^n$ into a finite union of
 //!   connected, disjoint, sign-invariant semi-algebraic cells $\mathbb{R}^n = \bigcup_{i} C_i$
 //!   for a set of polynomials $\mathcal{F} = \{f_1, \dots, f_m\} \subset \mathbb{Q}[x_1, \dots, x_n]$.
-//! - **Projection Phase (Collins & McCallum)**:
-//!   Recursively projects polynomials $\mathcal{F}_k \subset \mathbb{Q}[x_1, \dots, x_k]$ to
-//!   $\mathcal{F}_{k-1} \subset \mathbb{Q}[x_1, \dots, x_{k-1}]$ using Principal Subresultant
-//!   Coefficients ($\operatorname{psc}$), Discriminants $\operatorname{disc}(f, x_k)$, and
-//!   Resultants $\operatorname{res}(f, g, x_k)$.
+//! - **Projection Phase (McCallum)**:
+//!   For one and two variables the projection is exact ([`projection`]): the leading coefficient,
+//!   the discriminant $\operatorname{disc}(f, y)$ of each polynomial and the resultant
+//!   $\operatorname{res}(f, g, y)$ of each pair, over $\mathbb{Q}[x]$. Three or more variables are
+//!   rejected with an error (the multivariate projection is not implemented), as are inputs with a
+//!   repeated or common factor in $y$ (their discriminant or resultant vanishes identically).
 //! - **Base & Lifting Phase**:
-//!   Isolates real roots of univariate projection polynomials via Sturm/VAS bisection, constructing
-//!   sample points for **Sections** ($x_k = \alpha$) and **Sectors** ($x_k \in (\alpha_i, \alpha_{i+1})$).
+//!   Real roots are isolated exactly with Sturm sequences; the base cells are cut at the roots of
+//!   the projection polynomials, and each fibre is decomposed at the real roots of the polynomials
+//!   restricted to a sample point (a tangency, which a sample only approximates, is detected through
+//!   the critical points of the fibre polynomial and merged into one root).
 //! - **Quantifier Elimination (Tarski-Seidenberg Decision Procedure)**:
 //!   Eliminates quantifiers $\forall, \exists$ over first-order real arithmetic formulas:
 //!   $$
@@ -31,10 +34,12 @@
 
 pub mod bvh;
 pub mod engineering;
+pub mod projection;
 
 pub use bvh::{BvhIntersection, BvhNode, BvhTree, Ray3D};
 pub use engineering::{
-    BoltHeadType, HelicalSpring, InvoluteGear, NacaAirfoil, ThreadStandard, ThreadedScrew,
+    BoltHeadType, CycloidalGear, HelicalSpring, InternalGear, InvoluteGear, NacaAirfoil,
+    ThreadStandard, ThreadedScrew,
 };
 
 use algebra_core::error::{AlgebraError, AlgebraResult};
@@ -231,6 +236,12 @@ impl CadEngine {
             ));
         }
 
+        if n > 2 {
+            return Err(AlgebraError::EvaluationError(format!(
+                "CAD with {n} variables is not supported: the exact projection phase is implemented \
+                 for one and two variables, and lifting without a projection is unsound"
+            )));
+        }
         // Recursive cylindrical construction starting from base 1D space
         Self::decompose_recursive(polys, vars, 0, &[], precision_eps)
     }
@@ -264,7 +275,8 @@ impl CadEngine {
         }
 
         // 1. Project polynomials to find univariate roots in current level variable x_{level}
-        let roots = Self::isolate_cross_section_roots(polys, level, current_sample, eps)?;
+        let roots =
+            Self::isolate_cross_section_roots(polys, vars.len(), level, current_sample, eps)?;
 
         // 2. Form interleaved Sections and Sectors along the coordinate line
         let mut sample_coords = Vec::new();
@@ -323,98 +335,115 @@ impl CadEngine {
         })
     }
 
-    /// Isolate sorted real roots of polynomials evaluated on current base sample.
+    /// Sorted, distinct real roots that cut the coordinate line of variable `var_idx` into cells.
+    ///
+    /// For the base variable of a two-variable decomposition these are the roots of the McCallum
+    /// projection (coefficients, discriminants and resultants, see [`projection`]); otherwise they
+    /// are the real roots of the polynomials restricted to the fibre over `base_sample`, found by
+    /// exact Sturm isolation. A tangency (a double root of a fibre polynomial, which a sample
+    /// point only approximates) is detected through the critical points of the fibre polynomial
+    /// and reported as a single root.
     fn isolate_cross_section_roots(
         polys: &[CadPolynomial],
+        n_vars: usize,
         var_idx: usize,
         base_sample: &[f64],
         eps: f64,
     ) -> AlgebraResult<Vec<f64>> {
-        let mut all_roots = Vec::new();
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        use num_traits::{Signed, ToPrimitive};
+        let exact = |c: f64| -> AlgebraResult<BigRational> {
+            BigRational::from_float(c).ok_or_else(|| {
+                AlgebraError::EvaluationError("CAD polynomials need finite coefficients".into())
+            })
+        };
+        let mut roots: Vec<f64> = Vec::new();
 
-        for p in polys {
-            // Substitute base coordinates to produce univariate polynomial in x_{var_idx}
-            let deg = p.degree_wrt(var_idx);
-            if deg == 0 {
-                continue;
-            }
-
-            // Extract univariate coefficients c_0, c_1, ..., c_d
-            let mut uni_coeffs = vec![0.0; deg + 1];
-            for (exp, &coeff) in &p.terms {
-                let e = exp.get(var_idx).copied().unwrap_or(0);
-                // Evaluate remaining variables
-                let mut term_val = coeff;
-                for (i, &other_e) in exp.iter().enumerate() {
-                    if i != var_idx && other_e > 0 {
-                        let xi = base_sample.get(i).copied().unwrap_or(0.0);
-                        term_val *= xi.powi(other_e as i32);
+        if n_vars == 2 && var_idx == 0 {
+            // Projection phase: the polynomials as polynomials in y (variable 1) over Q[x].
+            let mut bipolys = Vec::new();
+            for p in polys {
+                let mut coeffs: Vec<Vec<BigRational>> = Vec::new();
+                for (exp, &c) in &p.terms {
+                    let (ex, ey) = (
+                        exp.first().copied().unwrap_or(0),
+                        exp.get(1).copied().unwrap_or(0),
+                    );
+                    while coeffs.len() <= ey {
+                        coeffs.push(Vec::new());
                     }
+                    while coeffs[ey].len() <= ex {
+                        coeffs[ey].push(BigRational::from_integer(BigInt::from(0)));
+                    }
+                    coeffs[ey][ex] += exact(c)?;
                 }
-                uni_coeffs[e] += term_val;
+                bipolys.push(projection::BiPoly {
+                    coeffs: coeffs.into_iter().map(crate::gosper::QPoly::new).collect(),
+                });
             }
-
-            // Solve univariate roots
-            if deg == 1 && uni_coeffs[1].abs() > 1e-12 {
-                let r = -uni_coeffs[0] / uni_coeffs[1];
-                all_roots.push(r);
-            } else if deg == 2 && uni_coeffs[2].abs() > 1e-12 {
-                let a = uni_coeffs[2];
-                let b = uni_coeffs[1];
-                let c = uni_coeffs[0];
-                let disc = b * b - 4.0 * a * c;
-                if disc >= -1e-14 {
-                    let sqrt_d = disc.max(0.0).sqrt();
-                    all_roots.push((-b - sqrt_d) / (2.0 * a));
-                    all_roots.push((-b + sqrt_d) / (2.0 * a));
-                }
-            } else {
-                // Approximate bisection / Newton isolation
-                let samples: [f64; 9] = [-10.0, -5.0, -2.0, -1.0, 0.0, 1.0, 2.0, 5.0, 10.0];
-                for i in 0..samples.len() - 1 {
-                    let x0: f64 = samples[i];
-                    let x1: f64 = samples[i + 1];
-                    let v0: f64 = uni_coeffs
-                        .iter()
-                        .enumerate()
-                        .map(|(k, &c)| c * x0.powi(k as i32))
-                        .sum();
-                    let v1: f64 = uni_coeffs
-                        .iter()
-                        .enumerate()
-                        .map(|(k, &c)| c * x1.powi(k as i32))
-                        .sum();
-                    if v0 * v1 <= 0.0 {
-                        let mut lo: f64 = x0;
-                        let mut hi: f64 = x1;
-                        for _ in 0..40 {
-                            let mid: f64 = (lo + hi) / 2.0;
-                            let v_mid: f64 = uni_coeffs
-                                .iter()
-                                .enumerate()
-                                .map(|(k, &c)| c * mid.powi(k as i32))
-                                .sum();
-                            if v_mid.abs() < eps {
-                                lo = mid;
-                                break;
-                            }
-                            if v0 * v_mid <= 0.0 {
-                                hi = mid;
-                            } else {
-                                lo = mid;
+            let projected = projection::project(&bipolys)
+                .map_err(|e| AlgebraError::EvaluationError(format!("CAD projection: {e}")))?;
+            for p in projection::coprime_basis(&projected) {
+                roots.extend(projection::real_roots(&p).iter().filter_map(|r| r.to_f64()));
+            }
+        } else {
+            // Fibre over `base_sample` (empty for a single variable): substitute exactly.
+            for p in polys {
+                let mut coeffs: Vec<BigRational> = Vec::new();
+                for (exp, &c) in &p.terms {
+                    let mut term = exact(c)?;
+                    for (i, &e) in exp.iter().enumerate() {
+                        if i != var_idx && e > 0 {
+                            let xi = exact(base_sample.get(i).copied().unwrap_or(0.0))?;
+                            for _ in 0..e {
+                                term *= xi.clone();
                             }
                         }
-                        all_roots.push((lo + hi) / 2.0);
+                    }
+                    let e = exp.get(var_idx).copied().unwrap_or(0);
+                    while coeffs.len() <= e {
+                        coeffs.push(BigRational::from_integer(BigInt::from(0)));
+                    }
+                    coeffs[e] += term;
+                }
+                let q = crate::gosper::QPoly::new(coeffs);
+                if q.degree().is_none_or(|d| d == 0) {
+                    continue;
+                }
+                roots.extend(projection::real_roots(&q).iter().filter_map(|r| r.to_f64()));
+                // Tangencies: a critical point where the polynomial is (numerically) zero.
+                let dq = crate::gosper::QPoly::new(
+                    (1..=q.degree().unwrap_or(0))
+                        .map(|i| q.coeff(i) * BigRational::from_integer(BigInt::from(i as i64)))
+                        .collect(),
+                );
+                let scale = projection::scale_of(&q);
+                for yc in projection::real_roots(&dq) {
+                    let value = q.eval(&yc).abs().to_f64().unwrap_or(f64::INFINITY);
+                    if value <= 1e-9 * scale {
+                        if let Some(y) = yc.to_f64() {
+                            roots.push(y);
+                        }
                     }
                 }
             }
         }
 
-        // Sort and deduplicate roots
-        all_roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        all_roots.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-
-        Ok(all_roots)
+        // Sort, and merge roots closer than the tolerance (the same root found twice, or a
+        // tangency seen as two nearby roots).
+        roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let tolerance = eps.max(1e-7);
+        let mut merged: Vec<f64> = Vec::new();
+        for r in roots {
+            match merged.last_mut() {
+                Some(last) if (r - *last).abs() <= tolerance * (1.0 + last.abs()) => {
+                    *last = 0.5 * (*last + r);
+                }
+                _ => merged.push(r),
+            }
+        }
+        Ok(merged)
     }
 }
 
@@ -508,6 +537,21 @@ pub enum GeometricEntity {
         p1: String,
         p2: String,
     },
+    /// A plane through three 3-D points (given by entity name); used by the point-plane
+    /// distance and the line/plane parallel and perpendicular constraints.
+    Plane3D {
+        name: String,
+        p1: String,
+        p2: String,
+        p3: String,
+    },
+    /// A straight line through two 3-D points (given by entity name); used by the line
+    /// constraints (parallel, perpendicular, angle).
+    Line3D {
+        name: String,
+        p1: String,
+        p2: String,
+    },
     Circle2D {
         name: String,
         center: String,
@@ -516,6 +560,12 @@ pub enum GeometricEntity {
     Point3D {
         name: String,
         coords: [Option<f64>; 3],
+    },
+    /// A point in `R^n` (any `n >= 1`); unknown coordinates are `None`. Distance and
+    /// coincidence constraints work between points of the same dimension.
+    PointND {
+        name: String,
+        coords: Vec<Option<f64>>,
     },
     HyperSphereND {
         name: String,
@@ -574,6 +624,11 @@ impl GeometricConstraintSolver {
                 GeometricEntity::Point3D { coords, .. } if coords.iter().all(|c| c.is_some()) => {
                     solved_coords.insert(name.clone(), coords.iter().flatten().copied().collect());
                 }
+                GeometricEntity::PointND { coords, .. }
+                    if !coords.is_empty() && coords.iter().all(|c| c.is_some()) =>
+                {
+                    solved_coords.insert(name.clone(), coords.iter().flatten().copied().collect());
+                }
                 _ => {}
             }
         }
@@ -584,16 +639,34 @@ impl GeometricConstraintSolver {
         for constraint in &self.constraints {
             match constraint {
                 GeometricConstraint::Distance(p1_name, p2_name, target_dist) => {
+                    // Only point-to-point distances place a point (a point-line distance does not).
+                    let is_point = |n: &String| {
+                        matches!(
+                            self.entities.get(n),
+                            Some(
+                                GeometricEntity::Point2D { .. }
+                                    | GeometricEntity::Point3D { .. }
+                                    | GeometricEntity::PointND { .. }
+                            )
+                        )
+                    };
+                    if !(is_point(p1_name) && is_point(p2_name)) {
+                        continue;
+                    }
                     if let (Some(p1), None) = (
                         solved_coords.get(p1_name).cloned(),
                         solved_coords.get(p2_name),
                     ) {
-                        solved_coords.insert(p2_name.clone(), vec![p1[0] + target_dist, p1[1]]);
+                        let mut placed = p1.clone();
+                        placed[0] += target_dist;
+                        solved_coords.insert(p2_name.clone(), placed);
                     } else if let (None, Some(p2)) = (
                         solved_coords.get(p1_name),
                         solved_coords.get(p2_name).cloned(),
                     ) {
-                        solved_coords.insert(p1_name.clone(), vec![p2[0] - target_dist, p2[1]]);
+                        let mut placed = p2.clone();
+                        placed[0] -= target_dist;
+                        solved_coords.insert(p1_name.clone(), placed);
                     }
                 }
                 GeometricConstraint::Coincident(e1_name, e2_name) => {
@@ -616,14 +689,37 @@ impl GeometricConstraintSolver {
     fn residuals_2d(
         &self,
         constraint: &GeometricConstraint,
-        points: &HashMap<String, [f64; 2]>,
+        points: &HashMap<String, Vec<f64>>,
     ) -> AlgebraResult<Vec<f64>> {
         let fail = |why: String| AlgebraError::EvaluationError(format!("constraint solver: {why}"));
-        let point = |name: &str| -> AlgebraResult<[f64; 2]> {
+        // A point of any dimension (2-D or 3-D).
+        let point_any = |name: &str| -> AlgebraResult<&Vec<f64>> {
             points
                 .get(name)
-                .copied()
-                .ok_or_else(|| fail(format!("`{name}` is not a 2D point of this solver")))
+                .ok_or_else(|| fail(format!("`{name}` is not a point of this solver")))
+        };
+        // A planar point, for the line-based constraints.
+        let point = |name: &str| -> AlgebraResult<[f64; 2]> {
+            let v = point_any(name)?;
+            if v.len() == 2 {
+                Ok([v[0], v[1]])
+            } else {
+                Err(fail(format!(
+                    "`{name}` is a {}-D point; line constraints need 2-D points",
+                    v.len()
+                )))
+            }
+        };
+        let same_dimension = |a: &str, b: &str| -> AlgebraResult<(Vec<f64>, Vec<f64>)> {
+            let (pa, pb) = (point_any(a)?, point_any(b)?);
+            if pa.len() != pb.len() {
+                return Err(fail(format!(
+                    "`{a}` ({}-D) and `{b}` ({}-D) have different dimensions",
+                    pa.len(),
+                    pb.len()
+                )));
+            }
+            Ok((pa.clone(), pb.clone()))
         };
         // A line entity gives the direction p2 - p1; a point name is not a line.
         let line = |name: &str| -> AlgebraResult<([f64; 2], [f64; 2])> {
@@ -632,25 +728,215 @@ impl GeometricConstraintSolver {
                 _ => Err(fail(format!("`{name}` is not a Line2D"))),
             }
         };
+        // The direction p2 - p1 of a `Line3D` (both points must be 3-D); `None` for other entities.
+        let line3 = |name: &str| -> Option<AlgebraResult<[f64; 3]>> {
+            let Some(GeometricEntity::Line3D { p1, p2, .. }) = self.entities.get(name) else {
+                return None;
+            };
+            Some((|| {
+                let (a, b) = (point_any(p1)?, point_any(p2)?);
+                if a.len() != 3 || b.len() != 3 {
+                    return Err(fail(format!("`{name}` needs two 3-D points")));
+                }
+                Ok([b[0] - a[0], b[1] - a[1], b[2] - a[2]])
+            })())
+        };
+        // Both names are 3-D lines: their directions; one of them only: an error (no mixing).
+        let lines3 = |a: &str, b: &str| -> AlgebraResult<Option<([f64; 3], [f64; 3])>> {
+            match (line3(a), line3(b)) {
+                (Some(da), Some(db)) => Ok(Some((da?, db?))),
+                (None, None) => Ok(None),
+                _ => Err(fail(format!(
+                    "`{a}` and `{b}` must both be Line2D or both be Line3D"
+                ))),
+            }
+        };
+        // A `Plane3D`'s normal `(p2 - p1) x (p3 - p1)`; `None` for other entities.
+        let plane_normal = |name: &str| -> Option<AlgebraResult<[f64; 3]>> {
+            let Some(GeometricEntity::Plane3D { p1, p2, p3, .. }) = self.entities.get(name) else {
+                return None;
+            };
+            Some((|| {
+                let (a, b, c) = (point_any(p1)?, point_any(p2)?, point_any(p3)?);
+                if a.len() != 3 || b.len() != 3 || c.len() != 3 {
+                    return Err(fail(format!("`{name}` needs three 3-D points")));
+                }
+                let (u, v) = (
+                    [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+                    [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+                );
+                Ok([
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ])
+            })())
+        };
+        // Unit vector and kind (`true` = plane normal) of a spatial line or plane, if it is one.
+        let spatial = |name: &str| -> Option<AlgebraResult<(bool, [f64; 3])>> {
+            let unit = |v: [f64; 3]| {
+                let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-12);
+                [v[0] / n, v[1] / n, v[2] / n]
+            };
+            if let Some(d) = line3(name) {
+                return Some(d.map(|v| (false, unit(v))));
+            }
+            plane_normal(name).map(|n| n.map(|v| (true, unit(v))))
+        };
+        let cross3 = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let dot3 = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         let direction = |l: ([f64; 2], [f64; 2])| [l.1[0] - l.0[0], l.1[1] - l.0[1]];
         let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
         let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
         match constraint {
             GeometricConstraint::Coincident(a, b) => {
-                let (pa, pb) = (point(a)?, point(b)?);
-                Ok(vec![pa[0] - pb[0], pa[1] - pb[1]])
+                let (pa, pb) = same_dimension(a, b)?;
+                Ok(pa.iter().zip(&pb).map(|(u, v)| u - v).collect())
             }
             GeometricConstraint::Distance(a, b, d) => {
-                let (pa, pb) = (point(a)?, point(b)?);
-                Ok(vec![(pa[0] - pb[0]).hypot(pa[1] - pb[1]) - d])
+                // A point and a plane: |(P - A) . n| / |n| with n the plane's normal.
+                let plane_of = |name: &str| match self.entities.get(name) {
+                    Some(GeometricEntity::Plane3D { p1, .. }) => Some(p1.clone()),
+                    _ => None,
+                };
+                if plane_of(a).is_some() || plane_of(b).is_some() {
+                    let (point_name, plane_name) = if plane_of(b).is_some() {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    let Some(origin) = plane_of(plane_name) else {
+                        return Err(fail(
+                            "the distance between two planes is not supported".into(),
+                        ));
+                    };
+                    if plane_of(point_name).is_some() {
+                        return Err(fail(
+                            "the distance between two planes is not supported".into(),
+                        ));
+                    }
+                    let normal = plane_normal(plane_name)
+                        .ok_or_else(|| fail(format!("`{plane_name}` is not a plane")))??;
+                    let (pt, o) = (point_any(point_name)?, point_any(&origin)?);
+                    if pt.len() != 3 {
+                        return Err(fail(format!(
+                            "`{point_name}` must be a 3-D point to measure a distance to a plane"
+                        )));
+                    }
+                    let len =
+                        (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2])
+                            .sqrt()
+                            .max(1e-12);
+                    let signed = ((pt[0] - o[0]) * normal[0]
+                        + (pt[1] - o[1]) * normal[1]
+                        + (pt[2] - o[2]) * normal[2])
+                        / len;
+                    return Ok(vec![signed.abs() - d]);
+                }
+                // A point and a line (2-D or 3-D): the distance from the point to the infinite
+                // line, |(P - A) - ((P - A) . u) u| with u the unit direction of the line.
+                let line_ends = |name: &str| match self.entities.get(name) {
+                    Some(
+                        GeometricEntity::Line2D { p1, p2, .. }
+                        | GeometricEntity::Line3D { p1, p2, .. },
+                    ) => Some((p1.clone(), p2.clone())),
+                    _ => None,
+                };
+                let (point_name, ends) = match (line_ends(a), line_ends(b)) {
+                    (None, Some(e)) => (Some(a), Some(e)),
+                    (Some(e), None) => (Some(b), Some(e)),
+                    (Some(_), Some(_)) => {
+                        return Err(fail(
+                            "the distance between two lines is not supported".into(),
+                        ));
+                    }
+                    (None, None) => (None, None),
+                };
+                if let (Some(point_name), Some((e1, e2))) = (point_name, ends) {
+                    let (pt, l1, l2) = (point_any(point_name)?, point_any(&e1)?, point_any(&e2)?);
+                    if pt.len() != l1.len() || l1.len() != l2.len() {
+                        return Err(fail(format!(
+                            "`{point_name}` and the line must have the same dimension"
+                        )));
+                    }
+                    let dir: Vec<f64> = l1.iter().zip(l2).map(|(u, v)| v - u).collect();
+                    let len = dir.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-12);
+                    let rel: Vec<f64> = pt.iter().zip(l1).map(|(u, v)| u - v).collect();
+                    let along = rel.iter().zip(&dir).map(|(r, u)| r * u).sum::<f64>() / len;
+                    let perp: f64 = rel
+                        .iter()
+                        .zip(&dir)
+                        .map(|(r, u)| (r - along * u / len).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    return Ok(vec![perp - d]);
+                }
+                let (pa, pb) = same_dimension(a, b)?;
+                let dist = pa
+                    .iter()
+                    .zip(&pb)
+                    .map(|(u, v)| (u - v).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                Ok(vec![dist - d])
             }
             GeometricConstraint::Parallel(a, b) => {
+                if let (Some(sa), Some(sb)) = (spatial(a), spatial(b)) {
+                    let ((plane_a, va), (plane_b, vb)) = (sa?, sb?);
+                    // Same kind (line-line, plane-plane): the vectors are parallel. A line and a
+                    // plane: the line lies along the plane, so the direction is orthogonal to the
+                    // normal.
+                    return Ok(if plane_a == plane_b {
+                        cross3(va, vb).to_vec()
+                    } else {
+                        vec![dot3(va, vb)]
+                    });
+                }
+                if spatial(a).is_some() != spatial(b).is_some() {
+                    return Err(fail(format!(
+                        "`{a}` and `{b}` must both be planar (Line2D) or both spatial (Line3D/Plane3D)"
+                    )));
+                }
+                if let Some((da, db)) = lines3(a, b)? {
+                    // Parallel in space: the cross product of the directions vanishes.
+                    return Ok(cross3(da, db).to_vec());
+                }
                 Ok(vec![cross(direction(line(a)?), direction(line(b)?))])
             }
             GeometricConstraint::Perpendicular(a, b) => {
+                if let (Some(sa), Some(sb)) = (spatial(a), spatial(b)) {
+                    let ((plane_a, va), (plane_b, vb)) = (sa?, sb?);
+                    // Line-line and plane-plane: the vectors are orthogonal. A line and a plane:
+                    // the line is along the normal, so the vectors are parallel.
+                    return Ok(if plane_a == plane_b {
+                        vec![dot3(va, vb)]
+                    } else {
+                        cross3(va, vb).to_vec()
+                    });
+                }
+                if spatial(a).is_some() != spatial(b).is_some() {
+                    return Err(fail(format!(
+                        "`{a}` and `{b}` must both be planar (Line2D) or both spatial (Line3D/Plane3D)"
+                    )));
+                }
+                if let Some((da, db)) = lines3(a, b)? {
+                    return Ok(vec![dot3(da, db)]);
+                }
                 Ok(vec![dot(direction(line(a)?), direction(line(b)?))])
             }
             GeometricConstraint::Angle(a, b, theta) => {
+                if let Some((da, db)) = lines3(a, b)? {
+                    // In space only the (unsigned) angle between the directions is defined:
+                    // cos of it equals dot / (|a||b|).
+                    let norm = |v: [f64; 3]| dot3(v, v).sqrt().max(1e-12);
+                    return Ok(vec![dot3(da, db) / (norm(da) * norm(db)) - theta.cos()]);
+                }
                 // The angle from line a to line b is theta: cross cos(theta) - dot sin(theta) = 0,
                 // and the unit-direction normalisation keeps the scale comparable to lengths.
                 let (da, db) = (direction(line(a)?), direction(line(b)?));
@@ -661,16 +947,25 @@ impl GeometricConstraintSolver {
             }
             GeometricConstraint::Tangent(line_name, circle_name) => {
                 let (p, q) = line(line_name)?;
+                // A circle with no stated radius has it as an unknown (see `refine_2d`).
                 let (center_name, radius) = match self.entities.get(circle_name) {
                     Some(GeometricEntity::Circle2D {
                         center,
                         radius: Some(r),
                         ..
                     }) => (center.clone(), *r),
+                    Some(GeometricEntity::Circle2D {
+                        center,
+                        radius: None,
+                        ..
+                    }) => match points.get(&format!("{circle_name}#radius")) {
+                        Some(r) => (center.clone(), r[0]),
+                        None => {
+                            return Err(fail(format!("`{circle_name}` has no radius value")));
+                        }
+                    },
                     _ => {
-                        return Err(fail(format!(
-                            "`{circle_name}` is not a Circle2D with a known radius"
-                        )));
+                        return Err(fail(format!("`{circle_name}` is not a Circle2D")));
                     }
                 };
                 let c = point(&center_name)?;
@@ -707,30 +1002,47 @@ impl GeometricConstraintSolver {
         let mut free: Vec<(String, usize)> = Vec::new();
         let mut names: Vec<&String> = self.entities.keys().collect();
         names.sort();
-        let mut points: HashMap<String, [f64; 2]> = HashMap::new();
+        let mut points: HashMap<String, Vec<f64>> = HashMap::new();
         for name in names {
-            if let Some(GeometricEntity::Point2D { x, y, .. }) = self.entities.get(name) {
-                let start = solved.get(name).cloned();
-                let value = |known: &Option<f64>, axis: usize, free: &mut Vec<(String, usize)>| {
-                    match known {
-                        Some(v) => *v,
-                        None => {
-                            free.push((name.clone(), axis));
-                            // Keep a placement from step 2; otherwise a small distinct offset
-                            // so the Jacobian is not degenerate at the origin.
-                            start
-                                .as_ref()
-                                .map_or(0.1 * (free.len() as f64), |s| s[axis])
-                        }
+            let known: Vec<Option<f64>> = match self.entities.get(name) {
+                Some(GeometricEntity::Point2D { x, y, .. }) => vec![*x, *y],
+                Some(GeometricEntity::Point3D { coords, .. }) => coords.to_vec(),
+                Some(GeometricEntity::PointND { coords, .. }) if !coords.is_empty() => {
+                    coords.clone()
+                }
+                _ => continue,
+            };
+            let start = solved.get(name).cloned();
+            let mut position = Vec::with_capacity(known.len());
+            for (axis, k) in known.iter().enumerate() {
+                position.push(match k {
+                    Some(v) => *v,
+                    None => {
+                        free.push((name.clone(), axis));
+                        // Keep a placement from step 2; otherwise a small distinct offset
+                        // so the Jacobian is not degenerate at the origin.
+                        start
+                            .as_ref()
+                            .filter(|s| s.len() == known.len())
+                            .map_or(0.1 * (free.len() as f64), |s| s[axis])
                     }
-                };
-                let px = value(x, 0, &mut free);
-                let py = value(y, 1, &mut free);
-                points.insert(name.clone(), [px, py]);
+                });
+            }
+            points.insert(name.clone(), position);
+        }
+        // A circle without a stated radius contributes the radius as one more unknown, stored
+        // under the key `<circle>#radius` (initial guess 1).
+        let mut circle_names: Vec<&String> = self.entities.keys().collect();
+        circle_names.sort();
+        for name in circle_names {
+            if let Some(GeometricEntity::Circle2D { radius: None, .. }) = self.entities.get(name) {
+                let key = format!("{name}#radius");
+                free.push((key.clone(), 0));
+                points.insert(key, vec![1.0]);
             }
         }
 
-        let evaluate = |points: &HashMap<String, [f64; 2]>| -> AlgebraResult<Vec<f64>> {
+        let evaluate = |points: &HashMap<String, Vec<f64>>| -> AlgebraResult<Vec<f64>> {
             let mut all = Vec::new();
             for constraint in &self.constraints {
                 all.extend(self.residuals_2d(constraint, points)?);
@@ -738,13 +1050,13 @@ impl GeometricConstraintSolver {
             Ok(all)
         };
         let norm = |r: &[f64]| r.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        let set = |points: &mut HashMap<String, [f64; 2]>, k: usize, value: f64| {
+        let set = |points: &mut HashMap<String, Vec<f64>>, k: usize, value: f64| {
             let (name, axis) = &free[k];
             if let Some(p) = points.get_mut(name) {
                 p[*axis] = value;
             }
         };
-        let get = |points: &HashMap<String, [f64; 2]>, k: usize| -> f64 {
+        let get = |points: &HashMap<String, Vec<f64>>, k: usize| -> f64 {
             let (name, axis) = &free[k];
             points.get(name).map_or(0.0, |p| p[*axis])
         };
@@ -859,14 +1171,18 @@ impl GeometricConstraintSolver {
             )));
         }
         for (name, p) in points {
-            solved.insert(name, vec![p[0], p[1]]);
+            // `<circle>#radius` entries report the solved radius under the circle's own name.
+            let key = name
+                .strip_suffix("#radius")
+                .map_or(name.clone(), str::to_string);
+            solved.insert(key, p);
         }
         Ok(())
     }
 }
 
 /// Point positions and the constraint residuals they leave.
-type SolveAttempt = (HashMap<String, [f64; 2]>, Vec<f64>);
+type SolveAttempt = (HashMap<String, Vec<f64>>, Vec<f64>);
 
 /// Solve the dense system `A x = b` by Gaussian elimination with partial pivoting.
 fn solve_dense(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
@@ -1033,8 +1349,10 @@ impl Mesh3D {
         !self.triangles.is_empty() && self.boundary_edge_count() == 0
     }
 
-    /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
-    pub fn compute_volume(&self) -> f64 {
+    /// Signed enclosed volume by the divergence theorem: positive when the triangle normals point
+    /// out of the solid (counter-clockwise seen from outside), negative for an inside-out mesh.
+    /// Only meaningful for a closed mesh.
+    pub fn signed_volume(&self) -> f64 {
         let mut signed_vol = 0.0;
         for t in &self.triangles {
             let v0 = self.vertices[t[0]];
@@ -1048,7 +1366,24 @@ impl Mesh3D {
             let dot = v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2];
             signed_vol += dot / 6.0;
         }
-        signed_vol.abs()
+        signed_vol
+    }
+
+    /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
+    pub fn compute_volume(&self) -> f64 {
+        self.signed_volume().abs()
+    }
+
+    /// Reverse the winding of every triangle (an inside-out closed mesh becomes outward-oriented).
+    pub fn reverse_orientation(&mut self) {
+        for tri in &mut self.triangles {
+            tri.swap(1, 2);
+        }
+    }
+
+    /// Whether the mesh is closed and its normals point out of the solid (positive signed volume).
+    pub fn is_outward_oriented(&self) -> bool {
+        self.is_closed() && self.signed_volume() > 0.0
     }
 
     /// Compute geometric centroid: $\mathbf{C} = \frac{1}{N} \sum \mathbf{v}_i$.
@@ -1107,6 +1442,232 @@ impl Mesh3D {
         }
     }
 
+    /// Mesh the implicit surface `f(x, y, z) = 0` inside `bbox` by marching tetrahedra.
+    ///
+    /// `expression` is parsed in the variables `x`, `y` and `z` (any other symbol is an error)
+    /// and compiled once to bytecode. The box is divided into `resolution`^3 cubes, each cut
+    /// into six tetrahedra along a common diagonal so neighbouring cells agree on shared faces;
+    /// the surface crosses an edge where `f` changes sign, at the linearly interpolated point.
+    /// Vertices are shared between triangles, so the mesh is closed and consistently oriented
+    /// (normals point towards `f > 0`) wherever the surface stays inside the box; a surface
+    /// that leaves the box is cut open along the box faces.
+    ///
+    /// The mesh is piecewise linear: the volume it encloses approaches the true one as the
+    /// resolution grows (a few percent at 40 for a sphere).
+    pub fn from_implicit(
+        expression: &str,
+        bbox: &BoundingBox3D,
+        resolution: usize,
+    ) -> AlgebraResult<Self> {
+        let fail = |why: String| AlgebraError::EvaluationError(format!("implicit surface: {why}"));
+        let graph = algebra_core::ExprGraph::new();
+        let expr = algebra_core::parser::ExprParser::new(&graph)
+            .parse(expression)
+            .map_err(|e| fail(format!("cannot parse `{expression}`: {e:?}")))?;
+        let program = algebra_core::vm::VmCompiler::compile(
+            &graph,
+            expr,
+            "x",
+            &["y".to_string(), "z".to_string()],
+        )
+        .map_err(|e| fail(e.to_string()))?;
+        let vm = algebra_core::vm::BytecodeVM::new();
+        Self::from_field(
+            &|p| {
+                vm.eval_scalar(&program, p[0], &[p[1], p[2]])
+                    .map_err(|e| fail(e.to_string()))
+            },
+            bbox,
+            resolution,
+        )
+    }
+
+    /// Mesh the zero level set of a scalar field `f(p)` (positive outside, negative inside) inside
+    /// `bbox` by marching tetrahedra; see [`Mesh3D::from_implicit`] for the guarantees.
+    pub fn from_field(
+        field: &dyn Fn([f64; 3]) -> AlgebraResult<f64>,
+        bbox: &BoundingBox3D,
+        resolution: usize,
+    ) -> AlgebraResult<Self> {
+        let fail = |why: String| AlgebraError::EvaluationError(format!("implicit surface: {why}"));
+        if !(2..=200).contains(&resolution) {
+            return Err(fail("the resolution must be between 2 and 200".into()));
+        }
+        if (0..3).any(|a| bbox.max[a] <= bbox.min[a]) {
+            return Err(fail("the bounding box must have positive extent".into()));
+        }
+        let n = resolution;
+        let stride = n + 1;
+        let point = |i: usize, j: usize, k: usize| -> [f64; 3] {
+            [
+                bbox.min[0] + (bbox.max[0] - bbox.min[0]) * i as f64 / n as f64,
+                bbox.min[1] + (bbox.max[1] - bbox.min[1]) * j as f64 / n as f64,
+                bbox.min[2] + (bbox.max[2] - bbox.min[2]) * k as f64 / n as f64,
+            ]
+        };
+        let id = |i: usize, j: usize, k: usize| (k * stride + j) * stride + i;
+        let mut values = vec![0.0_f64; stride * stride * stride];
+        for k in 0..=n {
+            for j in 0..=n {
+                for i in 0..=n {
+                    let p = point(i, j, k);
+                    let v = field(p)?;
+                    if !v.is_finite() {
+                        return Err(fail(format!("f is not finite at {p:?}")));
+                    }
+                    // A value of exactly zero counts as positive, so every edge crossing has a
+                    // strict sign change.
+                    values[id(i, j, k)] = if v == 0.0 { 1e-300 } else { v };
+                }
+            }
+        }
+
+        // Cube corners and the six tetrahedra of the Kuhn triangulation (all share the 0-6 diagonal).
+        const CORNERS: [[usize; 3]; 8] = [
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 1, 1],
+        ];
+        const TETS: [[usize; 4]; 6] = [
+            [0, 1, 2, 6],
+            [0, 1, 5, 6],
+            [0, 3, 2, 6],
+            [0, 3, 7, 6],
+            [0, 4, 5, 6],
+            [0, 4, 7, 6],
+        ];
+
+        let mut mesh = Self::new("Implicit");
+        let mut edge_vertex: HashMap<(usize, usize), usize> = HashMap::new();
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let corner = |c: usize| {
+                        let o = CORNERS[c];
+                        (i + o[0], j + o[1], k + o[2])
+                    };
+                    for tet in TETS {
+                        let verts: Vec<(usize, [f64; 3], f64)> = tet
+                            .iter()
+                            .map(|&c| {
+                                let (a, b, d) = corner(c);
+                                (id(a, b, d), point(a, b, d), values[id(a, b, d)])
+                            })
+                            .collect();
+                        let positive: Vec<usize> = (0..4).filter(|&v| verts[v].2 > 0.0).collect();
+                        if positive.is_empty() || positive.len() == 4 {
+                            continue;
+                        }
+                        let negative: Vec<usize> = (0..4).filter(|&v| verts[v].2 <= 0.0).collect();
+
+                        // The surface point on the edge between a positive and a negative corner.
+                        let mut cross = |pv: usize, nv: usize, mesh: &mut Self| -> usize {
+                            let (gp, gn) = (verts[pv].0, verts[nv].0);
+                            let key = (gp.min(gn), gp.max(gn));
+                            if let Some(&existing) = edge_vertex.get(&key) {
+                                return existing;
+                            }
+                            let (fp, fn_) = (verts[pv].2, verts[nv].2);
+                            let t = fp / (fp - fn_); // fraction from the positive end
+                            let (a, b) = (verts[pv].1, verts[nv].1);
+                            let index = mesh.add_vertex([
+                                a[0] + t * (b[0] - a[0]),
+                                a[1] + t * (b[1] - a[1]),
+                                a[2] + t * (b[2] - a[2]),
+                            ]);
+                            edge_vertex.insert(key, index);
+                            index
+                        };
+
+                        // Direction from the negative towards the positive side, for orientation.
+                        let mean = |set: &[usize]| {
+                            let mut c = [0.0; 3];
+                            for &v in set {
+                                for a in 0..3 {
+                                    c[a] += verts[v].1[a] / set.len() as f64;
+                                }
+                            }
+                            c
+                        };
+                        let (cp, cn) = (mean(&positive), mean(&negative));
+                        let towards = [cp[0] - cn[0], cp[1] - cn[1], cp[2] - cn[2]];
+
+                        // Orientation is decided from the midpoints of the crossed edges, which stay
+                        // well separated even when a surface point lands on a grid vertex and the
+                        // interpolated points coincide.
+                        let mid = |pv: usize, nv: usize| -> [f64; 3] {
+                            let (a, b) = (verts[pv].1, verts[nv].1);
+                            [
+                                (a[0] + b[0]) / 2.0,
+                                (a[1] + b[1]) / 2.0,
+                                (a[2] + b[2]) / 2.0,
+                            ]
+                        };
+                        let mut triangles: Vec<([usize; 3], [[f64; 3]; 3])> = Vec::new();
+                        match (positive.len(), negative.len()) {
+                            (1, 3) => {
+                                let p = positive[0];
+                                let e: Vec<usize> = negative[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&q| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(p, e[0]), mid(p, e[1]), mid(p, e[2])],
+                                ));
+                            }
+                            (3, 1) => {
+                                let q = negative[0];
+                                let e: Vec<usize> = positive[..3].to_vec();
+                                let ids: Vec<usize> =
+                                    e.iter().map(|&p| cross(p, q, &mut mesh)).collect();
+                                triangles.push((
+                                    [ids[0], ids[1], ids[2]],
+                                    [mid(e[0], q), mid(e[1], q), mid(e[2], q)],
+                                ));
+                            }
+                            _ => {
+                                // Two against two: a quad through the four mixed edges.
+                                let (p0, p1) = (positive[0], positive[1]);
+                                let (n0, n1) = (negative[0], negative[1]);
+                                let a = cross(p0, n0, &mut mesh);
+                                let b = cross(p0, n1, &mut mesh);
+                                let c = cross(p1, n1, &mut mesh);
+                                let d = cross(p1, n0, &mut mesh);
+                                let (ma, mb, mc, md) =
+                                    (mid(p0, n0), mid(p0, n1), mid(p1, n1), mid(p1, n0));
+                                triangles.push(([a, b, c], [ma, mb, mc]));
+                                triangles.push(([a, c, d], [ma, mc, md]));
+                            }
+                        }
+                        for ([a, b, c], [va, vb, vc]) in triangles {
+                            let u = [vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]];
+                            let w = [vc[0] - va[0], vc[1] - va[1], vc[2] - va[2]];
+                            let normal = [
+                                u[1] * w[2] - u[2] * w[1],
+                                u[2] * w[0] - u[0] * w[2],
+                                u[0] * w[1] - u[1] * w[0],
+                            ];
+                            let facing = normal[0] * towards[0]
+                                + normal[1] * towards[1]
+                                + normal[2] * towards[2];
+                            if facing >= 0.0 {
+                                mesh.add_triangle(a, b, c);
+                            } else {
+                                mesh.add_triangle(a, c, b);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(mesh)
+    }
+
     /// Create a standard 3D Box / Cube mesh of dimensions $(L_x, L_y, L_z)$.
     pub fn cube(lx: f64, ly: f64, lz: f64) -> Self {
         let mut mesh = Self::new("Cube");
@@ -1137,8 +1698,8 @@ impl Mesh3D {
             [1, 5, 6, 2],
         ];
         for q in quads {
-            mesh.add_triangle(q[0], q[1], q[2]);
-            mesh.add_triangle(q[0], q[2], q[3]);
+            mesh.add_triangle(q[0], q[2], q[1]);
+            mesh.add_triangle(q[0], q[3], q[2]);
         }
         mesh
     }
@@ -1275,9 +1836,10 @@ pub enum CustomShape {
 impl CustomShape {
     /// Convert the shape to a concrete `Mesh3D` for visualization and simulation.
     ///
-    /// Triangle meshes, extrusions and 3-dimensional polytopes whose simplices are triangles
-    /// convert. Implicit surfaces and Boolean combinations are not meshed by this library and
-    /// return an error: they used to be replaced silently by a unit cube.
+    /// Triangle meshes, extrusions, 3-dimensional polytopes whose simplices are triangles and
+    /// implicit surfaces (by marching tetrahedra at resolution 40, see [`Mesh3D::from_implicit`])
+    /// convert. Boolean combinations are not meshed by this library and return an error: they
+    /// used to be replaced silently by a unit cube.
     pub fn to_tri_mesh(&self) -> AlgebraResult<Mesh3D> {
         let unsupported = |what: &str| {
             Err(AlgebraError::EvaluationError(format!(
@@ -1320,8 +1882,76 @@ impl CustomShape {
                 }
                 Ok(mesh)
             }
-            CustomShape::ParametricImplicit { .. } => unsupported("an implicit surface"),
-            CustomShape::BooleanCSG { .. } => unsupported("a Boolean CSG combination"),
+            CustomShape::ParametricImplicit { expr_str, bbox } => {
+                Mesh3D::from_implicit(expr_str, bbox, 40)
+            }
+            CustomShape::BooleanCSG { .. } => {
+                let (field, bbox) = self.implicit_field()?;
+                Mesh3D::from_field(&*field, &bbox, 48)
+            }
+        }
+    }
+
+    /// The shape as a scalar field (negative inside, positive outside) and a box containing it,
+    /// when it is an implicit surface or a Boolean combination of such: union is `min(a, b)`,
+    /// intersection `max(a, b)` and difference `max(a, -b)`. Other operand kinds (triangle
+    /// meshes, extrusions, polytopes) have no field here and give an error.
+    #[allow(clippy::type_complexity)]
+    pub fn implicit_field(
+        &self,
+    ) -> AlgebraResult<(
+        Box<dyn Fn([f64; 3]) -> AlgebraResult<f64> + '_>,
+        BoundingBox3D,
+    )> {
+        match self {
+            CustomShape::ParametricImplicit { expr_str, bbox } => {
+                let fail = |why: String| {
+                    AlgebraError::EvaluationError(format!("implicit surface: {why}"))
+                };
+                let graph = algebra_core::ExprGraph::new();
+                let expr = algebra_core::parser::ExprParser::new(&graph)
+                    .parse(expr_str)
+                    .map_err(|e| fail(format!("cannot parse `{expr_str}`: {e:?}")))?;
+                let program = algebra_core::vm::VmCompiler::compile(
+                    &graph,
+                    expr,
+                    "x",
+                    &["y".to_string(), "z".to_string()],
+                )
+                .map_err(|e| fail(e.to_string()))?;
+                let vm = algebra_core::vm::BytecodeVM::new();
+                Ok((
+                    Box::new(move |p| {
+                        vm.eval_scalar(&program, p[0], &[p[1], p[2]])
+                            .map_err(|e| fail(e.to_string()))
+                    }),
+                    bbox.clone(),
+                ))
+            }
+            CustomShape::BooleanCSG { op, left, right } => {
+                let (fa, ba) = left.implicit_field()?;
+                let (fb, bb) = right.implicit_field()?;
+                let bbox = BoundingBox3D::new(
+                    [0, 1, 2].map(|a| ba.min[a].min(bb.min[a])),
+                    [0, 1, 2].map(|a| ba.max[a].max(bb.max[a])),
+                );
+                let op = *op;
+                Ok((
+                    Box::new(move |p| {
+                        let (a, b) = (fa(p)?, fb(p)?);
+                        Ok(match op {
+                            CsgBooleanOp::Union => a.min(b),
+                            CsgBooleanOp::Intersection => a.max(b),
+                            CsgBooleanOp::Difference => a.max(-b),
+                        })
+                    }),
+                    bbox,
+                ))
+            }
+            _ => Err(AlgebraError::EvaluationError(
+                "only implicit surfaces and Boolean combinations of them have a scalar field;                  meshes, extrusions and polytopes cannot take part in a Boolean yet"
+                    .into(),
+            )),
         }
     }
 }

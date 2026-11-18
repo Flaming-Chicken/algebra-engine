@@ -1336,6 +1336,12 @@ impl eframe::App for UraeNotebookApp {
                             self.export_notice = Some("Exported to 'notebook_export.py'".to_string());
                             ui.close();
                         }
+                        if ui.button("HTML report (.html)").clicked() {
+                            let html = self.presentation_report_html();
+                            self.trigger_file_download("notebook_report.html", html.as_bytes(), "text/html");
+                            self.export_notice = Some("Exported to 'notebook_report.html'".to_string());
+                            ui.close();
+                        }
                         if ui.button("Lean 4 Proof (.lean)").clicked() {
                             let lean = crate::export::to_lean(&self.state.session.raw_document_text);
                             self.trigger_file_download("notebook_export.lean", lean.as_bytes(), "text/plain");
@@ -1918,31 +1924,45 @@ impl eframe::App for UraeNotebookApp {
                 }
                 "__URAE_CMD_LAYOUT_FLUID__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::FluidNotepad);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::FluidNotepad);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
                 "__URAE_CMD_LAYOUT_DUAL__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::SplitDual);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::SplitDual);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
                 "__URAE_CMD_LAYOUT_TRIPLE__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::TripleIDE);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::TripleIDE);
+                    self.route_workspace_tab();
                     self.show_cli_terminal = true;
                     self.show_viewport_3d = true;
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
+                "__URAE_CMD_LAYOUT_PRESENTATION__" => {
+                    self.workspace
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::PresentationReport);
+                    self.route_workspace_tab();
+                    self.state.session.settings.workspace_preset = self.workspace.layout_preset;
+                    self.state.save_session();
+                }
+                "__URAE_CMD_LAYOUT_GRAPH__" => {
+                    self.workspace
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::DependencyGraph);
+                    self.route_workspace_tab();
+                    self.state.session.settings.workspace_preset = self.workspace.layout_preset;
+                    self.state.save_session();
+                }
                 "__URAE_CMD_LAYOUT_ZEN__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::ZenMode);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::ZenMode);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
@@ -6380,6 +6400,33 @@ impl UraeNotebookApp {
         });
     }
 
+    /// Make the central view and side panels follow the active workspace tab
+    /// ([`crate::ui::WorkspaceTab::route`]). A tab that needs the 3-D viewport or the terminal
+    /// turns that panel on; it never turns one off, since the user may have opened it separately.
+    pub fn route_workspace_tab(&mut self) {
+        let route = self.workspace.active_tab.route();
+        self.view_mode = route.view;
+        self.show_viewport_3d |= route.viewport_3d;
+        self.show_cli_terminal |= route.terminal;
+    }
+
+    /// The printable HTML report of the current document: each formula line is followed by its
+    /// evaluated output when the line evaluated without an error.
+    fn presentation_report_html(&self) -> String {
+        let doc = &self.state.session.raw_document_text;
+        let mut results: Vec<Option<String>> = vec![None; doc.lines().count()];
+        for pl in &self.state.parsed_lines {
+            if matches!(pl.kind, LineKind::Formula)
+                && pl.error_msg.is_none()
+                && !pl.output_unicode.is_empty()
+                && let Some(slot) = results.get_mut(pl.line_idx)
+            {
+                *slot = Some(pl.output_unicode.clone());
+            }
+        }
+        crate::export::to_html_report(&self.active_notebook, doc, &results)
+    }
+
     /// Render clean, publishable presentation / report view
     pub fn render_presentation_report_view(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
         let palette = self.theme.palette();
@@ -6393,7 +6440,16 @@ impl UraeNotebookApp {
                     self.view_mode = ViewMode::SmartStream;
                 }
                 if ui.button("🖨 Print / Export").clicked() {
-                    self.export_notice = Some("Exporting presentation document...".to_string());
+                    let html = self.presentation_report_html();
+                    self.trigger_file_download(
+                        "notebook_report.html",
+                        html.as_bytes(),
+                        "text/html",
+                    );
+                    self.export_notice = Some(
+                        "Exported 'notebook_report.html' (open it and use Print to PDF)"
+                            .to_string(),
+                    );
                 }
             });
         });

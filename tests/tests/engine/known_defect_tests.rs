@@ -270,8 +270,9 @@ fn cartan_operations_use_the_form_that_was_typed() {
         is_minkowski: false,
     });
     assert!(star.contains("= dy∧dz"), "{star}");
-    // Unreadable input is an error, not a canned answer.
-    assert!(cartan(wedge("nonsense", "dy")).starts_with("ERROR"));
+    // Unreadable input is an error, not a canned answer. (A bare word such as `nonsense` is now a
+    // legitimate symbolic 0-form, so use input that is not an expression at all.)
+    assert!(cartan(wedge("2 +* dx", "dy")).starts_with("ERROR"));
     assert!(cartan(wedge("dw", "dy")).starts_with("ERROR"));
 }
 
@@ -861,13 +862,6 @@ fn the_closure_diagnostic_distinguishes_closed_open_and_misoriented_meshes() {
     let mut flipped = tetra.clone();
     flipped.triangles[0].swap(1, 2);
     assert!(!flipped.is_closed());
-    // The screw is documented as an open surface and reports so.
-    use algebra_engine::cad::ThreadedScrew;
-    assert!(
-        !ThreadedScrew::metric_bolt(8.0, 1.25, 30.0)
-            .generate_3d_mesh()
-            .is_closed()
-    );
 }
 
 #[test]
@@ -975,7 +969,7 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
     let mesh = tetra.to_tri_mesh().unwrap();
     assert!(mesh.is_closed());
     assert!((mesh.compute_volume() - 1.0 / 6.0).abs() < 1e-12);
-    // Higher-dimensional polytopes, implicit surfaces and Booleans are reported, not faked.
+    // Higher-dimensional polytopes and Booleans are reported, not faked; implicit surfaces mesh.
     let four_d = CustomShape::PolytopeND {
         dim: 4,
         vertices: vec![],
@@ -986,7 +980,7 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
         expr_str: "x^2 + y^2 + z^2 - 1".into(),
         bbox: BoundingBox3D::new([-2.0; 3], [2.0; 3]),
     };
-    assert!(implicit.to_tri_mesh().is_err());
+    assert!(implicit.to_tri_mesh().unwrap().is_closed());
     let boolean = CustomShape::BooleanCSG {
         op: CsgBooleanOp::Union,
         left: Box::new(shape.clone()),
@@ -999,4 +993,782 @@ fn custom_shapes_convert_or_report_instead_of_becoming_a_unit_cube() {
             .to_string()
             .contains("Boolean")
     );
+}
+
+#[test]
+fn the_evaluator_reports_when_a_tier_overran_its_hard_timeout() {
+    use algebra_core::ExprGraph;
+    use algebra_core::parser::ExprParser;
+    use algebra_engine::cat_eval::{CatEvalInput, CatExprEvaluator};
+    use cat_anytime::{AnytimeBudget, MultiFidelityOp};
+    use cat_core::enclosure::{EvalForm, FidelityMode};
+    use std::time::Duration;
+
+    let graph = ExprGraph::new();
+    let expr = ExprParser::new(&graph).parse("(x + 1) * 2").unwrap();
+    let input = CatEvalInput::new(graph, expr).with_var("x", Some(3.0));
+    let evaluator = CatExprEvaluator::new();
+
+    let generous = AnytimeBudget {
+        hard_timeout: Duration::from_secs(60),
+        ..AnytimeBudget::default()
+    };
+    let impossible = AnytimeBudget {
+        hard_timeout: Duration::ZERO,
+        ..AnytimeBudget::default()
+    };
+    for mode in [
+        FidelityMode::NumericalApprox,
+        FidelityMode::SymbolicApprox,
+        FidelityMode::SymbolicExact,
+        FidelityMode::SymbolicHybrid,
+    ] {
+        let within = evaluator
+            .eval_with_fidelity(&input, mode, EvalForm::Canonical, &generous)
+            .unwrap();
+        let over = evaluator
+            .eval_with_fidelity(&input, mode, EvalForm::Canonical, &impossible)
+            .unwrap();
+        assert!(
+            !within.budget_exceeded,
+            "{mode:?} flagged with a 60 s budget"
+        );
+        assert!(
+            over.budget_exceeded,
+            "{mode:?} not flagged with a zero budget"
+        );
+        // The budget only reports; the value is the same either way.
+        assert_eq!(within.mode_used, over.mode_used);
+        assert_eq!(within.value.numeric_value, over.value.numeric_value);
+    }
+}
+
+#[test]
+fn screws_are_closed_solids_whose_volume_matches_the_thread_geometry() {
+    use algebra_engine::cad::{BoltHeadType, ThreadedScrew};
+    let mut cases: Vec<(&str, ThreadedScrew)> = vec![
+        ("M8 hex bolt", ThreadedScrew::metric_bolt(8.0, 1.25, 30.0)),
+        ("M6 socket cap", ThreadedScrew::socket_screw(6.0, 1.0, 20.0)),
+        (
+            "T12 Acme lead screw",
+            ThreadedScrew::lead_screw(12.0, 3.0, 60.0),
+        ),
+    ];
+    let mut stud = ThreadedScrew::metric_bolt(10.0, 1.5, 25.0);
+    stud.head_type = BoltHeadType::None;
+    stud.thread_length = 0.0;
+    cases.push(("plain stud", stud));
+
+    for (name, screw) in cases {
+        let mesh = screw.generate_3d_mesh();
+        assert!(
+            mesh.is_closed(),
+            "{name}: {} boundary edges",
+            mesh.boundary_edge_count()
+        );
+
+        // Independent volume: the thread region is pi * L_thread * mean(r^2) over one pitch
+        // (every height sees the full period around the axis), the shank a plain cylinder,
+        // the head a hexagonal or round prism.
+        let r_major = screw.nominal_diameter / 2.0;
+        let l_thread = screw.thread_length.min(screw.total_length);
+        let samples = 200_000;
+        let mean_r2 = (0..samples)
+            .map(|k| {
+                let r = screw.thread_radius((k as f64 + 0.5) / samples as f64 * screw.pitch);
+                r * r
+            })
+            .sum::<f64>()
+            / samples as f64;
+        let thread = if l_thread > 0.0 {
+            std::f64::consts::PI * l_thread * mean_r2
+        } else {
+            0.0
+        };
+        let shank = std::f64::consts::PI * r_major * r_major * (screw.total_length - l_thread);
+        let d = screw.nominal_diameter;
+        let head = match screw.head_type {
+            BoltHeadType::Hexagonal => {
+                let apothem = 0.8 * d;
+                2.0 * 3.0_f64.sqrt() * apothem * apothem * 0.65 * d
+            }
+            BoltHeadType::SocketCap => std::f64::consts::PI * (0.75 * d).powi(2) * d,
+            BoltHeadType::CountersunkFlat => std::f64::consts::PI * d * d * 0.5 * d,
+            BoltHeadType::None => 0.0,
+        };
+        let expected = thread + shank + head;
+        let volume = mesh.compute_volume();
+        assert!(
+            (volume - expected).abs() < 0.01 * expected,
+            "{name}: volume {volume} vs {expected}"
+        );
+        // The solid is a real screw: wider than the root cylinder, and no wider than the head.
+        assert!(volume > std::f64::consts::PI * screw.minor_radius().powi(2) * screw.total_length);
+    }
+}
+
+#[test]
+fn thread_profiles_are_periodic_bounded_and_differ_by_standard() {
+    use algebra_engine::cad::{ThreadStandard, ThreadedScrew};
+    for standard in [
+        ThreadStandard::IsoMetric60,
+        ThreadStandard::Acme29,
+        ThreadStandard::Square,
+    ] {
+        let mut screw = ThreadedScrew::metric_bolt(10.0, 2.0, 20.0);
+        screw.thread_standard = standard;
+        let (lo, hi) = (screw.minor_radius(), 5.0);
+        for k in 0..1000 {
+            let u = k as f64 * 0.01;
+            let r = screw.thread_radius(u);
+            assert!(
+                r >= lo - 1e-12 && r <= hi + 1e-12,
+                "{standard:?}: r({u}) = {r}"
+            );
+            assert!(
+                (r - screw.thread_radius(u + screw.pitch)).abs() < 1e-9,
+                "periodic"
+            );
+        }
+        // Both extremes are reached.
+        let values: Vec<f64> = (0..2000)
+            .map(|k| screw.thread_radius(k as f64 * 0.001))
+            .collect();
+        assert!(values.iter().any(|&r| (r - lo).abs() < 1e-9));
+        assert!(values.iter().any(|&r| (r - hi).abs() < 1e-9));
+    }
+    let mut iso = ThreadedScrew::metric_bolt(10.0, 2.0, 20.0);
+    let mut square = iso.clone();
+    iso.thread_standard = ThreadStandard::IsoMetric60;
+    square.thread_standard = ThreadStandard::Square;
+    assert!(
+        iso.minor_radius() < square.minor_radius(),
+        "ISO threads are deeper than square"
+    );
+}
+
+#[test]
+fn implicit_surfaces_mesh_to_closed_solids_with_the_right_volume() {
+    use algebra_engine::cad::{BoundingBox3D, CustomShape, Mesh3D};
+    use std::f64::consts::PI;
+
+    // Sphere of radius 1: f = r^2 - x^2 - y^2 - z^2 is positive inside, so normals point inward;
+    // use f = x^2 + y^2 + z^2 - 1 (positive outside) for an outward-oriented solid.
+    let bbox = BoundingBox3D::new([-1.5; 3], [1.5; 3]);
+    let sphere = Mesh3D::from_implicit("x^2 + y^2 + z^2 - 1", &bbox, 40).unwrap();
+    assert!(sphere.is_closed(), "the sphere must be a closed surface");
+    let v = sphere.compute_volume();
+    let exact = 4.0 / 3.0 * PI;
+    assert!(
+        (v - exact).abs() < 0.04 * exact,
+        "sphere volume {v} vs {exact}"
+    );
+
+    // Torus (R=1, r=0.4): (sqrt(x^2+y^2)-1)^2 + z^2 - 0.16, volume 2 pi^2 R r^2.
+    let bbox = BoundingBox3D::new([-1.6, -1.6, -0.6], [1.6, 1.6, 0.6]);
+    let torus = Mesh3D::from_implicit("(sqrt(x^2 + y^2) - 1)^2 + z^2 - 0.16", &bbox, 60).unwrap();
+    assert!(torus.is_closed(), "the torus must be a closed surface");
+    let v = torus.compute_volume();
+    let exact = 2.0 * PI * PI * 0.16;
+    assert!(
+        (v - exact).abs() < 0.05 * exact,
+        "torus volume {v} vs {exact}"
+    );
+
+    // A surface that leaves the box is cut open.
+    let small = BoundingBox3D::new([-0.8; 3], [0.8; 3]);
+    let cut = Mesh3D::from_implicit("x^2 + y^2 + z^2 - 1", &small, 12).unwrap();
+    assert!(!cut.is_closed() || cut.triangles.is_empty());
+
+    // Bad input is an error, not a cube.
+    assert!(Mesh3D::from_implicit("x +", &bbox, 10).is_err());
+    assert!(Mesh3D::from_implicit("x", &bbox, 1).is_err());
+
+    // And CustomShape routes to it.
+    let shape = CustomShape::ParametricImplicit {
+        expr_str: "x^2 + y^2 + z^2 - 1".into(),
+        bbox: BoundingBox3D::new([-1.5; 3], [1.5; 3]),
+    };
+    assert!(shape.to_tri_mesh().unwrap().is_closed());
+}
+
+#[test]
+fn boolean_combinations_of_implicit_solids_have_the_right_volumes() {
+    use algebra_engine::cad::{BoundingBox3D, CsgBooleanOp, CustomShape};
+    use std::f64::consts::PI;
+
+    let bbox = BoundingBox3D::new([-1.5, -1.5, -1.5], [2.5, 1.5, 1.5]);
+    let sphere = |centre: &str| CustomShape::ParametricImplicit {
+        expr_str: format!("({centre})^2 + y^2 + z^2 - 1"),
+        bbox: bbox.clone(),
+    };
+    let (a, b) = (sphere("x"), sphere("x - 1"));
+    let combine = |op| CustomShape::BooleanCSG {
+        op,
+        left: Box::new(a.clone()),
+        right: Box::new(b.clone()),
+    };
+    let ball = 4.0 / 3.0 * PI;
+    // Two unit spheres whose centres are 1 apart: the lens has volume pi (4R + d)(2R - d)^2 / 12.
+    let lens = PI * 5.0 / 12.0;
+    for (op, expected) in [
+        (CsgBooleanOp::Intersection, lens),
+        (CsgBooleanOp::Union, 2.0 * ball - lens),
+        (CsgBooleanOp::Difference, ball - lens),
+    ] {
+        let mesh = combine(op).to_tri_mesh().unwrap();
+        assert!(mesh.is_closed(), "{op:?} must be a closed solid");
+        let v = mesh.compute_volume();
+        assert!(
+            (v - expected).abs() < 0.05 * expected,
+            "{op:?}: volume {v} vs {expected}"
+        );
+    }
+
+    // Operands without a scalar field cannot take part yet, and say so.
+    let cube = CustomShape::Extrusion {
+        profile_2d: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        height: 1.0,
+    };
+    let mixed = CustomShape::BooleanCSG {
+        op: CsgBooleanOp::Union,
+        left: Box::new(a),
+        right: Box::new(cube),
+    };
+    assert!(mixed.to_tri_mesh().is_err());
+}
+
+#[test]
+fn gear_teeth_have_the_involute_thickness_and_profile_shift_thickens_them() {
+    use algebra_engine::cad::InvoluteGear;
+    use std::f64::consts::PI;
+
+    for (z, shift) in [(24usize, 0.0), (24, 0.4), (14, 0.5), (17, -0.2)] {
+        let gear = InvoluteGear::spur(2.0, z, 5.0).with_profile_shift(shift);
+        let r = gear.pitch_diameter() / 2.0;
+        let alpha = gear.pressure_angle_deg.to_radians();
+        // Standard thickness on the pitch circle: pi m / 2 + 2 x m tan(alpha).
+        let expected = PI * gear.module / 2.0 + 2.0 * shift * gear.module * alpha.tan();
+        let measured = 2.0 * r * gear.tooth_half_angle(r);
+        assert!((measured - expected).abs() < 1e-9, "z={z} x={shift}");
+
+        // The outline really passes through that width: pick the two profile points of tooth 0
+        // nearest the pitch circle and compare their angular separation (fine sampling).
+        let profile = gear.generate_2d_profile(600);
+        let tooth: Vec<[f64; 2]> = profile
+            .iter()
+            .copied()
+            .filter(|p| p[1].atan2(p[0]).abs() < PI / z as f64 * 0.9 && p[0] > 0.0)
+            .collect();
+        let near = |sign: f64| {
+            tooth
+                .iter()
+                .filter(|p| {
+                    p[1] * sign >= 0.0 && p[0].hypot(p[1]) > gear.root_diameter() / 2.0 + 1e-6
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - expected).abs() < 5e-3,
+            "z={z} x={shift}: {width} vs {expected}"
+        );
+
+        // Tip and root radii follow the shift, and the solid is still closed.
+        assert!((gear.tip_diameter() / 2.0 - (r + (1.0 + shift) * gear.module)).abs() < 1e-12);
+        assert!((gear.root_diameter() / 2.0 - (r - (1.25 - shift) * gear.module)).abs() < 1e-12);
+        assert_closed_and_oriented(&gear.generate_3d_mesh());
+    }
+
+    // A positive shift makes a fatter tooth, so the outline encloses more area.
+    let area = |x: f64| {
+        shoelace(
+            &InvoluteGear::spur(2.0, 24, 5.0)
+                .with_profile_shift(x)
+                .generate_2d_profile(8),
+        )
+        .abs()
+    };
+    assert!(area(0.5) > area(0.0));
+}
+
+#[test]
+fn cycloidal_gears_are_closed_star_shaped_solids_with_the_right_tooth_thickness() {
+    use algebra_engine::cad::CycloidalGear;
+    use std::f64::consts::PI;
+
+    for (module, z, ratio) in [(2.0, 24usize, 0.3), (1.5, 18, 0.25), (2.0, 30, 0.4)] {
+        let mut gear = CycloidalGear::new(module, z, 6.0);
+        gear.rolling_ratio = ratio;
+        let r = gear.pitch_radius();
+
+        // Star-shaped: the polar angle of the outline only increases, by exactly one turn.
+        let profile = gear.generate_2d_profile(12);
+        let mut total = 0.0;
+        let mut previous = profile[0][1].atan2(profile[0][0]);
+        for p in profile.iter().skip(1).chain(std::iter::once(&profile[0])) {
+            let angle = p[1].atan2(p[0]);
+            let mut delta = angle - previous;
+            while delta < -PI {
+                delta += 2.0 * PI;
+            }
+            while delta > PI {
+                delta -= 2.0 * PI;
+            }
+            assert!(delta >= -1e-12, "z={z}: outline turns back by {delta}");
+            total += delta;
+            previous = angle;
+        }
+        assert!((total - 2.0 * PI).abs() < 1e-9, "z={z}: winds {total}");
+
+        // Radii stay between the root and the tip circle.
+        for p in &profile {
+            let radius = p[0].hypot(p[1]);
+            assert!(radius <= gear.tip_radius() + 1e-9 && radius >= gear.root_radius() - 1e-9);
+        }
+
+        // Tooth thickness on the pitch circle is pi m / 2: the two flank points nearest the
+        // pitch circle around tooth 0 are separated by that arc (fine sampling).
+        let fine = gear.generate_2d_profile(500);
+        let near = |sign: f64| {
+            fine.iter()
+                .filter(|p| {
+                    p[0] > 0.0 && p[1] * sign >= 0.0 && p[1].atan2(p[0]).abs() < PI / z as f64
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - PI * module / 2.0).abs() < 2e-3,
+            "z={z}: thickness {width}"
+        );
+
+        // A closed, outward-oriented solid whose volume is outline area (minus bore) x width.
+        let mesh = gear.generate_3d_mesh();
+        assert_closed_and_oriented(&mesh);
+        let bore = gear.bore_radius.min(0.8 * gear.root_radius());
+        let n = 48.0;
+        let bore_area = 0.5 * n * bore * bore * (2.0 * PI / n).sin();
+        let expected = (shoelace(&gear.generate_2d_profile(8)).abs() - bore_area) * gear.face_width;
+        assert!(
+            (mesh.compute_volume() - expected).abs() < 1e-6 * expected,
+            "z={z}"
+        );
+    }
+
+    // With a rolling circle of half the pitch radius the hypocycloid is a radial line: every
+    // dedendum flank point shares one polar angle.
+    let mut gear = CycloidalGear::new(2.0, 24, 6.0);
+    gear.rolling_ratio = 0.5;
+    let r = gear.pitch_radius();
+    let psi = PI / (2.0 * 24.0);
+    let profile = gear.generate_2d_profile(12);
+    let radial: Vec<f64> = profile
+        .iter()
+        .filter(|p| {
+            let radius = p[0].hypot(p[1]);
+            let angle = p[1].atan2(p[0]);
+            // Tooth 0 leading flank only (other teeth sit at other angles).
+            angle < 0.0
+                && angle > -PI / 24.0
+                && radius > gear.root_radius() + 1e-6
+                && radius < r - 1e-6
+        })
+        .map(|p| p[1].atan2(p[0]))
+        .collect();
+    assert!(radial.len() > 3);
+    assert!(radial.iter().all(|a| (a + psi).abs() < 1e-6), "{radial:?}");
+}
+
+#[test]
+fn internal_gears_are_inside_out_rings_with_the_right_tooth_thickness() {
+    use algebra_engine::cad::InternalGear;
+    use std::f64::consts::PI;
+
+    for (module, z) in [(2.0, 24usize), (1.5, 40), (2.0, 60)] {
+        let gear = InternalGear::new(module, z, 5.0);
+        let r = gear.pitch_radius();
+        assert!(
+            gear.tip_radius() < r
+                && gear.root_radius() > r
+                && gear.tip_radius() >= gear.base_radius()
+        );
+        // Without clamping, the addendum circle is R - m.
+        if r - module >= gear.base_radius() * 1.0005 {
+            assert!((gear.tip_radius() - (r - module)).abs() < 1e-12);
+        }
+
+        // Star-shaped, winding once, radii within [tip, root].
+        let profile = gear.generate_2d_profile(12);
+        let (mut total, mut previous) = (0.0, profile[0][1].atan2(profile[0][0]));
+        for p in profile.iter().skip(1).chain(std::iter::once(&profile[0])) {
+            let angle = p[1].atan2(p[0]);
+            let mut delta = angle - previous;
+            while delta < -PI {
+                delta += 2.0 * PI;
+            }
+            while delta > PI {
+                delta -= 2.0 * PI;
+            }
+            assert!(delta >= -1e-12, "z={z}: outline turns back by {delta}");
+            total += delta;
+            previous = angle;
+            let radius = p[0].hypot(p[1]);
+            assert!(radius >= gear.tip_radius() - 1e-9 && radius <= gear.root_radius() + 1e-9);
+        }
+        assert!((total - 2.0 * PI).abs() < 1e-9, "z={z}: winds {total}");
+
+        // Tooth thickness on the pitch circle is pi m / 2 (formula and geometric measurement).
+        assert!((2.0 * r * gear.tooth_half_angle(r) - PI * module / 2.0).abs() < 1e-9);
+        let fine = gear.generate_2d_profile(600);
+        let near = |sign: f64| {
+            fine.iter()
+                .filter(|p| {
+                    p[0] > 0.0 && p[1] * sign >= 0.0 && p[1].atan2(p[0]).abs() < PI / z as f64
+                })
+                .min_by(|a, b| {
+                    (a[0].hypot(a[1]) - r)
+                        .abs()
+                        .total_cmp(&(b[0].hypot(b[1]) - r).abs())
+                })
+                .copied()
+                .unwrap()
+        };
+        let (lo, hi) = (near(-1.0), near(1.0));
+        let width = (hi[1].atan2(hi[0]) - lo[1].atan2(lo[0])) * r;
+        assert!(
+            (width - PI * module / 2.0).abs() < 3e-3,
+            "z={z}: thickness {width}"
+        );
+
+        // A closed ring with outward normals (positive volume) = (outer polygon - outline) x width.
+        let mesh = gear.generate_3d_mesh();
+        assert_closed_and_oriented(&mesh);
+        let outer = gear.outer_radius;
+        let n = 48.0;
+        let outer_area = 0.5 * n * outer * outer * (2.0 * PI / n).sin();
+        let expected =
+            (outer_area - shoelace(&gear.generate_2d_profile(8)).abs()) * gear.face_width;
+        let volume = mesh.compute_volume();
+        assert!(
+            volume > 0.0,
+            "z={z}: normals point into the material (volume {volume})"
+        );
+        assert!(
+            (volume - expected).abs() < 1e-6 * expected,
+            "z={z}: {volume} vs {expected}"
+        );
+    }
+
+    // Center distance to a pinion: m (z_ring - z_pinion) / 2.
+    let gear = InternalGear::new(2.0, 40, 5.0);
+    assert!((gear.center_distance(16) - 24.0).abs() < 1e-12);
+}
+
+#[test]
+fn screw_heads_can_be_chamfered_and_have_a_key_socket() {
+    use algebra_engine::cad::{BoltHeadType, ThreadedScrew};
+    use std::f64::consts::PI;
+
+    let base_volume = |screw: &ThreadedScrew| {
+        let mut plain = screw.clone();
+        plain.head_chamfer = 0.0;
+        plain.socket_depth = 0.0;
+        plain.generate_3d_mesh().compute_volume()
+    };
+
+    let cases: Vec<(&str, ThreadedScrew)> = {
+        let mut hex = ThreadedScrew::metric_bolt(8.0, 1.25, 30.0);
+        hex.head_chamfer = 0.8;
+        let mut cap = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+        cap.socket_depth = 4.0;
+        let mut both = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+        both.head_chamfer = 0.7;
+        both.socket_depth = 5.0;
+        let mut hex_socket = ThreadedScrew::metric_bolt(12.0, 1.75, 40.0);
+        hex_socket.head_chamfer = 1.0;
+        hex_socket.socket_depth = 3.0;
+        vec![
+            ("chamfered hex", hex),
+            ("socket cap", cap),
+            ("chamfer + socket", both),
+            ("hex with socket", hex_socket),
+        ]
+    };
+
+    for (name, screw) in cases {
+        let mesh = screw.generate_3d_mesh();
+        assert!(
+            mesh.is_closed(),
+            "{name}: {} boundary edges",
+            mesh.boundary_edge_count()
+        );
+
+        // Independent head volume: prism area x height, minus the chamfer wedge and the socket.
+        let d = screw.nominal_diameter;
+        let (across_flats, hexagonal, height) = match screw.head_type {
+            BoltHeadType::Hexagonal => (1.6 * d, true, 0.65 * d),
+            BoltHeadType::SocketCap => (1.5 * d, false, d),
+            _ => unreachable!(),
+        };
+        let half = across_flats / 2.0;
+        let area = if hexagonal {
+            2.0 * 3.0_f64.sqrt() * half * half
+        } else {
+            PI * half * half
+        };
+        let c = screw.effective_chamfer();
+        let f = 1.0 - c / half;
+        let mut cut = area * c - area * c * (1.0 + f + f * f) / 3.0;
+        if let Some((key, depth)) = screw.effective_socket() {
+            cut += 2.0 * 3.0_f64.sqrt() * (key / 2.0).powi(2) * depth;
+        }
+        let expected = base_volume(&screw) - cut;
+        let volume = mesh.compute_volume();
+        assert!(
+            (volume - expected).abs() < 2e-3 * expected,
+            "{name}: volume {volume} vs {expected}"
+        );
+        assert!(
+            volume < base_volume(&screw),
+            "{name}: features must remove material"
+        );
+
+        // The socket floor is below the top face and the outline narrows at the top.
+        let top = screw.total_length + height;
+        if let Some((_, depth)) = screw.effective_socket() {
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .any(|v| (v[2] - (top - depth)).abs() < 1e-9)
+            );
+        }
+        let top_radius = mesh
+            .vertices
+            .iter()
+            .filter(|v| (v[2] - top).abs() < 1e-9)
+            .map(|v| v[0].hypot(v[1]))
+            .fold(0.0, f64::max);
+        let full_radius = mesh
+            .vertices
+            .iter()
+            .map(|v| v[0].hypot(v[1]))
+            .fold(0.0, f64::max);
+        if c > 0.0 {
+            assert!(
+                top_radius < full_radius - 0.5 * c,
+                "{name}: top {top_radius} vs {full_radius}"
+            );
+        }
+    }
+
+    // Absurd settings are clamped or ignored, never producing an invalid solid.
+    let mut silly = ThreadedScrew::metric_bolt(6.0, 1.0, 20.0);
+    silly.head_chamfer = 100.0;
+    silly.socket_depth = 100.0;
+    assert!(silly.effective_chamfer() < 0.45 * 4.8);
+    assert!(
+        silly.effective_socket().is_none(),
+        "the socket cannot fit inside a heavily chamfered head"
+    );
+    assert!(silly.generate_3d_mesh().is_closed());
+    let mut deep = ThreadedScrew::socket_screw(8.0, 1.25, 20.0);
+    deep.socket_depth = 100.0;
+    let (_, depth) = deep.effective_socket().unwrap();
+    assert!((depth - 0.9 * 8.0).abs() < 1e-12);
+    assert!(deep.generate_3d_mesh().is_closed());
+    // A stud has no head to cut.
+    let mut stud = ThreadedScrew::metric_bolt(8.0, 1.25, 20.0);
+    stud.head_type = BoltHeadType::None;
+    stud.socket_depth = 3.0;
+    stud.head_chamfer = 1.0;
+    assert!(stud.effective_socket().is_none() && stud.effective_chamfer() == 0.0);
+}
+
+#[test]
+fn gear_end_caps_are_unfolded_triangulations() {
+    // Every triangle of an end cap has the same orientation, so the cap tiles the annulus without
+    // overlaps (a folded triangle cancels out in a signed volume and hides itself there). Small
+    // pinions have radial root segments, which used to produce one folded triangle per tooth.
+    use algebra_engine::cad::{CycloidalGear, InternalGear, InvoluteGear, Mesh3D};
+    fn assert_unfolded(name: &str, mesh: &Mesh3D) {
+        let cap_area = |z: f64| -> Vec<f64> {
+            mesh.triangles
+                .iter()
+                .filter(|t| t.iter().all(|&i| (mesh.vertices[i][2] - z).abs() < 1e-9))
+                .map(|t| {
+                    let (a, b, c) = (
+                        mesh.vertices[t[0]],
+                        mesh.vertices[t[1]],
+                        mesh.vertices[t[2]],
+                    );
+                    0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+                })
+                .collect()
+        };
+        let top = mesh.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
+        for (label, z, sign) in [("bottom", 0.0, -1.0), ("top", top, 1.0)] {
+            let areas = cap_area(z);
+            assert!(!areas.is_empty(), "{name}: no {label} cap");
+            let wrong = areas.iter().filter(|a| **a * sign <= 1e-12).count();
+            assert_eq!(
+                wrong, 0,
+                "{name}: {wrong} folded or degenerate {label}-cap triangles"
+            );
+        }
+    }
+    for gear in [
+        InvoluteGear::spur(2.0, 12, 8.0),
+        InvoluteGear::spur(2.0, 17, 8.0),
+        InvoluteGear::spur(2.0, 30, 8.0),
+    ] {
+        assert_unfolded(
+            &format!("involute z={}", gear.teeth),
+            &gear.generate_3d_mesh(),
+        );
+    }
+    assert_unfolded(
+        "cycloidal",
+        &CycloidalGear::new(2.0, 24, 6.0).generate_3d_mesh(),
+    );
+    // The inside-out ring's caps face outwards as well (bottom down, top up).
+    let ring = InternalGear::new(2.0, 40, 5.0).generate_3d_mesh();
+    let top = ring.vertices.iter().map(|v| v[2]).fold(f64::MIN, f64::max);
+    for (z, sign) in [(0.0, -1.0), (top, 1.0)] {
+        let wrong = ring
+            .triangles
+            .iter()
+            .filter(|t| t.iter().all(|&i| (ring.vertices[i][2] - z).abs() < 1e-9))
+            .filter(|t| {
+                let (a, b, c) = (
+                    ring.vertices[t[0]],
+                    ring.vertices[t[1]],
+                    ring.vertices[t[2]],
+                );
+                let area = 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+                area * sign <= 1e-12
+            })
+            .count();
+        assert_eq!(wrong, 0, "internal gear cap at z={z}");
+    }
+}
+
+#[test]
+fn every_cad_builder_produces_an_outward_oriented_closed_mesh() {
+    // `compute_volume` is an absolute value, so an inside-out mesh (normals into the solid) passes
+    // every closure and volume check. The signed volume exposes it: the airfoil, the spring and
+    // the cube were all built inside out.
+    use algebra_engine::cad::{
+        CustomShape, CycloidalGear, HelicalSpring, InternalGear, InvoluteGear, Mesh3D, NacaAirfoil,
+        ThreadedScrew,
+    };
+    let mut chamfered = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+    chamfered.head_chamfer = 0.7;
+    chamfered.socket_depth = 5.0;
+    let l_shape = [
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+    ];
+    let builders: Vec<(&str, Mesh3D)> = vec![
+        (
+            "involute spur",
+            InvoluteGear::spur(2.0, 20, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "involute small pinion",
+            InvoluteGear::spur(2.0, 12, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "helical",
+            InvoluteGear::helical(1.5, 17, 8.0, 20.0).generate_3d_mesh(),
+        ),
+        (
+            "cycloidal",
+            CycloidalGear::new(2.0, 24, 6.0).generate_3d_mesh(),
+        ),
+        (
+            "internal",
+            InternalGear::new(2.0, 40, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "airfoil",
+            NacaAirfoil::new("2412", 100.0, 300.0).generate_3d_mesh(),
+        ),
+        (
+            "symmetric airfoil",
+            NacaAirfoil::new("0012", 1.0, 1.0).generate_3d_mesh(),
+        ),
+        (
+            "spring",
+            HelicalSpring::new(2.0, 20.0, 5.0, 6.0).generate_3d_mesh(),
+        ),
+        (
+            "hex bolt",
+            ThreadedScrew::metric_bolt(8.0, 1.25, 30.0).generate_3d_mesh(),
+        ),
+        (
+            "socket screw",
+            ThreadedScrew::socket_screw(6.0, 1.0, 20.0).generate_3d_mesh(),
+        ),
+        ("chamfered socket screw", chamfered.generate_3d_mesh()),
+        (
+            "lead screw",
+            ThreadedScrew::lead_screw(12.0, 3.0, 60.0).generate_3d_mesh(),
+        ),
+        ("cube", Mesh3D::cube(1.0, 2.0, 3.0)),
+        ("extrusion ccw", Mesh3D::extrude_profile(&l_shape, 1.5)),
+        (
+            "extrusion cw",
+            Mesh3D::extrude_profile(&[[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]], 1.5),
+        ),
+        (
+            "implicit sphere",
+            CustomShape::ParametricImplicit {
+                expr_str: "x^2 + y^2 + z^2 - 1".into(),
+                bbox: algebra_engine::cad::BoundingBox3D::new([-1.5; 3], [1.5; 3]),
+            }
+            .to_tri_mesh()
+            .unwrap(),
+        ),
+    ];
+    for (name, mesh) in &builders {
+        assert!(mesh.is_closed(), "{name}: not closed");
+        assert!(
+            mesh.is_outward_oriented(),
+            "{name}: normals point into the solid (signed volume {})",
+            mesh.signed_volume()
+        );
+        assert!(
+            (mesh.signed_volume() - mesh.compute_volume()).abs() < 1e-9 * mesh.compute_volume()
+        );
+    }
+
+    // reverse_orientation turns any of them inside out and back.
+    let mut cube = Mesh3D::cube(1.0, 1.0, 1.0);
+    cube.reverse_orientation();
+    assert!(cube.is_closed() && !cube.is_outward_oriented() && cube.signed_volume() < 0.0);
+    cube.reverse_orientation();
+    assert!(cube.is_outward_oriented());
+    // An open mesh is never "outward oriented".
+    let mut open = Mesh3D::cube(1.0, 1.0, 1.0);
+    open.triangles.pop();
+    assert!(!open.is_outward_oriented());
 }

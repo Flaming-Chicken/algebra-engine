@@ -16,6 +16,7 @@ pub mod branch;
 pub mod cad;
 pub mod calculus;
 pub mod cartan;
+pub mod cartan_symbolic;
 pub mod cat_eval;
 pub mod cft;
 pub mod combinatorics;
@@ -28,7 +29,9 @@ pub mod exceptional_lie;
 pub mod executor;
 pub mod geometric_dl;
 pub mod geometry;
+pub mod gosper;
 pub mod gpu;
+pub mod guess;
 pub mod hecs;
 pub mod heuristic;
 pub mod html_export;
@@ -79,6 +82,7 @@ pub mod urscript_pose;
 pub mod visualizer;
 pub mod weyl_dmodules;
 pub mod workbench;
+pub mod zeilberger;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,
@@ -90,13 +94,14 @@ pub use branch::{
 };
 pub use cad::{
     BoltHeadType, BoundingBox3D, BvhIntersection, BvhNode, BvhTree, CadCell, CadCellType,
-    CadEngine, CadPolynomial, CsgBooleanOp, CustomShape, GeometricConstraint,
+    CadEngine, CadPolynomial, CsgBooleanOp, CustomShape, CycloidalGear, GeometricConstraint,
     GeometricConstraintSolver, GeometricEntity, HelicalSpring, InvoluteGear, Mesh3D, NacaAirfoil,
     Quantifier, QuantifierEliminator, Ray3D, RelationalOp, ShapeExporter, ShapeImporter, Sign,
     ThreadStandard, ThreadedScrew,
 };
 pub use calculus::{FractionalCalculus, SymbolicCalculus, VariationalCalculus};
 pub use cartan::{DifferentialForm, FormBasis, VectorField};
+pub use cartan_symbolic::SymbolicForm;
 pub use cat_eval::{CatEvalError, CatEvalInput, CatEvalOutput, CatExprEvaluator};
 pub use cft::{KacMoodyAlgebra, OperatorProductExpansion, VirasoroAlgebra};
 pub use combinatorics::{

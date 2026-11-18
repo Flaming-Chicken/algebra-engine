@@ -177,3 +177,418 @@ fn test_under_constrained_structures_are_reported_not_solved_with_zeros() {
     let error = pipeline.run_analysis().unwrap_err();
     assert!(error.to_string().contains("singular"), "{error}");
 }
+
+fn tet_volume(mesh: &algebra_engine::pde::FeaMesh, e: &[usize]) -> f64 {
+    let p: Vec<&Vec<f64>> = e.iter().map(|&i| &mesh.nodes[i]).collect();
+    let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+    let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+    let c = [p[3][0] - p[0][0], p[3][1] - p[0][1], p[3][2] - p[0][2]];
+    (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+        + a[2] * (b[0] * c[1] - b[1] * c[0]))
+        .abs()
+        / 6.0
+}
+
+#[test]
+fn a_bored_gear_is_meshed_as_a_solid_and_analysed_with_real_elasticity() {
+    use algebra_engine::pde::ElementType;
+    let gear = InvoluteGear::spur(2.0, 12, 8.0);
+    let fea = CadFeaBridge::gear_to_fea(&gear);
+    let cad = gear.generate_3d_mesh();
+
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    assert_eq!(
+        fea.nodes.len(),
+        cad.vertices.len(),
+        "FEA nodes are the CAD vertices"
+    );
+    // The tetrahedra fill the solid exactly: their volumes add up to the closed mesh's volume.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 1e-8 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    assert!(
+        fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12),
+        "no degenerate tetrahedra"
+    );
+
+    // Real 3-D elasticity: clamp the bore, load the teeth; the bore carries exactly the load.
+    let force = [500.0, -200.0, 30.0];
+    let mut pipeline =
+        SimulationPipeline::from_gear(&gear).with_physics(PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: 200_000.0,
+            poissons_ratio: 0.29,
+            density: 7850.0,
+            body_force: vec![0.0, 0.0, 0.0],
+            plane_stress: false,
+        });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "bore_hole".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "teeth_flanks".into(),
+        force_vector: force.to_vec(),
+    });
+    let result = pipeline.run_analysis().expect("solid gear analysis");
+    assert_eq!(result.fea_mesh.element_type, ElementType::Tet4);
+    assert!(result.max_magnitude() > 0.0);
+    assert!(result.max_von_mises_stress() > 0.0);
+    let bore = &result.fea_mesh.boundary_groups["bore_hole"];
+    for (dof, f) in force.iter().enumerate() {
+        let reaction: f64 = bore
+            .iter()
+            .map(|&n| result.solution.reaction_forces[n * 3 + dof])
+            .sum();
+        assert!(
+            (reaction + f).abs() < 1e-6 * f.abs().max(1.0),
+            "dof {dof}: reaction {reaction} vs load {f}"
+        );
+    }
+
+    // A gently twisted helical gear is still meshed as a solid with nearly the same volume; a
+    // strongly twisted one would fold the stacked prisms (the outline turns against the bore
+    // ring), so it keeps the surface fallback instead of producing inverted tetrahedra.
+    let gentle = InvoluteGear::helical(1.5, 50, 8.0, 3.0);
+    let fea = CadFeaBridge::gear_to_fea(&gentle);
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = gentle.generate_3d_mesh().compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.01 * solid,
+        "gentle helical tets {tets} vs solid {solid}"
+    );
+    let steep = InvoluteGear::helical(1.5, 14, 8.0, 20.0);
+    assert_eq!(
+        CadFeaBridge::gear_to_fea(&steep).element_type,
+        ElementType::Tri3
+    );
+
+    // Without a bore there is no annular cap to extrude: the surface fallback is used.
+    let mut plain = InvoluteGear::spur(2.0, 12, 8.0);
+    plain.bore_radius = 0.0;
+    assert_eq!(
+        CadFeaBridge::gear_to_fea(&plain).element_type,
+        ElementType::Tri3
+    );
+}
+
+#[test]
+fn a_wing_is_meshed_as_a_solid_and_bends_under_a_tip_load() {
+    use algebra_engine::pde::ElementType;
+    let mut wing = NacaAirfoil::new("2412", 100.0, 600.0);
+    let fea = CadFeaBridge::airfoil_to_fea(&wing);
+    let cad = wing.generate_3d_mesh();
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    // The CAD vertices come first, followed by one extra centroid node per interior section.
+    assert_eq!(fea.nodes.len(), cad.vertices.len() + 6);
+    for (n, v) in fea.nodes.iter().zip(&cad.vertices) {
+        assert_eq!(n.as_slice(), v.as_slice());
+    }
+    // The tetrahedra fill the wing exactly.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 1e-8 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    // No node is left out of the mesh (an unused node would make the system singular).
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u), "every node belongs to an element");
+
+    // A tip load in +y with the root clamped: the wing deflects towards +y, more towards the tip,
+    // and the root reactions balance the load.
+    let force = [0.0, 40.0, 0.0];
+    let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+    pipeline.fea_mesh = fea.clone();
+    pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 70_000.0,
+        poissons_ratio: 0.33,
+        density: 2700.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "wing_root".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "wing_tip".into(),
+        force_vector: force.to_vec(),
+    });
+    let result = pipeline.run_analysis().expect("wing structural analysis");
+    let uy = |z: f64| {
+        let nodes: Vec<usize> = (0..cad.vertices.len())
+            .filter(|&i| (cad.vertices[i][2] - z).abs() < 1e-6)
+            .collect();
+        nodes
+            .iter()
+            .map(|&i| result.solution.nodal_values[i * 3 + 1])
+            .sum::<f64>()
+            / nodes.len() as f64
+    };
+    let (mid, tip) = (uy(600.0 * 3.0 / 7.0), uy(600.0));
+    assert!(
+        tip > mid && mid > 0.0,
+        "deflection grows towards the tip: mid {mid}, tip {tip}"
+    );
+    let root = &result.fea_mesh.boundary_groups["wing_root"];
+    for (dof, f) in force.iter().enumerate() {
+        let reaction: f64 = root
+            .iter()
+            .map(|&n| result.solution.reaction_forces[n * 3 + dof])
+            .sum();
+        assert!(
+            // Tolerance relative to the size of the whole load (a component that should be zero
+            // carries solver noise of that order).
+            (reaction + f).abs() < 1e-5 * 40.0,
+            "dof {dof}: {reaction} vs {f}"
+        );
+    }
+
+    // A twisted wing (rotated sections never fold) is a solid as well.
+    wing.twist_deg = 8.0;
+    let twisted = CadFeaBridge::airfoil_to_fea(&wing);
+    assert_eq!(twisted.element_type, ElementType::Tet4);
+    let tets: f64 = twisted
+        .elements
+        .iter()
+        .map(|e| tet_volume(&twisted, e))
+        .sum();
+    let solid = wing.generate_3d_mesh().compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.02 * solid,
+        "twisted tets {tets} vs solid {solid}"
+    );
+}
+
+#[test]
+fn gear_boundary_groups_are_selected_by_geometry() {
+    for (module, teeth, bore) in [(2.0, 12usize, None), (2.0, 30, None), (1.5, 20, Some(4.0))] {
+        let mut gear = InvoluteGear::spur(module, teeth, 6.0);
+        if let Some(b) = bore {
+            gear.bore_radius = b;
+        }
+        let fea = CadFeaBridge::gear_to_fea(&gear);
+        let bore_radius = gear.bore_radius.min(0.8 * gear.root_diameter() / 2.0);
+        let pitch = gear.pitch_diameter() / 2.0;
+        let radius = |i: usize| fea.nodes[i][0].hypot(fea.nodes[i][1]);
+
+        let bore_nodes = &fea.boundary_groups["bore_hole"];
+        // Two layers of the 48-vertex bore ring and nothing else.
+        assert_eq!(bore_nodes.len(), 2 * 48, "z={teeth}");
+        assert!(
+            bore_nodes
+                .iter()
+                .all(|&i| (radius(i) - bore_radius).abs() < 1e-6),
+            "z={teeth}"
+        );
+
+        let teeth_nodes = &fea.boundary_groups["teeth_flanks"];
+        assert!(!teeth_nodes.is_empty());
+        assert!(
+            teeth_nodes.iter().all(|&i| radius(i) > pitch),
+            "z={teeth}: a flank node below the pitch circle"
+        );
+        // Every outline vertex above the pitch circle is included, none of the bore or the root.
+        let expected = fea
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| radius(*i) > pitch)
+            .count();
+        assert_eq!(teeth_nodes.len(), expected, "z={teeth}");
+        assert!(bore_nodes.iter().all(|i| !teeth_nodes.contains(i)));
+    }
+}
+
+#[test]
+fn a_spring_is_meshed_as_a_solid_and_compresses_under_an_axial_load() {
+    use algebra_engine::cad::HelicalSpring;
+    use algebra_engine::pde::ElementType;
+    let spring = HelicalSpring::new(2.0, 16.0, 5.0, 2.0);
+    let cad = spring.generate_3d_mesh();
+    let fea = CadFeaBridge::spring_to_fea(&spring);
+
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    let rings = (cad.vertices.len() - 2) / 8;
+    assert_eq!(fea.nodes.len(), cad.vertices.len() + (rings - 2));
+    for (n, v) in fea.nodes.iter().zip(&cad.vertices) {
+        assert_eq!(n.as_slice(), v.as_slice());
+    }
+    // 8 fan triangles per ring step.
+    assert_eq!(fea.elements.len(), 8 * (rings - 1) * 3);
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    // The tetrahedra fill the wire: about pi r^2 times the wire length, and close to the closed
+    // mesh's own volume (the prisms between rings are slightly warped, so not exact).
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.03 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u));
+    assert_eq!(fea.boundary_groups["spring_bottom"].len(), 9);
+    assert_eq!(fea.boundary_groups["spring_top"].len(), 9);
+
+    // Axial compression: bottom end clamped, load on the top end along -z.
+    let (e_mod, nu, load) = (200_000.0, 0.3, 10.0);
+    let analyse = |force: f64| {
+        let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+        pipeline.fea_mesh = fea.clone();
+        pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+            youngs_modulus: e_mod,
+            poissons_ratio: nu,
+            density: 7850.0,
+            body_force: vec![0.0, 0.0, 0.0],
+            plane_stress: false,
+        });
+        for dof in 0..3 {
+            pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+                group_name: "spring_bottom".into(),
+                dof_index: dof,
+                value: 0.0,
+            });
+        }
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+            group_name: "spring_top".into(),
+            force_vector: vec![0.0, 0.0, -force],
+        });
+        pipeline.run_analysis().expect("spring analysis")
+    };
+    let result = analyse(load);
+    let top = &result.fea_mesh.boundary_groups["spring_top"];
+    let deflection = -top
+        .iter()
+        .map(|&n| result.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / top.len() as f64;
+    assert!(deflection > 0.0, "the spring shortens under compression");
+    // Linear elasticity: doubling the load doubles the deflection.
+    let double = analyse(2.0 * load);
+    let top2 = -top
+        .iter()
+        .map(|&n| double.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / top.len() as f64;
+    assert!((top2 / deflection - 2.0).abs() < 1e-6);
+    // The clamp carries the whole load.
+    let bottom = &result.fea_mesh.boundary_groups["spring_bottom"];
+    let reaction: f64 = bottom
+        .iter()
+        .map(|&n| result.solution.reaction_forces[n * 3 + 2])
+        .sum();
+    assert!((reaction - load).abs() < 1e-5 * load, "reaction {reaction}");
+
+    // Stiffness against the coil formula k = G d^4 / (8 D^3 n). Linear tetrahedra over a wire only
+    // 8 elements around are much too stiff in bending/torsion, so the model is an upper bound; we
+    // require the right order of magnitude, never softer than the formula.
+    let g = e_mod / (2.0 * (1.0 + nu));
+    let k_formula = g * spring.wire_diameter.powi(4)
+        / (8.0 * spring.mean_diameter.powi(3) * spring.active_coils);
+    let ratio = (load / deflection) / k_formula;
+    assert!(ratio > 0.8 && ratio < 10.0, "stiffness ratio {ratio}");
+}
+
+#[test]
+fn a_screw_without_a_socket_is_meshed_as_a_solid_and_stretches_like_a_bar() {
+    use algebra_engine::cad::ThreadedScrew;
+    use algebra_engine::pde::ElementType;
+    let screw = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    let cad = screw.generate_3d_mesh();
+    let fea = CadFeaBridge::screw_to_fea(&screw);
+    assert_eq!(
+        fea.element_type,
+        ElementType::Tet4,
+        "a plain bolt is a solid"
+    );
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u), "every node belongs to an element");
+    // The tetrahedra fill the bolt; the lowered step rows only add a thin cone each.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.03 * solid && tets >= solid * 0.999,
+        "tets {tets} vs solid {solid}"
+    );
+
+    // A bolt with a socket keeps the surface mesh (a cavity is not a star-shaped stack).
+    let mut socketed = ThreadedScrew::metric_bolt(8.0, 4.0, 8.0);
+    socketed.socket_depth = 2.0;
+    assert_ne!(
+        CadFeaBridge::screw_to_fea(&socketed).element_type,
+        ElementType::Tet4
+    );
+
+    // Tension: tip clamped, the head pulled along +z. The shank is a bar of cross-section between
+    // the minor and the major circle, so the stiffness is bracketed by those two areas.
+    let (e_mod, load) = (200_000.0, 1000.0);
+    let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+    pipeline.fea_mesh = fea;
+    pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: e_mod,
+        poissons_ratio: 0.3,
+        density: 7850.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "shank_tip".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "bolt_head".into(),
+        force_vector: vec![0.0, 0.0, load],
+    });
+    let result = pipeline.run_analysis().expect("screw analysis");
+    let head = &result.fea_mesh.boundary_groups["bolt_head"];
+    let stretch = head
+        .iter()
+        .map(|&n| result.solution.nodal_values[n * 3 + 2])
+        .sum::<f64>()
+        / head.len() as f64;
+    assert!(stretch > 0.0, "the bolt lengthens under tension");
+    let tip = &result.fea_mesh.boundary_groups["shank_tip"];
+    let reaction: f64 = tip
+        .iter()
+        .map(|&n| result.solution.reaction_forces[n * 3 + 2])
+        .sum();
+    assert!((reaction + load).abs() < 1e-4 * load, "reaction {reaction}");
+    let (r_minor, r_major) = (screw.minor_radius(), screw.nominal_diameter / 2.0);
+    let k = load / stretch;
+    let k_soft = e_mod * std::f64::consts::PI * r_minor * r_minor / screw.total_length;
+    let k_stiff = e_mod * std::f64::consts::PI * r_major * r_major / screw.total_length;
+    assert!(
+        k > 0.9 * k_soft && k < 1.2 * k_stiff,
+        "k {k} not in [{k_soft}, {k_stiff}]"
+    );
+}

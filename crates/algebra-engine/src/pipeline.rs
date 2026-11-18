@@ -14,11 +14,12 @@
 //!   Generates deformed 3D CAD meshes $\mathbf{v}' = \mathbf{v} + \alpha \mathbf{u}$ and computes von Mises stress
 //!   distributions, temperature fields, and VTK data export.
 
-use crate::cad::{InvoluteGear, Mesh3D, NacaAirfoil, ThreadedScrew};
+use crate::cad::{HelicalSpring, InvoluteGear, Mesh3D, NacaAirfoil, ThreadedScrew};
 use crate::pde::{
     ElementType, FeaBoundaryCondition, FeaEngine, FeaMesh, FeaSolution, PhysicsDiscipline,
 };
 use algebra_core::error::AlgebraResult;
+use std::f64::consts::PI;
 
 /// Bridge utility for converting CAD representations to FEA simulation meshes.
 pub struct CadFeaBridge;
@@ -94,32 +95,281 @@ impl CadFeaBridge {
         fea
     }
 
+    /// Tetrahedral solid mesh of a bored gear, or `None` when the gear mesh is not a stack of
+    /// identical layers (no bore).
+    fn extruded_gear_solid(gear: &InvoluteGear, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let bore = gear
+            .bore_radius
+            .min(0.8 * gear.root_diameter() / 2.0)
+            .max(0.0);
+        if bore <= 1e-9 {
+            return None;
+        }
+        let per_layer = gear.generate_2d_profile(6).len() + 48;
+        let total = mesh_3d.vertices.len();
+        if !total.is_multiple_of(per_layer) || total / per_layer < 2 {
+            return None;
+        }
+        let layers = total / per_layer;
+        // The bottom cap: triangles lying entirely in the first layer (the walls span two layers).
+        let bottom: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .copied()
+            .filter(|t| t.iter().all(|&i| i < per_layer))
+            .collect();
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        let node_of = |layer: usize, local: usize| layer * per_layer + local;
+        Self::stack_prisms(
+            &mut fea,
+            &bottom,
+            layers,
+            &node_of,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
+        Some(fea)
+    }
+
+    /// Fill a stack of identical layers with tetrahedra: every base triangle (given by *local*
+    /// vertex ids) is extruded between consecutive layers and each prism is cut into three
+    /// tetrahedra. `node(layer, local)` gives the FEA node of a local vertex in a layer.
+    ///
+    /// Local ids are sorted before cutting so neighbouring prisms split their shared quad faces
+    /// along the same diagonal (a conforming mesh). `None` if a base triangle is degenerate or
+    /// changes orientation between layers (a strong twist that would give inverted tetrahedra).
+    fn stack_prisms(
+        fea: &mut FeaMesh,
+        base: &[[usize; 3]],
+        layers: usize,
+        node: &dyn Fn(usize, usize) -> usize,
+        orientation: &dyn Fn(&FeaMesh, usize, &[usize; 3]) -> f64,
+    ) -> Option<()> {
+        if base.is_empty() || layers < 2 {
+            return None;
+        }
+        // `orientation(mesh, layer, triangle)` is a signed measure of how the base triangle sits
+        // in that layer (its planar area for a straight stack, its normal along the path for a
+        // swept one); it must keep its sign through the stack.
+        for tri in base {
+            let reference = orientation(fea, 0, tri);
+            if reference.abs() < 1e-12 {
+                return None;
+            }
+            if (1..layers).any(|l| orientation(fea, l, tri) * reference <= 1e-12) {
+                return None;
+            }
+        }
+        for layer in 0..layers - 1 {
+            for tri in base {
+                let mut v = *tri;
+                v.sort_unstable();
+                let lo = |i: usize| node(layer, i);
+                let hi = |i: usize| node(layer + 1, i);
+                let (p0, p1, p2) = (v[0], v[1], v[2]);
+                fea.add_element(vec![lo(p0), lo(p1), lo(p2), hi(p2)]);
+                fea.add_element(vec![lo(p0), lo(p1), hi(p1), hi(p2)]);
+                fea.add_element(vec![lo(p0), hi(p0), hi(p1), hi(p2)]);
+            }
+        }
+        Some(())
+    }
+
+    /// Tetrahedral solid mesh of a wing: the outline cap (a fan from the section centroid) is
+    /// extruded through the spanwise sections. The FEA nodes are the CAD vertices followed by one
+    /// extra centroid node per intermediate section (the CAD mesh only has centroids at the two
+    /// ends). `None` for a strongly twisted wing whose sections would fold the prisms.
+    fn extruded_airfoil_solid(airfoil: &NacaAirfoil, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let n_prof = airfoil.generate_2d_coordinates(20).len();
+        let sections = 8;
+        // Layout of `generate_3d_mesh`: sections * n_prof outline vertices, then the bottom and
+        // top centroids.
+        if mesh_3d.vertices.len() != sections * n_prof + 2 {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (sections * n_prof, sections * n_prof + 1);
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        // Centroid of each intermediate section, at the section's own twist.
+        let mut middle = Vec::new();
+        for s in 1..sections - 1 {
+            let ring: Vec<&Vec<f64>> = (0..n_prof).map(|i| &fea.nodes[s * n_prof + i]).collect();
+            let cx = ring.iter().map(|p| p[0]).sum::<f64>() / n_prof as f64;
+            let cy = ring.iter().map(|p| p[1]).sum::<f64>() / n_prof as f64;
+            let z = ring[0][2];
+            middle.push((cx, cy, z));
+        }
+        let first_extra = fea.nodes.len();
+        for (cx, cy, z) in &middle {
+            fea.add_node(vec![*cx, *cy, *z]);
+        }
+        // Base triangles: the fan around the bottom centroid, in local ids (the centroid is local
+        // id `n_prof`).
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { n_prof } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < n_prof {
+                layer * n_prof + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == sections - 1 {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        let node_of = &node;
+        Self::stack_prisms(
+            &mut fea,
+            &base,
+            sections,
+            &node,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
+        Some(fea)
+    }
+
+    /// Tetrahedral solid mesh of a helical spring: the wire's circular cross-section (a fan around
+    /// the ring centre) is swept along the helix and each step between consecutive rings is cut
+    /// into tetrahedra. The FEA nodes are the CAD vertices followed by one centre node per
+    /// interior ring. `None` if a triangle of the cross-section would fold between rings.
+    fn extruded_spring_solid(spring: &HelicalSpring, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let steps_per_turn = 24;
+        let circ = 8;
+        let total_steps = (spring.active_coils * steps_per_turn as f64) as usize;
+        let rings = total_steps + 1;
+        if total_steps < 1 || mesh_3d.vertices.len() != rings * circ + 2 {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (rings * circ, rings * circ + 1);
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        let r_coil = spring.mean_diameter / 2.0;
+        let first_extra = fea.nodes.len();
+        for s in 1..total_steps {
+            let theta = (s as f64 / steps_per_turn as f64) * 2.0 * PI;
+            fea.add_node(vec![
+                r_coil * theta.cos(),
+                r_coil * theta.sin(),
+                (s as f64 / steps_per_turn as f64) * spring.pitch,
+            ]);
+        }
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { circ } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < circ {
+                layer * circ + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == total_steps {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        // Orientation of a cross-section triangle: its normal along the direction to the next
+        // ring's centre (the last ring looks back at the previous one).
+        let orientation = |mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+            let p = |i: usize| &mesh.nodes[node(layer, i)];
+            let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let n = [
+                u[1] * w[2] - u[2] * w[1],
+                u[2] * w[0] - u[0] * w[2],
+                u[0] * w[1] - u[1] * w[0],
+            ];
+            let (this, other) = if layer < total_steps {
+                (node(layer, circ), node(layer + 1, circ))
+            } else {
+                (node(layer - 1, circ), node(layer, circ))
+            };
+            let d = [
+                mesh.nodes[other][0] - mesh.nodes[this][0],
+                mesh.nodes[other][1] - mesh.nodes[this][1],
+                mesh.nodes[other][2] - mesh.nodes[this][2],
+            ];
+            n[0] * d[0] + n[1] * d[1] + n[2] * d[2]
+        };
+        Self::stack_prisms(&mut fea, &base, rings, &node, &orientation)?;
+        Some(fea)
+    }
+
+    /// Convert a helical spring to a simulation `FeaMesh` (a solid of linear tetrahedra, see
+    /// [`CadFeaBridge::extruded_spring_solid`]) with the end-face groups `"spring_bottom"` and
+    /// `"spring_top"`. Falls back to the surface triangulation if the sweep would fold.
+    pub fn spring_to_fea(spring: &HelicalSpring) -> FeaMesh {
+        let mesh_3d = spring.generate_3d_mesh();
+        let mut fea = Self::extruded_spring_solid(spring, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
+        // The end faces are the first and last rings plus their centres (vertex order is by ring).
+        let ring = |lo: bool| -> Vec<usize> {
+            let circ = 8;
+            let rings = (mesh_3d.vertices.len() - 2) / circ;
+            let range = if lo {
+                0..circ
+            } else {
+                (rings - 1) * circ..rings * circ
+            };
+            let centre = mesh_3d.vertices.len() - if lo { 2 } else { 1 };
+            range.chain(std::iter::once(centre)).collect()
+        };
+        fea.add_boundary_group("spring_bottom", ring(true));
+        fea.add_boundary_group("spring_top", ring(false));
+        fea
+    }
+
     /// Convert an Involute Gear to a specialized simulation `FeaMesh` with named `"bore_hole"` and `"teeth_flanks"`.
+    ///
+    /// A gear with a bore is meshed as a **solid** of linear tetrahedra (`Tet4`): the bottom cap's
+    /// triangles are extruded through the layers of the gear mesh and each triangular prism is cut
+    /// into three tetrahedra, so the analysis is real 3-D elasticity and the FEA nodes are exactly
+    /// the CAD vertices (displacements map straight onto the deformed shape). A gear without a
+    /// bore has no annular cap to extrude and falls back to the surface triangulation, whose 3-D
+    /// `Tri3` element is only a pseudo-stiffness (see ledger C11).
     pub fn gear_to_fea(gear: &InvoluteGear) -> FeaMesh {
         let mesh_3d = gear.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_gear_solid(gear, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
-        let min_r = mesh_3d
-            .vertices
-            .iter()
-            .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
-            .fold(f64::INFINITY, f64::min);
-        let max_r = mesh_3d
-            .vertices
-            .iter()
-            .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
-            .fold(0.0, f64::max);
-        let span_r = (max_r - min_r).max(1e-6);
-
+        // `bore_hole`: exactly the vertices on the bore cylinder (none for a gear without a bore).
+        // `teeth_flanks`: the outline vertices above the pitch circle (tooth tips and the upper
+        // flanks), where the mating gear loads the tooth. Both are selected by geometry, not by
+        // a fraction of the radial range, so they do not depend on the bore size or tooth count.
+        let bore_radius = gear
+            .bore_radius
+            .min(0.8 * gear.root_diameter() / 2.0)
+            .max(0.0);
+        let pitch_radius = gear.pitch_diameter() / 2.0;
         let mut bore_nodes = Vec::new();
         let mut tooth_nodes = Vec::new();
-
         for (idx, v) in mesh_3d.vertices.iter().enumerate() {
             let r = (v[0] * v[0] + v[1] * v[1]).sqrt();
-            if (r - min_r) <= span_r * 0.35 {
+            if bore_radius > 1e-9 && (r - bore_radius).abs() < 1e-6 * bore_radius.max(1.0) {
                 bore_nodes.push(idx);
-            }
-            if (max_r - r) <= span_r * 0.45 {
+            } else if r > pitch_radius {
                 tooth_nodes.push(idx);
             }
         }
@@ -129,16 +379,105 @@ impl CadFeaBridge {
         fea
     }
 
+    /// Tetrahedral solid mesh of a screw. The CAD mesh is one grid of star-shaped rows (closed
+    /// polar curves `r(theta)` at a height); the cross-section is a fan from the axis, extruded
+    /// through the rows by the shared prism stacker. A radius step is a pair of rows at the same
+    /// height, which would give zero-thickness (degenerate) tetrahedra, so the lower row of the
+    /// pair is moved down by `0.05 pitch` (at most half the gap below it): the step becomes a
+    /// thin conical face, adding under 1% to the volume. The FEA nodes are therefore the CAD
+    /// vertices with those rows lowered, plus one axis node per intermediate row.
+    ///
+    /// `None` (surface fallback) for a screw with a key socket, whose cavity is not a star-shaped
+    /// stack, or if the rows are not in increasing height.
+    fn extruded_screw_solid(screw: &ThreadedScrew, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        const N_THETA: usize = 96;
+        if screw.effective_socket().is_some() || mesh_3d.vertices.len() < 2 * N_THETA + 2 {
+            return None;
+        }
+        let rows = (mesh_3d.vertices.len() - 2) / N_THETA;
+        if rows * N_THETA + 2 != mesh_3d.vertices.len() {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (rows * N_THETA, rows * N_THETA + 1);
+        // Row heights, with the lower row of every equal-height pair lowered.
+        let mut z: Vec<f64> = (0..rows)
+            .map(|j| mesh_3d.vertices[j * N_THETA][2])
+            .collect();
+        let original = z.clone();
+        for j in 0..rows - 1 {
+            if (original[j + 1] - original[j]).abs() < 1e-9 {
+                let gap = if j > 0 {
+                    original[j] - original[j - 1]
+                } else {
+                    f64::INFINITY
+                };
+                z[j] -= (0.05 * screw.pitch).min(0.5 * gap);
+            }
+        }
+        if z.windows(2).any(|w| w[1] - w[0] < 1e-9) {
+            return None;
+        }
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for (idx, v) in mesh_3d.vertices.iter().enumerate() {
+            let height = if idx < rows * N_THETA {
+                z[idx / N_THETA]
+            } else {
+                v[2]
+            };
+            fea.add_node(vec![v[0], v[1], height]);
+        }
+        let first_extra = fea.nodes.len();
+        for zj in &z[1..rows - 1] {
+            fea.add_node(vec![0.0, 0.0, *zj]);
+        }
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { N_THETA } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < N_THETA {
+                layer * N_THETA + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == rows - 1 {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        let node_of = &node;
+        Self::stack_prisms(
+            &mut fea,
+            &base,
+            rows,
+            &node,
+            &|mesh: &FeaMesh, layer: usize, t: &[usize; 3]| {
+                let v = |i: usize| &mesh.nodes[node_of(layer, i)];
+                let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+                (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+            },
+        )?;
+        // The surface mesh has the bottom and top centres at the end rows' heights; keep them.
+        Some(fea)
+    }
+
     /// Convert a Threaded Fastener to a simulation `FeaMesh` with `"bolt_head"` and `"shank_tip"`.
+    ///
+    /// A screw without a key socket is meshed as a **solid** of linear tetrahedra (see
+    /// [`CadFeaBridge::extruded_screw_solid`]); a screw with a socket keeps the surface
+    /// triangulation (ledger D1).
     pub fn screw_to_fea(screw: &ThreadedScrew) -> FeaMesh {
         let mesh_3d = screw.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_screw_solid(screw, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
         let head_z = screw.total_length;
         let mut head_nodes = Vec::new();
         let mut tip_nodes = Vec::new();
 
-        for (idx, v) in mesh_3d.vertices.iter().enumerate() {
+        for (idx, v) in fea.nodes.iter().enumerate() {
             if v[2] >= head_z - 1e-3 {
                 head_nodes.push(idx);
             } else if v[2] <= 1e-3 {
@@ -152,9 +491,15 @@ impl CadFeaBridge {
     }
 
     /// Convert a NACA Airfoil wing to a simulation `FeaMesh` with `"wing_root"` and `"wing_tip"`.
+    ///
+    /// The wing is meshed as a **solid** of linear tetrahedra (the section is extruded through the
+    /// spanwise sections, see [`CadFeaBridge::gear_to_fea`] for the scheme), so structural
+    /// analysis is real 3-D elasticity; a strongly twisted wing keeps the surface triangulation.
+    /// The FEA nodes are the CAD vertices plus one extra centroid node per intermediate section.
     pub fn airfoil_to_fea(airfoil: &NacaAirfoil) -> FeaMesh {
         let mesh_3d = airfoil.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_airfoil_solid(airfoil, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
         let span = airfoil.span;
         let mut root_nodes = Vec::new();

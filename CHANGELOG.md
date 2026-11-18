@@ -3,6 +3,63 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
+## [0.6.0] - 2026-11-18
+
+### Added
+
+- `ThreadedScrew::thread_radius`, `thread_depth` and `minor_radius`; the Acme 29 degree and square thread profiles are now distinct from the ISO 60 degree profile.
+- FEA Dirichlet constraints are eliminated exactly rather than penalised with 1e12, and `reaction_forces` now reports the support reactions (was all zeros).
+- `CustomShape::BooleanCSG` of implicit surfaces now meshes (`implicit_field`, `Mesh3D::from_field`); Booleans involving meshes/extrusions/polytopes still report unsupported.
+- `InvoluteGear` teeth are true involutes (the pitch-circle thickness was too small before) and support a profile shift coefficient (`with_profile_shift`).
+- FEA assembly is sparse (`SparseAssembly`); constrained systems are built from it directly, so large problems never form a dense matrix.
+- FEA: the plane-strain constitutive matrix was wrong and element von Mises stress was computed from absolute nodal differences; stress is now `C B u` for the constant-strain triangle (plane stress and strain), verified exactly by a uniaxial patch test.
+- FEA: linear tetrahedral solid elements (`Tet4`, `FeaMesh::box_3d`); 2-D body forces are applied; unimplemented element types are an error instead of being skipped.
+- FEA: bilinear quadrilateral elasticity elements (`Quad4`, `FeaMesh::plate_2d_quad`).
+- FEA heat conduction on `Quad4` and `Tet4` elements; unsupported element types are an error instead of being skipped.
+- FEA: trilinear hexahedral elements (`Hex8`, `FeaMesh::box_3d_hex`) for elasticity and heat conduction.
+- The Cartan operation accepts symbolic coefficients (`d(x^2*y dx)`, wedge, interior product, Lie derivative) via `SymbolicForm::parse`.
+- `SymbolicForm::{hodge_star, codifferential, laplace_de_rham}`; the Cartan operation's Hodge star accepts symbolic coefficients.
+- Notebook: "Print / Export" in the presentation view now produces a printable HTML report (`export::to_html_report`); it only set a status message before.
+- Geometric constraint solver: `Point3D` unknowns with distance and coincidence constraints.
+- Symbolic form coefficients accept juxtaposed products (`x^2 y dx`).
+- FEA: quadratic triangle elements (`Tri6`, `FeaMesh::plate_2d_tri6`) for elasticity and heat conduction.
+- Notebook: workspace tabs and layout presets are routed to views (`WorkspaceTab::route`, `apply_layout`), with palette commands for the Presentation Report and Dependency Graph layouts.
+- Geometric constraint solver: a circle with no stated radius gets the radius solved from tangency.
+- FEA: quadratic tetrahedral elements (`Tet10`, `FeaMesh::box_3d_tet10`) for elasticity and heat conduction.
+- `CycloidalGear`: cycloidal spur gears with a closed, oriented solid (shared generator with the involute gear).
+- `InternalGear`: internal (ring) involute spur gears as closed solids.
+- `ThreadedScrew`: optional head chamfer and hexagonal key socket (closed solids, volumes verified).
+- Gear end caps no longer contain folded triangles (one per radial root segment on small pinions); `gear_to_fea` meshes a bored gear as a solid of linear tetrahedra for real 3-D elasticity.
+- Fixed: `NacaAirfoil`, `HelicalSpring` and `Mesh3D::cube` were inside out (normals into the solid); added `Mesh3D::{signed_volume, is_outward_oriented, reverse_orientation}`.
+- `airfoil_to_fea` meshes the wing as a solid of linear tetrahedra (shared prism stacker with the gear mesh).
+- Fixed: gear FEA boundary groups are selected by geometry (`bore_hole` = the bore cylinder, `teeth_flanks` = outline above the pitch circle) instead of by radial-range fractions.
+- `spring_to_fea`: helical springs are meshed as solids of linear tetrahedra with end-face groups.
+- `gosper::{gosper, QPoly, GosperSum}`: Gosper's algorithm for indefinite hypergeometric summation in exact rational arithmetic (the building block of Zeilberger's creative telescoping, which is still open).
+- `summation` handles polynomial times geometric summands (`k*2^k`, `(1/2)^k`, ...) in closed form via Gosper's algorithm.
+- Geometric constraint solver: `Line3D` with parallel, perpendicular and angle constraints in space.
+- Geometric constraint solver: point-to-line distances (2-D and 3-D); a distance of zero puts a point on a line.
+- Geometric constraint solver: `Plane3D` with point-plane distance and line/plane parallel and perpendicular constraints.
+- Geometric constraint solver: `PointND` unknowns in any dimension for distance and coincidence.
+- Cartan operations with symbolic vector fields (`InteriorProductSymbolic`, `LieDerivativeSymbolic`).
+- `guess::{guess_recurrence, guess_minimal_recurrence}`: P-recursive recurrences guessed from exact sequence values (a conjecture, not a proof).
+- `SymbolicForm::hodge_star_diagonal`: Hodge star for a diagonal metric with symbolic entries (spherical, Minkowski, ...).
+- Cartan operation `HodgeStarMetric`: Hodge star for a diagonal metric given as expressions.
+- `SymbolicForm::hodge_star_metric`: Hodge star for a general symmetric metric with symbolic entries.
+- Cartan operation `HodgeStarMatrix`: Hodge star for a general symmetric metric matrix given as expressions.
+- `zeilberger::{zeilberger, telescoping_at}`: creative telescoping by specialisation and interpolation (recurrences for binomial, squared-binomial and Delannoy sums, verified beyond the fitted range; not an all-n proof).
+- Fixed: the hard-coded Zeilberger certificates for the binomial and Vandermonde sums were wrong (sign; plus an extra factor for Vandermonde); a vacuous test (`valid || order == 1`) had hidden it. Both are now verified exactly.
+- Fixed: `SpinorHelicity::mandelstam_s` had the wrong sign and returned 0 for momenta along -z (spinor construction singular there); two always-true test assertions that hid this and an untested uncertainty path were replaced.
+- Fixed: `CadEngine::decompose` is now sound for one and two variables (exact McCallum projection, Sturm root isolation); it used to cut the base line at the roots of the polynomials with the other variables set to 0. Three or more variables, repeated factors and common factors are errors.
+- Fixed: `lim (1+x)^(1/x)` at a finite point (and every `1^oo` form) was NaN; constant folding in the limit engine could overflow `i64` (a panic for a high-order Taylor series of `sqrt(1+x)`).
+- `CadFeaBridge::screw_to_fea` meshes a screw without a key socket as a solid of linear tetrahedra (radius steps become thin cones); a socketed screw keeps the surface mesh.
+- Fixed: inverse trig/hyperbolic function names are canonicalised (`arctan` is `atan`, ...), so `d/dx arctan(x)` is evaluated; the arctan integral of a perfect-square constant is simplified (`1/2 atan(1/2 x)` for `1/(x^2 + 4)`). Expressions typed with the long names are now displayed with the short ones.
+- `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
+- `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
+- `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.
+- `CustomShape::to_tri_mesh` returns `Result`; N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.
+- `ThreadedScrew::generate_3d_mesh` returned an open ribbon surface (hundreds of open edges) regardless of the thread standard; it is now a closed solid with a threaded section, shank, hex or round head and end faces.
+- `CatExprEvaluator::eval_with_fidelity` ignored its `AnytimeBudget`; `ApproxResult::budget_exceeded` is now set when a tier runs past the hard timeout.
+
 ## [0.5.0] - 2026-11-17
 
 ### Added

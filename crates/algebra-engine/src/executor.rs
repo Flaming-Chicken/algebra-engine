@@ -22,6 +22,7 @@ use std::collections::HashMap;
 
 use crate::calculus::SymbolicCalculus;
 use crate::cartan::{DifferentialForm, VectorField};
+use crate::cartan_symbolic::SymbolicForm;
 use crate::combinatorics::{
     bell_number, catalan_number, combinations, derangements, factorial, integer_partitions,
     permutations, stirling_second_kind,
@@ -1823,6 +1824,24 @@ impl OperationExecutor {
                     let out = format!("{label} = {} (degree {})", form.to_text(), form.degree);
                     OperationResult::success(out.clone(), latex, out)
                 };
+                // Forms whose coefficients are expressions (`x^2 dy`) are handled by `SymbolicForm`.
+                let sym_names: Vec<String> = coords.to_vec();
+                let sym_parse = |text: &str, dim: usize| -> Result<SymbolicForm, String> {
+                    if dim == 0 || dim > sym_names.len() {
+                        return Err(format!(
+                            "dimension must be between 1 and {}",
+                            sym_names.len()
+                        ));
+                    }
+                    SymbolicForm::parse(graph, text, &sym_names[..dim]).map_err(|e| e.to_string())
+                };
+                let sym_report = |label: String, form: &SymbolicForm, latex: &str| {
+                    let out = format!("{label} = {} (degree {})", form.to_text(graph), form.degree);
+                    OperationResult::success(out.clone(), latex.to_string(), out)
+                };
+                let sym_vector = |components: &[f64]| -> Vec<algebra_core::ExprId> {
+                    components.iter().map(|&v| graph.float(v)).collect()
+                };
                 match kind {
                     CartanOpKind::Wedge {
                         form1_str,
@@ -1837,7 +1856,19 @@ impl OperationExecutor {
                             ),
                             Err(e) => OperationResult::error(e.to_string()),
                         },
-                        (Err(e), _) | (_, Err(e)) => OperationResult::error(e),
+                        (Err(e), _) | (_, Err(e)) => {
+                            match (sym_parse(form1_str, *dim), sym_parse(form2_str, *dim)) {
+                                (Ok(f1), Ok(f2)) => match f1.wedge(graph, &f2) {
+                                    Ok(w) => sym_report(
+                                        format!("Wedge Product ({form1_str}) ∧ ({form2_str})"),
+                                        &w,
+                                        "\\omega_1 \\wedge \\omega_2",
+                                    ),
+                                    Err(err) => OperationResult::error(err.to_string()),
+                                },
+                                _ => OperationResult::error(e),
+                            }
+                        }
                     },
                     CartanOpKind::ExteriorDerivative { form_str, dim } => {
                         match parse(form_str, *dim) {
@@ -1849,7 +1880,16 @@ impl OperationExecutor {
                                 ),
                                 Err(e) => OperationResult::error(e.to_string()),
                             },
-                            Err(e) => OperationResult::error(e),
+                            Err(e) => match sym_parse(form_str, *dim).and_then(|f| {
+                                f.exterior_derivative(graph).map_err(|x| x.to_string())
+                            }) {
+                                Ok(df) => sym_report(
+                                    format!("Exterior Derivative d({form_str})"),
+                                    &df,
+                                    "\\mathrm{d}\\omega",
+                                ),
+                                Err(_) => OperationResult::error(e),
+                            },
                         }
                     }
                     CartanOpKind::InteriorProduct {
@@ -1872,7 +1912,17 @@ impl OperationExecutor {
                                 Err(e) => OperationResult::error(e.to_string()),
                             }
                         }
-                        Err(e) => OperationResult::error(e),
+                        Err(e) => match sym_parse(form_str, *dim).and_then(|f| {
+                            f.interior_product(graph, &sym_vector(vector_field))
+                                .map_err(|x| x.to_string())
+                        }) {
+                            Ok(c) => sym_report(
+                                format!("Interior Product i_X({form_str})"),
+                                &c,
+                                "\\iota_X \\omega",
+                            ),
+                            Err(_) => OperationResult::error(e),
+                        },
                     },
                     CartanOpKind::LieDerivative {
                         form_str,
@@ -1894,8 +1944,124 @@ impl OperationExecutor {
                                 Err(e) => OperationResult::error(e.to_string()),
                             }
                         }
-                        Err(e) => OperationResult::error(e),
+                        Err(e) => match sym_parse(form_str, *dim).and_then(|f| {
+                            f.lie_derivative(graph, &sym_vector(vector_field))
+                                .map_err(|x| x.to_string())
+                        }) {
+                            Ok(l) => sym_report(
+                                format!("Lie Derivative L_X({form_str})"),
+                                &l,
+                                "\\mathcal{L}_X \\omega",
+                            ),
+                            Err(_) => OperationResult::error(e),
+                        },
                     },
+                    CartanOpKind::InteriorProductSymbolic {
+                        form_str,
+                        vector_field,
+                        dim,
+                    }
+                    | CartanOpKind::LieDerivativeSymbolic {
+                        form_str,
+                        vector_field,
+                        dim,
+                    } => {
+                        let lie = matches!(kind, CartanOpKind::LieDerivativeSymbolic { .. });
+                        // The vector components are parsed as expressions in the coordinates.
+                        let components: Result<Vec<algebra_core::ExprId>, String> = vector_field
+                            .iter()
+                            .map(|c| {
+                                parser
+                                    .parse(c)
+                                    .map_err(|e| format!("vector component `{c}`: {e:?}"))
+                            })
+                            .collect();
+                        let result = sym_parse(form_str, *dim).and_then(|f| {
+                            let v = components?;
+                            if lie {
+                                f.lie_derivative(graph, &v)
+                            } else {
+                                f.interior_product(graph, &v)
+                            }
+                            .map_err(|e| e.to_string())
+                        });
+                        match result {
+                            Ok(form) => {
+                                let (label, latex) = if lie {
+                                    (
+                                        format!("Lie Derivative L_X({form_str})"),
+                                        r"\mathcal{L}_X \omega",
+                                    )
+                                } else {
+                                    (
+                                        format!("Interior Product i_X({form_str})"),
+                                        r"\iota_X \omega",
+                                    )
+                                };
+                                sym_report(label, &form, latex)
+                            }
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
+                    CartanOpKind::HodgeStarMatrix {
+                        form_str,
+                        metric,
+                        dim,
+                    } => {
+                        let entries: Result<Vec<Vec<algebra_core::ExprId>>, String> = metric
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|c| {
+                                        parser
+                                            .parse(c)
+                                            .map_err(|e| format!("metric entry `{c}`: {e:?}"))
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+                        let result = sym_parse(form_str, *dim).and_then(|f| {
+                            f.hodge_star_metric(graph, &entries?)
+                                .map_err(|e| e.to_string())
+                        });
+                        match result {
+                            Ok(star) => sym_report(
+                                format!("Hodge Star ⋆({form_str}) for the given metric g"),
+                                &star,
+                                r"\star_g\omega",
+                            ),
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
+                    CartanOpKind::HodgeStarMetric {
+                        form_str,
+                        metric,
+                        dim,
+                    } => {
+                        let entries: Result<Vec<algebra_core::ExprId>, String> = metric
+                            .iter()
+                            .map(|c| {
+                                parser
+                                    .parse(c)
+                                    .map_err(|e| format!("metric entry `{c}`: {e:?}"))
+                            })
+                            .collect();
+                        let result = sym_parse(form_str, *dim).and_then(|f| {
+                            f.hodge_star_diagonal(graph, &entries?)
+                                .map_err(|e| e.to_string())
+                        });
+                        match result {
+                            Ok(star) => sym_report(
+                                format!(
+                                    "Hodge Star ⋆({form_str}) for g = diag({})",
+                                    metric.join(", ")
+                                ),
+                                &star,
+                                r"\star_g\omega",
+                            ),
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
                     CartanOpKind::HodgeStar {
                         form_str,
                         dim,
@@ -1909,7 +2075,17 @@ impl OperationExecutor {
                             ),
                             Err(e) => OperationResult::error(e.to_string()),
                         },
-                        Err(e) => OperationResult::error(e),
+                        Err(e) => match sym_parse(form_str, *dim).and_then(|f| {
+                            f.hodge_star(graph, *is_minkowski)
+                                .map_err(|x| x.to_string())
+                        }) {
+                            Ok(star) => sym_report(
+                                format!("Hodge Star ⋆({form_str})"),
+                                &star,
+                                "\\star\\omega",
+                            ),
+                            Err(_) => OperationResult::error(e),
+                        },
                     },
                 }
             }

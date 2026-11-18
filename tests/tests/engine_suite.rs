@@ -4,6 +4,8 @@
 
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
+#[path = "engine/limits_series_audit_tests.rs"]
+mod limits_series_audit_tests;
 
 #[path = "engine/branch_tests.rs"]
 mod branch_tests;
@@ -223,3 +225,21 @@ mod iga_stiffness_tests;
 
 #[path = "engine/cad_constraint_solver_tests.rs"]
 mod cad_constraint_solver_tests;
+
+#[path = "engine/symbolic_cartan_tests.rs"]
+mod symbolic_cartan_tests;
+
+#[path = "engine/gosper_tests.rs"]
+mod gosper_tests;
+
+#[path = "engine/geometric_summation_tests.rs"]
+mod geometric_summation_tests;
+
+#[path = "engine/guess_tests.rs"]
+mod guess_tests;
+
+#[path = "engine/zeilberger_tests.rs"]
+mod zeilberger_tests;
+
+#[path = "engine/cad_projection_tests.rs"]
+mod cad_projection_tests;

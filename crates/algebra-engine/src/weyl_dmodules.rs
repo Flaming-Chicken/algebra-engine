@@ -435,21 +435,25 @@ pub struct ZeilbergerAlgorithm;
 
 impl ZeilbergerAlgorithm {
     /// Prove recurrence for binomial sum $S(n) = \sum_k \binom{n}{k} = 2^n$:
-    /// Recurrence: $S(n+1) - 2 S(n) = 0$, Certificate: $G(n, k) = \frac{k}{n+1-k} \binom{n}{k}$.
+    /// Recurrence: $S(n+1) - 2 S(n) = 0$, Certificate: $G(n, k) = -\frac{k}{n+1-k} \binom{n}{k} = -\binom{n}{k-1}$,
+    /// so that $\binom{n+1}{k} - 2\binom{n}{k} = G(n, k+1) - G(n, k)$ (checked exactly in the tests; an earlier
+    /// version had the opposite sign).
     pub fn prove_binomial_sum() -> ZeilbergerResult {
         ZeilbergerResult {
             order: 1,
             recurrence_coeffs: vec!["-2.0".to_string(), "1.0".to_string()],
-            certificate_r_nk: "k / (n + 1 - k)".to_string(),
+            certificate_r_nk: "-k / (n + 1 - k)".to_string(),
         }
     }
 
-    /// Prove recurrence for Vandermonde convolution $\sum_k \binom{a}{k} \binom{b}{n-k} = \binom{a+b}{n}$.
+    /// Prove recurrence for Vandermonde convolution $\sum_k \binom{a}{k} \binom{b}{n-k} = \binom{a+b}{n}$:
+    /// $(n+1) S(n+1) - (a+b-n) S(n) = 0$ with $G(n, k) = R(n, k) F(n, k)$, $R = -k (b-n+k) / (n+1-k)$ (checked
+    /// exactly in the tests; an earlier version had an extra factor $1/(a+b-n)$ and the opposite sign).
     pub fn prove_vandermonde() -> ZeilbergerResult {
         ZeilbergerResult {
             order: 1,
             recurrence_coeffs: vec!["-(a + b - n)".to_string(), "(n + 1)".to_string()],
-            certificate_r_nk: "k * (b - n + k) / ((n + 1 - k) * (a + b - n))".to_string(),
+            certificate_r_nk: "-k * (b - n + k) / (n + 1 - k)".to_string(),
         }
     }
 

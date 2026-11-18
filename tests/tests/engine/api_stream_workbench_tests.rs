@@ -90,9 +90,22 @@ fn test_lifetime_sym_expr_calculus_and_algebra() {
     let roots = (x * x - 9).solve(&x).expect("solve");
     assert_eq!(roots.len(), 2);
 
+    // A free symbol without a binding is an error (the old assertion `is_err() || is_ok()` could
+    // not fail and tested nothing)...
     let ctx = ExecutionContext::new();
-    let unc = (2 * x + 1).eval_uncertain(&ctx);
-    assert!(unc.is_err() || unc.is_ok()); // Free x without binding safely handled without panic
+    assert!(
+        (2 * x + 1).eval_uncertain(&ctx).is_err(),
+        "an unbound symbol cannot be evaluated"
+    );
+    // ...and with a binding and a 1-sigma uncertainty the result propagates: 2 * (3 +- 0.1) + 1 = 7 +- 0.2.
+    let mut bound = ExecutionContext::new();
+    bound.bindings.insert("x".to_string(), 3.0);
+    bound.uncertainties.insert("x".to_string(), 0.1);
+    let unc = (2 * x + 1)
+        .eval_uncertain(&bound)
+        .expect("bound expression evaluates");
+    assert!((unc.mean - 7.0).abs() < 1e-12, "mean {}", unc.mean);
+    assert!((unc.std_dev - 0.2).abs() < 1e-12, "sigma {}", unc.std_dev);
     assert_eq!((x * y + 1).free_symbols().len(), 2);
 }
 

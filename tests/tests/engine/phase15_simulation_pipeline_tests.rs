@@ -375,3 +375,43 @@ fn a_wing_is_meshed_as_a_solid_and_bends_under_a_tip_load() {
         "twisted tets {tets} vs solid {solid}"
     );
 }
+
+#[test]
+fn gear_boundary_groups_are_selected_by_geometry() {
+    for (module, teeth, bore) in [(2.0, 12usize, None), (2.0, 30, None), (1.5, 20, Some(4.0))] {
+        let mut gear = InvoluteGear::spur(module, teeth, 6.0);
+        if let Some(b) = bore {
+            gear.bore_radius = b;
+        }
+        let fea = CadFeaBridge::gear_to_fea(&gear);
+        let bore_radius = gear.bore_radius.min(0.8 * gear.root_diameter() / 2.0);
+        let pitch = gear.pitch_diameter() / 2.0;
+        let radius = |i: usize| fea.nodes[i][0].hypot(fea.nodes[i][1]);
+
+        let bore_nodes = &fea.boundary_groups["bore_hole"];
+        // Two layers of the 48-vertex bore ring and nothing else.
+        assert_eq!(bore_nodes.len(), 2 * 48, "z={teeth}");
+        assert!(
+            bore_nodes
+                .iter()
+                .all(|&i| (radius(i) - bore_radius).abs() < 1e-6),
+            "z={teeth}"
+        );
+
+        let teeth_nodes = &fea.boundary_groups["teeth_flanks"];
+        assert!(!teeth_nodes.is_empty());
+        assert!(
+            teeth_nodes.iter().all(|&i| radius(i) > pitch),
+            "z={teeth}: a flank node below the pitch circle"
+        );
+        // Every outline vertex above the pitch circle is included, none of the bore or the root.
+        let expected = fea
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| radius(*i) > pitch)
+            .count();
+        assert_eq!(teeth_nodes.len(), expected, "z={teeth}");
+        assert!(bore_nodes.iter().all(|i| !teeth_nodes.contains(i)));
+    }
+}

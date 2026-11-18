@@ -238,27 +238,22 @@ impl CadFeaBridge {
         let mut fea = Self::extruded_gear_solid(gear, &mesh_3d)
             .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
-        let min_r = mesh_3d
-            .vertices
-            .iter()
-            .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
-            .fold(f64::INFINITY, f64::min);
-        let max_r = mesh_3d
-            .vertices
-            .iter()
-            .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
-            .fold(0.0, f64::max);
-        let span_r = (max_r - min_r).max(1e-6);
-
+        // `bore_hole`: exactly the vertices on the bore cylinder (none for a gear without a bore).
+        // `teeth_flanks`: the outline vertices above the pitch circle (tooth tips and the upper
+        // flanks), where the mating gear loads the tooth. Both are selected by geometry, not by
+        // a fraction of the radial range, so they do not depend on the bore size or tooth count.
+        let bore_radius = gear
+            .bore_radius
+            .min(0.8 * gear.root_diameter() / 2.0)
+            .max(0.0);
+        let pitch_radius = gear.pitch_diameter() / 2.0;
         let mut bore_nodes = Vec::new();
         let mut tooth_nodes = Vec::new();
-
         for (idx, v) in mesh_3d.vertices.iter().enumerate() {
             let r = (v[0] * v[0] + v[1] * v[1]).sqrt();
-            if (r - min_r) <= span_r * 0.35 {
+            if bore_radius > 1e-9 && (r - bore_radius).abs() < 1e-6 * bore_radius.max(1.0) {
                 bore_nodes.push(idx);
-            }
-            if (max_r - r) <= span_r * 0.45 {
+            } else if r > pitch_radius {
                 tooth_nodes.push(idx);
             }
         }

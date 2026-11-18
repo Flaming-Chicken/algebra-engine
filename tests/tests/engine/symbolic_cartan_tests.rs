@@ -636,3 +636,108 @@ fn the_cartan_operation_takes_a_metric_for_the_hodge_star() {
         .starts_with("ERROR")
     );
 }
+
+#[test]
+fn hodge_star_for_a_general_symmetric_metric() {
+    let g = ExprGraph::new();
+    let c: Vec<ExprId> = ["x", "y", "z"].iter().map(|n| g.symbol(n)).collect();
+    let m = |rows: [[&str; 3]; 3]| -> Vec<Vec<ExprId>> {
+        rows.iter()
+            .map(|r| r.iter().map(|e| expr(&g, e)).collect())
+            .collect()
+    };
+    let point = [0.7, -0.4, 1.1];
+    let value = |f: &SymbolicForm, blade: &[usize]| at(f, &g, &point, blade);
+
+    // A diagonal metric agrees with the diagonal implementation for forms of every degree.
+    let diag = m([
+        ["1", "0", "0"],
+        ["0", "x^2", "0"],
+        ["0", "0", "x^2*sin(y)^2"],
+    ]);
+    let diag_entries = [expr(&g, "1"), expr(&g, "x^2"), expr(&g, "x^2*sin(y)^2")];
+    let forms = [
+        SymbolicForm::function(&c, expr(&g, "x*y + 2")),
+        SymbolicForm::one_form(&c, &[expr(&g, "x"), expr(&g, "y*z"), expr(&g, "1")]).unwrap(),
+        SymbolicForm::term(&g, &c, expr(&g, "z + x"), &[0, 2]).unwrap(),
+        SymbolicForm::term(&g, &c, expr(&g, "y"), &[0, 1, 2]).unwrap(),
+    ];
+    for f in &forms {
+        let a = f.hodge_star_metric(&g, &diag).unwrap();
+        let b = f.hodge_star_diagonal(&g, &diag_entries).unwrap();
+        let (va, vb) = (
+            a.evaluate(&g, &point).unwrap(),
+            b.evaluate(&g, &point).unwrap(),
+        );
+        for (blade, x) in &vb {
+            let y = va.get(blade).copied().unwrap_or(0.0);
+            assert!(
+                (x - y).abs() < 1e-10,
+                "degree {} blade {:?}: {x} vs {y}",
+                f.degree,
+                blade.indices
+            );
+        }
+    }
+
+    // A constant non-diagonal metric: omega ^ star omega = <omega, omega>_g vol, with the inverse
+    // metric (1/3)[[2,-1,0],[-1,2,0],[0,0,3]] and vol = sqrt(det g) = sqrt 3.
+    let metric = m([["2", "1", "0"], ["1", "2", "0"], ["0", "0", "1"]]);
+    let sqrt3 = 3.0_f64.sqrt();
+    let dx = SymbolicForm::one_form(&c, &[expr(&g, "1"), expr(&g, "0"), expr(&g, "0")]).unwrap();
+    let star = dx.hodge_star_metric(&g, &metric).unwrap();
+    assert!((value(&dx.wedge(&g, &star).unwrap(), &[0, 1, 2]) - (2.0 / 3.0) * sqrt3).abs() < 1e-10);
+    let mixed = SymbolicForm::one_form(&c, &[expr(&g, "1"), expr(&g, "2"), expr(&g, "0")]).unwrap();
+    let star = mixed.hodge_star_metric(&g, &metric).unwrap();
+    assert!((value(&mixed.wedge(&g, &star).unwrap(), &[0, 1, 2]) - 2.0 * sqrt3).abs() < 1e-10);
+    let area = SymbolicForm::term(&g, &c, expr(&g, "1"), &[0, 1]).unwrap();
+    let star = area.hodge_star_metric(&g, &metric).unwrap();
+    assert!((value(&area.wedge(&g, &star).unwrap(), &[0, 1, 2]) - sqrt3 / 3.0).abs() < 1e-10);
+    // star star = +1 on a Riemannian 3-manifold.
+    for f in [&mixed, &area] {
+        let twice = f
+            .hodge_star_metric(&g, &metric)
+            .unwrap()
+            .hodge_star_metric(&g, &metric)
+            .unwrap();
+        let (vt, vf) = (
+            twice.evaluate(&g, &point).unwrap(),
+            f.evaluate(&g, &point).unwrap(),
+        );
+        for (blade, x) in &vf {
+            assert!((vt.get(blade).copied().unwrap_or(0.0) - x).abs() < 1e-10);
+        }
+    }
+
+    // A position-dependent non-diagonal metric in the plane: g = [[1 + x^2, x y], [x y, 1 + y^2]],
+    // det = 1 + x^2 + y^2 and g^{00} = (1 + y^2) / det.
+    let plane: Vec<ExprId> = ["x", "y"].iter().map(|n| g.symbol(n)).collect();
+    let g2 = vec![
+        vec![expr(&g, "1 + x^2"), expr(&g, "x*y")],
+        vec![expr(&g, "x*y"), expr(&g, "1 + y^2")],
+    ];
+    let dx2 = SymbolicForm::one_form(&plane, &[expr(&g, "1"), expr(&g, "0")]).unwrap();
+    let wedge = dx2
+        .wedge(&g, &dx2.hodge_star_metric(&g, &g2).unwrap())
+        .unwrap();
+    let p = [0.7, -0.4];
+    let det = 1.0 + p[0] * p[0] + p[1] * p[1];
+    let got = wedge.evaluate(&g, &p).unwrap()[&FormBasis {
+        indices: vec![0, 1],
+    }];
+    assert!((got - (1.0 + p[1] * p[1]) / det * det.sqrt()).abs() < 1e-10);
+
+    // Shape errors.
+    assert!(dx.hodge_star_metric(&g, &metric[..2]).is_err());
+    assert!(
+        dx.hodge_star_metric(
+            &g,
+            &[
+                vec![expr(&g, "1")],
+                vec![expr(&g, "1")],
+                vec![expr(&g, "1")]
+            ]
+        )
+        .is_err()
+    );
+}

@@ -3,28 +3,11 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
-## [0.5.0] - 2026-11-17
+## [0.6.0] - 2026-11-18
 
 ### Added
-- `ThreadedScrew::thread_radius`, `thread_depth` and `minor_radius`; the Acme 29 degree and square thread profiles are now distinct from the ISO 60 degree profile.
-- `Mesh3D::boundary_edge_count` and `Mesh3D::is_closed`: detect open boundaries and inconsistent winding.
-- `GpuKernelDescriptor::validate` (structural WGSL checks) and `SimdPolyVector::{checked_add, checked_multiply}`.
-- `cat_egraph::EGraph::rebuild` (congruence closure) and `extract_term`/`ExtractedTerm` (the cheapest expression as a tree). `EGraph::add` now hash-conses.
-- `IgaStiffnessMatrix::assemble_2d`, `NurbsPatchND::rational_basis` and `tangents`: the isogeometric Laplace-Beltrami stiffness matrix with analytic NURBS derivatives.
-- `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
-- `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
-- `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
-- `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
-- Notebook export (`urae_notebook::export`): LaTeX, SymPy and Lean 4 files are built from the parsed document. The LaTeX export previously wrapped the raw buffer, the Python export put it in a docstring, and the Lean export was a two-line stub.
-- `DysonSeries::first_order_term_between` (integral from `t0` to `t`) and `WeilJet::ito_drift`.
-- `ProofTrace::export_lean4_with` and `export_coq_with`: each step is a theorem about the real expressions it rewrote (closed by `ring`; unsupported steps are listed as comments). The CLI and agent export use them.
-- `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
-- Closed forms for second-order linear recurrences with distinct or repeated real roots.
-- Cartan operations (wedge, `d`, interior product, Lie derivative, Hodge star) read the form that was typed (`dx`, `2 dx + dz`, `dx^dy`).
-- Summation of any polynomial summand by Faulhaber's formula (degree up to 12).
-- Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
 
-### Changed
+- `ThreadedScrew::thread_radius`, `thread_depth` and `minor_radius`; the Acme 29 degree and square thread profiles are now distinct from the ISO 60 degree profile.
 - FEA Dirichlet constraints are eliminated exactly rather than penalised with 1e12, and `reaction_forces` now reports the support reactions (was all zeros).
 - `CustomShape::BooleanCSG` of implicit surfaces now meshes (`implicit_field`, `Mesh3D::from_field`); Booleans involving meshes/extrusions/polytopes still report unsupported.
 - `InvoluteGear` teeth are true involutes (the pitch-circle thickness was too small before) and support a profile shift coefficient (`with_profile_shift`).
@@ -73,6 +56,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.
 - `CustomShape::to_tri_mesh` returns `Result`; N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.
+- `ThreadedScrew::generate_3d_mesh` returned an open ribbon surface (hundreds of open edges) regardless of the thread standard; it is now a closed solid with a threaded section, shank, hex or round head and end faces.
+- `CatExprEvaluator::eval_with_fidelity` ignored its `AnytimeBudget`; `ApproxResult::budget_exceeded` is now set when a tier runs past the hard timeout.
+
+## [0.5.0] - 2026-11-17
+
+### Added
+- `Mesh3D::boundary_edge_count` and `Mesh3D::is_closed`: detect open boundaries and inconsistent winding.
+- `GpuKernelDescriptor::validate` (structural WGSL checks) and `SimdPolyVector::{checked_add, checked_multiply}`.
+- `cat_egraph::EGraph::rebuild` (congruence closure) and `extract_term`/`ExtractedTerm` (the cheapest expression as a tree). `EGraph::add` now hash-conses.
+- `IgaStiffnessMatrix::assemble_2d`, `NurbsPatchND::rational_basis` and `tangents`: the isogeometric Laplace-Beltrami stiffness matrix with analytic NURBS derivatives.
+- `RittWuReducer::reduce` (differential pseudo-division) and `is_reduced_wrt`; `DiffPolynomial` normalisation and arithmetic (`add`, `sub`, `mul`, `scale`, `coefficient_of`, `initial`).
+- `UraeLanguageServer::completions_at`: offers names defined above the cursor, newest first, before the catalogue.
+- `SymbolicOdeSolver::frobenius_series_at_zero`: Frobenius series at a regular singular point (the module documentation previously claimed this method without implementing it).
+- `poly::exact`: exact Gröbner bases over the rationals (`ExactPoly`, `ExactGrobner`) with a decision procedure for ideal membership. The floating-point `GrobnerBasis` is documented as numeric.
+- Notebook export (`urae_notebook::export`): LaTeX, SymPy and Lean 4 files are built from the parsed document. The LaTeX export previously wrapped the raw buffer, the Python export put it in a docstring, and the Lean export was a two-line stub.
+- `DysonSeries::first_order_term_between` (integral from `t0` to `t`) and `WeilJet::ito_drift`.
+- `ProofTrace::export_lean4_with` and `export_coq_with`: each step is a theorem about the real expressions it rewrote (closed by `ring`; unsupported steps are listed as comments). The CLI and agent export use them.
+- `calculus::pade_approximant`: exact Padé `[l/m]` approximants from rational Taylor coefficients.
+- Closed forms for second-order linear recurrences with distinct or repeated real roots.
+- Cartan operations (wedge, `d`, interior product, Lie derivative, Hodge star) read the form that was typed (`dx`, `2 dx + dz`, `dx^dy`).
+- Summation of any polynomial summand by Faulhaber's formula (degree up to 12).
+- Clifford vector products and rotor rotations compute real results; `export <format> <expr>` renders the expression in LaTeX, Unicode or MathML.
+
+### Changed
+- `CustomShape::to_tri_mesh` returns `Result`; implicit surfaces, N-D polytopes and Boolean CSG are reported as unsupported instead of being replaced by a unit cube.
 - `CodeGenerator::compile_fn1`, `compile_fn2` and `compile_fn_n` compile to bytecode once and evaluate on `f64` per call instead of cloning the graph and substituting symbolically on every call.
 - `VmCompiler` reports an unbound symbol as a compilation error; it used to compile it as the variable and return wrong numbers.
 - `AdjointSensitivitySolver::compute_gradient` back-propagates exactly through the RK4 steps of `NeuralOde::forward` (fourth-order accurate gradients). It was a first-order scheme with an error of about 1% at 100 steps, and it ignored its `vector_field` argument.
@@ -91,8 +99,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Unsupported summands, complex-root and higher-order recurrences return an error instead of a wrong formula.
 
 ### Fixed
-- `ThreadedScrew::generate_3d_mesh` returned an open ribbon surface (hundreds of open edges) regardless of the thread standard; it is now a closed solid with a threaded section, shank, hex or round head and end faces.
-- `CatExprEvaluator::eval_with_fidelity` ignored its `AnytimeBudget`; `ApproxResult::budget_exceeded` is now set when a tier runs past the hard timeout.
 - `poly::groebner_basis` returned its input with zero polynomials removed; it now computes the reduced Groebner basis over the rationals. `SparseMonomial::cmp_grevlex` is a genuine graded reverse lexicographic order.
 - `Mesh3D::extrude_profile` capped non-convex outlines with a fan from one vertex (overlapping or inverted faces); it now ear-clips the polygon, handles either winding, and rejects degenerate or self-intersecting profiles.
 - `NacaAirfoil::generate_3d_mesh` and `HelicalSpring::generate_3d_mesh` returned open shells without end caps (so `compute_volume` was meaningless); they are now closed solids. The airfoil outline no longer repeats its leading-edge point. `ThreadedScrew` meshes are documented as open surfaces.

@@ -47,7 +47,19 @@ fn limits_and_series_agree_with_known_values() {
         }
     }
     // Series: compare the truncated series with the function near 0.
-    let fns = ["exp(x)", "sin(x)", "cos(x)", "1/(1-x)", "ln(1+x)", "atan(x)", "sqrt(1+x)", "tan(x)", "exp(x)*cos(x)", "sinh(x)", "1/(1+x^2)"];
+    let fns = [
+        "exp(x)",
+        "sin(x)",
+        "cos(x)",
+        "1/(1-x)",
+        "ln(1+x)",
+        "atan(x)",
+        "sqrt(1+x)",
+        "tan(x)",
+        "exp(x)*cos(x)",
+        "sinh(x)",
+        "1/(1+x^2)",
+    ];
     for f in fns {
         let ex = parser.parse(f).unwrap();
         let zero = parser.parse("0").unwrap();
@@ -61,7 +73,11 @@ fn limits_and_series_agree_with_known_values() {
                     let ctx = EvalContext::with_bindings(15, b);
                     let a = graph.evalf(s, &ctx).map(|v| v.to_f64());
                     let t = graph.evalf(ex, &ctx).map(|v| v.to_f64());
-                    if let (Ok(a), Ok(t)) = (a, t) { worst = worst.max((a - t).abs()); } else { worst = f64::NAN; }
+                    if let (Ok(a), Ok(t)) = (a, t) {
+                        worst = worst.max((a - t).abs());
+                    } else {
+                        worst = f64::NAN;
+                    }
                 }
                 assert!(worst < 1e-8, "series of {f}: worst error {worst:e}");
             }

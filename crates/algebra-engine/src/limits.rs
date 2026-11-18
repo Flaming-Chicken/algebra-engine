@@ -138,7 +138,8 @@ impl LimitEngine {
                 let one = graph.integer(1);
                 let ln_base = graph.function("ln", [base]);
                 let inverse = graph.div(one, exp);
-                let inverse = crate::simplify::Simplifier::simplify(graph, inverse).unwrap_or(inverse);
+                let inverse =
+                    crate::simplify::Simplifier::simplify(graph, inverse).unwrap_or(inverse);
                 let quotient = graph.div(ln_base, inverse);
                 if let Ok(l) = Self::limit_directed(graph, quotient, wrt, point, direction)
                     && !Self::is_indeterminate(graph, l)
@@ -477,7 +478,9 @@ impl LimitEngine {
                 ) = (&graph.get(s_base).kind, &graph.get(s_exp).kind)
                 {
                     // Exact only while the result fits an i64; otherwise the power stays symbolic.
-                    let magnitude = u32::try_from(e.unsigned_abs()).ok().and_then(|n| b.checked_pow(n));
+                    let magnitude = u32::try_from(e.unsigned_abs())
+                        .ok()
+                        .and_then(|n| b.checked_pow(n));
                     if let Some(power) = magnitude {
                         if *e >= 0 {
                             return graph.integer(power);

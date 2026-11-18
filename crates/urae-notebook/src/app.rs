@@ -1924,31 +1924,45 @@ impl eframe::App for UraeNotebookApp {
                 }
                 "__URAE_CMD_LAYOUT_FLUID__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::FluidNotepad);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::FluidNotepad);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
                 "__URAE_CMD_LAYOUT_DUAL__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::SplitDual);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::SplitDual);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
                 "__URAE_CMD_LAYOUT_TRIPLE__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::TripleIDE);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::TripleIDE);
+                    self.route_workspace_tab();
                     self.show_cli_terminal = true;
                     self.show_viewport_3d = true;
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
+                "__URAE_CMD_LAYOUT_PRESENTATION__" => {
+                    self.workspace
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::PresentationReport);
+                    self.route_workspace_tab();
+                    self.state.session.settings.workspace_preset = self.workspace.layout_preset;
+                    self.state.save_session();
+                }
+                "__URAE_CMD_LAYOUT_GRAPH__" => {
+                    self.workspace
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::DependencyGraph);
+                    self.route_workspace_tab();
+                    self.state.session.settings.workspace_preset = self.workspace.layout_preset;
+                    self.state.save_session();
+                }
                 "__URAE_CMD_LAYOUT_ZEN__" => {
                     self.workspace
-                        .set_layout(crate::ui::WorkspaceLayoutPreset::ZenMode);
-                    self.view_mode = ViewMode::SmartStream;
+                        .apply_layout(crate::ui::WorkspaceLayoutPreset::ZenMode);
+                    self.route_workspace_tab();
                     self.state.session.settings.workspace_preset = self.workspace.layout_preset;
                     self.state.save_session();
                 }
@@ -6384,6 +6398,16 @@ impl UraeNotebookApp {
                 });
             });
         });
+    }
+
+    /// Make the central view and side panels follow the active workspace tab
+    /// ([`crate::ui::WorkspaceTab::route`]). A tab that needs the 3-D viewport or the terminal
+    /// turns that panel on; it never turns one off, since the user may have opened it separately.
+    pub fn route_workspace_tab(&mut self) {
+        let route = self.workspace.active_tab.route();
+        self.view_mode = route.view;
+        self.show_viewport_3d |= route.viewport_3d;
+        self.show_cli_terminal |= route.terminal;
     }
 
     /// The printable HTML report of the current document: each formula line is followed by its

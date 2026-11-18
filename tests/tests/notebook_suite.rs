@@ -31,3 +31,6 @@ mod smart_stream_tests;
 
 #[path = "notebook/export_tests.rs"]
 mod export_tests;
+
+#[path = "notebook/workspace_routing_tests.rs"]
+mod workspace_routing_tests;

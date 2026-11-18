@@ -297,6 +297,20 @@ impl CommandPalette {
             },
             CommandItem {
                 category: "Layout",
+                title: "Layout: Presentation Report",
+                description: "Full-page clean report view with print / HTML export",
+                syntax_template: "__URAE_CMD_LAYOUT_PRESENTATION__",
+                shortcut: Some("layout:presentation"),
+            },
+            CommandItem {
+                category: "Layout",
+                title: "Layout: Dependency Graph",
+                description: "Full-page view of how the document's lines depend on each other",
+                syntax_template: "__URAE_CMD_LAYOUT_GRAPH__",
+                shortcut: Some("layout:graph"),
+            },
+            CommandItem {
+                category: "Layout",
                 title: "Layout: Zen Mode",
                 description: "Distraction-free fullscreen mathematical workspace",
                 syntax_template: "__URAE_CMD_LAYOUT_ZEN__",

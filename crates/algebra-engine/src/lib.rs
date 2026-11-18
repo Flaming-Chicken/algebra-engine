@@ -83,6 +83,7 @@ pub mod visualizer;
 pub mod weyl_dmodules;
 pub mod workbench;
 pub mod zeilberger;
+pub mod zeilberger_proof;
 
 pub use analysis::{
     ClassifiedZero, CriticalPoint1D, CriticalPointKind, CriticalPointND, FunctionAnalyzer, ZeroType,

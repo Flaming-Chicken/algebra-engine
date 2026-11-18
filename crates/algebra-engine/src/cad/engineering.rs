@@ -649,6 +649,11 @@ pub struct ThreadedScrew {
     pub thread_standard: ThreadStandard,
     /// Head type (Hex, Socket Cap, etc.).
     pub head_type: BoltHeadType,
+    /// Radial size of the 45 degree chamfer on the top edge of the head (0 for none).
+    pub head_chamfer: f64,
+    /// Depth of the hexagonal key socket cut into the top of the head (0 for none); the socket
+    /// is `0.8 d` across flats.
+    pub socket_depth: f64,
 }
 
 impl ThreadedScrew {
@@ -661,6 +666,8 @@ impl ThreadedScrew {
             total_length: total_len,
             thread_standard: ThreadStandard::IsoMetric60,
             head_type: BoltHeadType::Hexagonal,
+            head_chamfer: 0.0,
+            socket_depth: 0.0,
         }
     }
 
@@ -673,6 +680,8 @@ impl ThreadedScrew {
             total_length: total_len,
             thread_standard: ThreadStandard::IsoMetric60,
             head_type: BoltHeadType::SocketCap,
+            head_chamfer: 0.0,
+            socket_depth: 0.0,
         }
     }
 
@@ -685,6 +694,8 @@ impl ThreadedScrew {
             total_length: length,
             thread_standard: ThreadStandard::Acme29,
             head_type: BoltHeadType::None,
+            head_chamfer: 0.0,
+            socket_depth: 0.0,
         }
     }
 
@@ -732,6 +743,30 @@ impl ThreadedScrew {
         } else {
             r_major - depth * (u - root - flank - crest) / flank.max(1e-12)
         }
+    }
+
+    /// The head chamfer actually applied: clamped so it is smaller than half the head's across
+    /// flats and than its height (0 when there is no head).
+    pub fn effective_chamfer(&self) -> f64 {
+        match self.head_shape() {
+            Some((across_flats, _, height)) => self
+                .head_chamfer
+                .clamp(0.0, 0.45 * (across_flats / 2.0).min(height)),
+            None => 0.0,
+        }
+    }
+
+    /// The key socket actually cut: `(across_flats, depth)`, or `None`. The depth is limited to
+    /// 90% of the head height, and the socket must fit inside the head's top face.
+    pub fn effective_socket(&self) -> Option<(f64, f64)> {
+        let (across_flats, _, height) = self.head_shape()?;
+        let key = 0.8 * self.nominal_diameter;
+        // The socket's corners (circumradius key / sqrt 3) must stay inside the chamfered top.
+        let top_inner = (across_flats / 2.0 - self.effective_chamfer()) * 0.9;
+        if self.socket_depth <= 0.0 || key / 3.0_f64.sqrt() >= top_inner {
+            return None;
+        }
+        Some((key, self.socket_depth.min(0.9 * height)))
     }
 
     /// Head outline radius at polar angle `theta` (hexagon with the given across-flats width, or a
@@ -799,8 +834,28 @@ impl ThreadedScrew {
                     across_flats / 2.0
                 }
             };
+            let chamfer = self.effective_chamfer();
+            let top = z0 + height;
             rows.push((z0, Box::new(head)));
-            rows.push((z0 + height, Box::new(head)));
+            if chamfer > 0.0 {
+                // A 45 degree chamfer: the outline shrinks by `chamfer` (about the apothem or radius)
+                // over the last `chamfer` of the height.
+                let shrink = 1.0 - chamfer / (across_flats / 2.0);
+                rows.push((top - chamfer, Box::new(head)));
+                rows.push((top, Box::new(move |theta: f64| shrink * head(theta))));
+            } else {
+                rows.push((top, Box::new(head)));
+            }
+            if let Some((key, depth)) = self.effective_socket() {
+                // Hexagonal socket: a step down to the socket outline on the top face (an annulus),
+                // a wall down to the floor, and the end fan closes the floor.
+                let socket = move |theta: f64| -> f64 {
+                    let sector = theta.rem_euclid(PI / 3.0) - PI / 6.0;
+                    (key / 2.0) / sector.cos()
+                };
+                rows.push((top, Box::new(socket)));
+                rows.push((top - depth, Box::new(socket)));
+            }
         }
 
         for (z, radius) in &rows {

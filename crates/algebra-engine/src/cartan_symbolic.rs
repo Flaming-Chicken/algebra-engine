@@ -271,6 +271,70 @@ impl SymbolicForm {
         Ok(out)
     }
 
+    /// Hodge star for a general symmetric metric `g_ij(x)` (any entries, up to four coordinates)
+    /// with the orientation `dx^0 ^ ... ^ dx^{n-1}`:
+    ///
+    /// `star(omega)_J = sqrt|det g| sum_I sign(I, J) omega^I`, where the raised components are
+    /// `omega^I = sum_L minor_{I,L}(g^{-1}) omega_L` (minors of the inverse metric).
+    ///
+    /// The inverse is the adjugate over the determinant, built symbolically, so entries may be
+    /// expressions in the coordinates; nothing is simplified. For a diagonal metric this equals
+    /// [`SymbolicForm::hodge_star_diagonal`].
+    pub fn hodge_star_metric(&self, g: &ExprGraph, metric: &[Vec<ExprId>]) -> AlgebraResult<Self> {
+        let n = self.coords.len();
+        if n > 4 {
+            return Err(error(
+                "the general metric Hodge star supports up to four coordinates",
+            ));
+        }
+        if metric.len() != n || metric.iter().any(|row| row.len() != n) {
+            return Err(error("the metric must be an n x n matrix of expressions"));
+        }
+        let det = determinant(g, metric);
+        // Inverse metric: adj(g) / det(g), with adj_{ij} = (-1)^{i+j} minor_{ji}.
+        let inverse: Vec<Vec<ExprId>> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| {
+                        let m = submatrix(metric, &[j], &[i]);
+                        let cofactor = determinant(g, &m);
+                        let cofactor = signed(g, cofactor, if (i + j) % 2 == 0 { 1 } else { -1 });
+                        g.div(cofactor, det)
+                    })
+                    .collect()
+            })
+            .collect();
+        let volume = g.function("sqrt", [g.function("abs", [det])]);
+        let k = self.degree;
+        let mut out = Self::zero(&self.coords, n - k);
+        for i_set in subsets(n, k) {
+            // omega^I = sum over L of the minor of the inverse metric (rows I, columns L) * omega_L.
+            let mut raised = g.integer(0);
+            for (basis, &c) in &self.terms {
+                let minor = if k == 0 {
+                    g.integer(1)
+                } else {
+                    determinant(g, &submatrix_keep(&inverse, &i_set, &basis.indices))
+                };
+                raised = g.add([raised, g.mul([minor, c])]);
+            }
+            let complement: Vec<usize> = (0..n).filter(|i| !i_set.contains(i)).collect();
+            let mut full = i_set.clone();
+            full.extend(&complement);
+            let (_, sign) = FormBasis::new(full);
+            let term = signed(g, g.mul([volume, raised]), sign);
+            let key = FormBasis {
+                indices: complement,
+            };
+            let merged = match out.terms.get(&key) {
+                Some(&existing) => g.add([existing, term]),
+                None => term,
+            };
+            out.terms.insert(key, merged);
+        }
+        Ok(out)
+    }
+
     /// Codifferential `delta = (-1)^{n(k+1)+1} star d star` (Euclidean metric): it lowers the
     /// degree by one, and `delta` of a 1-form is minus the divergence.
     pub fn codifferential(&self, g: &ExprGraph) -> AlgebraResult<Self> {
@@ -588,5 +652,63 @@ fn insert_implicit_products(text: &str) -> String {
             i += 1;
         }
     }
+    out
+}
+
+/// Determinant of a square matrix of expressions by cofactor expansion along the first row
+/// (the empty matrix has determinant 1).
+fn determinant(g: &ExprGraph, m: &[Vec<ExprId>]) -> ExprId {
+    match m.len() {
+        0 => g.integer(1),
+        1 => m[0][0],
+        n => {
+            let terms: Vec<ExprId> = (0..n)
+                .map(|j| {
+                    let minor = determinant(g, &submatrix(m, &[0], &[j]));
+                    signed(g, g.mul([m[0][j], minor]), if j % 2 == 0 { 1 } else { -1 })
+                })
+                .collect();
+            g.add(terms)
+        }
+    }
+}
+
+/// `m` without the listed rows and columns.
+fn submatrix(m: &[Vec<ExprId>], drop_rows: &[usize], drop_cols: &[usize]) -> Vec<Vec<ExprId>> {
+    m.iter()
+        .enumerate()
+        .filter(|(i, _)| !drop_rows.contains(i))
+        .map(|(_, row)| {
+            row.iter()
+                .enumerate()
+                .filter(|(j, _)| !drop_cols.contains(j))
+                .map(|(_, &v)| v)
+                .collect()
+        })
+        .collect()
+}
+
+/// The submatrix of `m` with exactly the listed rows and columns, in the given order.
+fn submatrix_keep(m: &[Vec<ExprId>], rows: &[usize], cols: &[usize]) -> Vec<Vec<ExprId>> {
+    rows.iter()
+        .map(|&i| cols.iter().map(|&j| m[i][j]).collect())
+        .collect()
+}
+
+/// All sorted `k`-element subsets of `0..n`.
+fn subsets(n: usize, k: usize) -> Vec<Vec<usize>> {
+    fn go(start: usize, n: usize, k: usize, current: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if current.len() == k {
+            out.push(current.clone());
+            return;
+        }
+        for i in start..n {
+            current.push(i);
+            go(i + 1, n, k, current, out);
+            current.pop();
+        }
+    }
+    let mut out = Vec::new();
+    go(0, n, k, &mut Vec::new(), &mut out);
     out
 }

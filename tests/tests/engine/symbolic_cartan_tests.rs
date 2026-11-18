@@ -184,3 +184,124 @@ fn mismatched_inputs_are_errors() {
     let h = SymbolicForm::function(&c, expr(&g, "x + q"));
     assert!(h.evaluate(&g, &[1.0, 2.0, 3.0]).is_err());
 }
+
+fn run(kind: algebra_core::operation::CartanOpKind) -> String {
+    use algebra_core::operation::MathOperation;
+    use algebra_engine::executor::{ExecutionContext, OperationExecutor};
+    let g = ExprGraph::new();
+    let res =
+        OperationExecutor::execute(&g, &MathOperation::Cartan(kind), &ExecutionContext::new());
+    if res.is_error {
+        format!("ERROR {}", res.error_msg.unwrap_or_default())
+    } else {
+        res.output_text
+    }
+}
+
+#[test]
+fn the_cartan_operation_accepts_symbolic_coefficients() {
+    use algebra_core::operation::CartanOpKind::{
+        ExteriorDerivative, InteriorProduct, LieDerivative, Wedge,
+    };
+
+    // d(x^2 y dx) = x^2 dy^dx = -x^2 dx^dy.
+    let d = run(ExteriorDerivative {
+        form_str: "x^2*y dx".into(),
+        dim: 3,
+    });
+    assert!(
+        d.contains("(degree 2)") && d.contains("dx∧dy") && d.contains("x"),
+        "{d}"
+    );
+    assert!(!d.starts_with("ERROR"), "{d}");
+
+    // d(d(f)) = 0 shows up as `0`: d of a function gives a 1-form; the 1-form's d is zero.
+    let closed = run(ExteriorDerivative {
+        form_str: "2*x*y dx + x^2 dy".into(),
+        dim: 2,
+    });
+    assert!(
+        closed.contains("= 0 (degree 2)"),
+        "an exact form is closed: {closed}"
+    );
+
+    // A non-closed form: d(-y dx + x dy) = 2 dx^dy.
+    let rot = run(ExteriorDerivative {
+        form_str: "-y dx + x dy".into(),
+        dim: 2,
+    });
+    assert!(rot.contains("2") && rot.contains("dx∧dy"), "{rot}");
+
+    // Wedge of symbolic forms.
+    let w = run(Wedge {
+        form1_str: "x dx".into(),
+        form2_str: "y dy".into(),
+        dim: 2,
+    });
+    assert!(w.contains("dx∧dy") && w.contains("(degree 2)"), "{w}");
+
+    // Lie derivative of a symbolic function along d/dx: L_X (x^2) = 2x (degree 0).
+    let l = run(LieDerivative {
+        form_str: "x^2".into(),
+        vector_field: vec![1.0, 0.0],
+        dim: 2,
+    });
+    assert!(
+        l.contains("(degree 0)") && l.contains("2") && !l.starts_with("ERROR"),
+        "{l}"
+    );
+
+    // Interior product of a symbolic 2-form.
+    let i = run(InteriorProduct {
+        form_str: "x dx^dy".into(),
+        vector_field: vec![1.0, 0.0],
+        dim: 2,
+    });
+    assert!(i.contains("(degree 1)") && i.contains("dy"), "{i}");
+
+    // Constant-coefficient behaviour is unchanged, and nonsense is still an error.
+    assert!(
+        run(ExteriorDerivative {
+            form_str: "3 dx".into(),
+            dim: 3
+        })
+        .contains("= 0")
+    );
+    assert!(
+        run(ExteriorDerivative {
+            form_str: "x dq".into(),
+            dim: 3
+        })
+        .starts_with("ERROR")
+    );
+    assert!(
+        run(ExteriorDerivative {
+            form_str: "x dx +".into(),
+            dim: 3
+        })
+        .starts_with("ERROR")
+    );
+}
+
+#[test]
+fn symbolic_form_parsing_handles_signs_parentheses_and_degrees() {
+    let g = ExprGraph::new();
+    let names: Vec<String> = ["x", "y", "z"].iter().map(|s| s.to_string()).collect();
+    let f = SymbolicForm::parse(&g, "sin(x - y) dx - (y + 1) dy^dz", &names);
+    // Mixed degrees (1-form plus 2-form) are rejected.
+    assert!(f.is_err());
+    let w = SymbolicForm::parse(&g, "sin(x - y) dx - (y + 1) dz", &names).unwrap();
+    assert_eq!(w.degree, 1);
+    let p = [0.5, 0.2, 0.0];
+    let v = w.evaluate(&g, &p).unwrap();
+    assert!((v[&FormBasis { indices: vec![0] }] - (0.3_f64).sin()).abs() < 1e-12);
+    assert!((v[&FormBasis { indices: vec![2] }] + 1.2).abs() < 1e-12);
+    let f0 = SymbolicForm::parse(&g, "x*y", &names).unwrap();
+    assert_eq!(f0.degree, 0);
+    assert!(SymbolicForm::parse(&g, "", &names).is_err());
+    assert!(SymbolicForm::parse(&g, "dx^", &names).is_err());
+    // A term can repeat a differential: dx^dx = 0 keeps the degree.
+    let zero = SymbolicForm::parse(&g, "x dx^dx", &names).unwrap();
+    assert_eq!(zero.degree, 2);
+    assert_eq!(zero.to_text(&g), "0");
+}

@@ -210,6 +210,189 @@ impl SymbolicForm {
         a.add(g, &b)
     }
 
+    /// Parse a form with symbolic coefficients such as `x^2 dy`, `sin(x) dx^dy - y dz` or `z`.
+    ///
+    /// Terms are separated by a top-level `+` or `-` (not inside parentheses and not directly
+    /// after `^`, `*`, `/` or `(`). A term is a coefficient expression followed by a wedge chain of
+    /// coordinate differentials (`dx`, `dy^dz`, with `^`, `*` or `∧` between them); a term with no
+    /// differential is a function. All terms must have the same degree. `coord_names` name the
+    /// coordinates in order.
+    pub fn parse(g: &ExprGraph, input: &str, coord_names: &[String]) -> AlgebraResult<Self> {
+        let fail = |why: String| error(&format!("form `{input}`: {why}"));
+        let coords: Vec<ExprId> = coord_names.iter().map(|n| g.symbol(n)).collect();
+        let text: Vec<char> = input.replace('∧', "^").chars().collect();
+        if text.iter().all(|c| c.is_whitespace()) {
+            return Err(fail("empty".into()));
+        }
+
+        // Split into signed terms at top-level + and -.
+        let mut pieces: Vec<(bool, String)> = Vec::new(); // (negative, text)
+        let (mut depth, mut start, mut negative) = (0_i32, 0, false);
+        let mut prev_sig: Option<char> = None;
+        for (i, &c) in text.iter().enumerate() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                '+' | '-' if depth == 0 => {
+                    let unary = matches!(prev_sig, None | Some('^' | '*' | '/' | '(' | '+' | '-'));
+                    if !unary {
+                        pieces.push((negative, text[start..i].iter().collect()));
+                        negative = c == '-';
+                        start = i + 1;
+                    } else if i == start {
+                        // A leading sign of this term.
+                        negative ^= c == '-';
+                        start = i + 1;
+                    }
+                }
+                _ => {}
+            }
+            if !c.is_whitespace() {
+                prev_sig = Some(c);
+            }
+        }
+        pieces.push((negative, text[start..].iter().collect()));
+
+        let parser = algebra_core::parser::ExprParser::new(g);
+        let mut form: Option<Self> = None;
+        for (negative, piece) in pieces {
+            if piece.trim().is_empty() {
+                return Err(fail("dangling operator".into()));
+            }
+            let chars: Vec<char> = piece.chars().collect();
+            // The first differential: `d` + coordinate name, not part of a longer identifier.
+            let is_word = |c: char| c.is_alphanumeric() || c == '_';
+            let mut first = None;
+            for i in 0..chars.len() {
+                if chars[i] != 'd' || (i > 0 && chars[i - 1].is_alphabetic()) {
+                    continue;
+                }
+                for name in coord_names {
+                    let n: Vec<char> = name.chars().collect();
+                    let end = i + 1 + n.len();
+                    if end <= chars.len()
+                        && chars[i + 1..end] == n[..]
+                        && (end == chars.len() || !is_word(chars[end]))
+                    {
+                        first = Some(i);
+                        break;
+                    }
+                }
+                if first.is_some() {
+                    break;
+                }
+            }
+            let (coef_text, wedge_text) = match first {
+                Some(p) => (
+                    chars[..p].iter().collect::<String>(),
+                    chars[p..].iter().collect::<String>(),
+                ),
+                None => (piece.clone(), String::new()),
+            };
+            let coef_text = coef_text.trim().trim_end_matches('*').trim().to_string();
+            // A bare `d` + one letter that is not a coordinate is a mistyped differential, not a
+            // coefficient symbol.
+            let cs: Vec<char> = coef_text.chars().collect();
+            for i in 0..cs.len() {
+                let word_start = i == 0 || !(cs[i - 1].is_alphanumeric() || cs[i - 1] == '_');
+                let word_end =
+                    i + 2 >= cs.len() || !(cs[i + 2].is_alphanumeric() || cs[i + 2] == '_');
+                if cs[i] == 'd'
+                    && word_start
+                    && i + 1 < cs.len()
+                    && cs[i + 1].is_alphabetic()
+                    && word_end
+                {
+                    return Err(fail(format!(
+                        "unknown coordinate `{}` in `d{}`",
+                        cs[i + 1],
+                        cs[i + 1]
+                    )));
+                }
+            }
+            let coefficient = if coef_text.is_empty() {
+                g.integer(1)
+            } else {
+                parser
+                    .parse(&coef_text)
+                    .map_err(|e| fail(format!("cannot read coefficient `{coef_text}`: {e:?}")))?
+            };
+            let mut indices = Vec::new();
+            for factor in wedge_text.split(['^', '*']) {
+                let factor = factor.trim();
+                if factor.is_empty() {
+                    if wedge_text.is_empty() {
+                        break;
+                    }
+                    return Err(fail("a wedge needs a differential on both sides".into()));
+                }
+                let name = factor
+                    .strip_prefix('d')
+                    .ok_or_else(|| fail(format!("cannot read `{factor}` as a differential")))?;
+                let index = coord_names
+                    .iter()
+                    .position(|c| c == name)
+                    .ok_or_else(|| fail(format!("unknown coordinate `{name}`")))?;
+                indices.push(index);
+            }
+            let term = Self::term(
+                g,
+                &coords,
+                signed(g, coefficient, if negative { -1 } else { 1 }),
+                &indices,
+            )?;
+            let term = if term.terms.is_empty() {
+                Self::zero(&coords, indices.len())
+            } else {
+                term
+            };
+            form = Some(match form {
+                None => term,
+                Some(acc) => acc.add(g, &term)?,
+            });
+        }
+        form.ok_or_else(|| fail("no terms".into()))
+    }
+
+    /// Render as `coefficient dx∧dy + ...` with each coefficient simplified; blades whose
+    /// coefficient simplifies to zero are dropped, and the zero form is `0`.
+    pub fn to_text(&self, g: &ExprGraph) -> String {
+        use algebra_core::format::{Formatter, UnicodeFormatter};
+        let names: Vec<String> = self
+            .coords
+            .iter()
+            .map(|&c| match g.get(c).kind {
+                ExprKind::Symbol(id) => g.symbols.resolve(id).unwrap_or_default(),
+                _ => "?".to_string(),
+            })
+            .collect();
+        let mut parts: Vec<String> = Vec::new();
+        for (basis, &c) in &self.terms {
+            let simple = crate::simplify::Simplifier::simplify(g, c).unwrap_or(c);
+            if matches!(&g.get(simple).kind, ExprKind::Number(n) if n.is_zero()) {
+                continue;
+            }
+            let coefficient = UnicodeFormatter
+                .format(g, simple)
+                .unwrap_or_else(|_| "?".to_string());
+            let blade: Vec<String> = basis
+                .indices
+                .iter()
+                .map(|&i| format!("d{}", names[i]))
+                .collect();
+            parts.push(if blade.is_empty() {
+                coefficient
+            } else {
+                format!("({coefficient}) {}", blade.join("∧"))
+            });
+        }
+        if parts.is_empty() {
+            "0".to_string()
+        } else {
+            parts.join(" + ")
+        }
+    }
+
     /// Evaluate every coefficient at the point `values` (one value per coordinate), using the
     /// evaluator `eval(graph, expr, coordinate values)`; returns blade to number.
     pub fn evaluate(

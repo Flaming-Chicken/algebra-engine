@@ -146,6 +146,53 @@ impl FeaMesh {
         mesh
     }
 
+    /// A 2-D rectangular plate of quadratic triangles (Tri6): the [`FeaMesh::plate_2d`] triangles
+    /// with a node added at the middle of every edge. Element nodes are the three corners, then
+    /// the midpoints of edges 0-1, 1-2 and 2-0. The boundary groups `left`/`right`/`bottom`/`top`
+    /// include the midside nodes on those edges.
+    pub fn plate_2d_tri6(width: f64, height: f64, nx: usize, ny: usize) -> Self {
+        let linear = Self::plate_2d(width, height, nx, ny);
+        let mut mesh = Self::new(2, ElementType::Tri6);
+        for node in &linear.nodes {
+            mesh.add_node(node.clone());
+        }
+        let mut midpoints: HashMap<(usize, usize), usize> = HashMap::new();
+        for elem in &linear.elements {
+            let mut mid = |a: usize, b: usize, mesh: &mut Self| -> usize {
+                let key = (a.min(b), a.max(b));
+                *midpoints.entry(key).or_insert_with(|| {
+                    let (pa, pb) = (&mesh.nodes[a], &mesh.nodes[b]);
+                    let m = vec![(pa[0] + pb[0]) / 2.0, (pa[1] + pb[1]) / 2.0];
+                    mesh.add_node(m)
+                })
+            };
+            let m01 = mid(elem[0], elem[1], &mut mesh);
+            let m12 = mid(elem[1], elem[2], &mut mesh);
+            let m20 = mid(elem[2], elem[0], &mut mesh);
+            mesh.add_element(vec![elem[0], elem[1], elem[2], m01, m12, m20]);
+        }
+        let eps = 1e-9 * width.max(height);
+        let mut groups: [Vec<usize>; 4] = Default::default();
+        for (i, p) in mesh.nodes.iter().enumerate() {
+            if p[0].abs() < eps {
+                groups[0].push(i);
+            }
+            if (p[0] - width).abs() < eps {
+                groups[1].push(i);
+            }
+            if p[1].abs() < eps {
+                groups[2].push(i);
+            }
+            if (p[1] - height).abs() < eps {
+                groups[3].push(i);
+            }
+        }
+        for (name, nodes) in ["left", "right", "bottom", "top"].into_iter().zip(groups) {
+            mesh.add_boundary_group(name, nodes);
+        }
+        mesh
+    }
+
     /// A 2-D rectangular plate of bilinear quadrilaterals (Quad4, counter-clockwise nodes), with
     /// the same `left`/`right`/`bottom`/`top` boundary groups as [`FeaMesh::plate_2d`].
     pub fn plate_2d_quad(width: f64, height: f64, nx: usize, ny: usize) -> Self {
@@ -621,6 +668,31 @@ impl FeaEngine {
                         }
                     }
                 }
+                ElementType::Tri6 if mesh.dim == 2 => {
+                    let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
+                    let mut area = 0.0;
+                    for l in Self::TRI6_GAUSS {
+                        let (b, a) = Self::tri6_b_matrix(mesh, elem, l)?;
+                        area = a;
+                        for r in 0..12 {
+                            for c in 0..12 {
+                                let val = (b[0][r] * (c11 * b[0][c] + c12 * b[1][c])
+                                    + b[1][r] * (c12 * b[0][c] + c11 * b[1][c])
+                                    + b[2][r] * c33 * b[2][c])
+                                    * area
+                                    / 3.0;
+                                k_global.add(elem[r / 2] * 2 + r % 2, elem[c / 2] * 2 + c % 2, val);
+                            }
+                        }
+                    }
+                    // Consistent body force: corner shape functions integrate to zero, each
+                    // midside function to A/3.
+                    for &mid in &elem[3..6] {
+                        for (d, &bf) in body_force.iter().enumerate().take(2) {
+                            f_global[mid * 2 + d] += bf * area / 3.0;
+                        }
+                    }
+                }
                 ElementType::Quad4 if mesh.dim == 2 => {
                     if elem.len() != 4 {
                         return Err(AlgebraError::EvaluationError(
@@ -812,6 +884,33 @@ impl FeaEngine {
                 von_mises.push(
                     (0.5 * ((s[0] - s[1]).powi(2) + (s[1] - s[2]).powi(2) + (s[2] - s[0]).powi(2))
                         + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]))
+                        .sqrt(),
+                );
+            } else if mesh.element_type == ElementType::Tri6 && mesh.dim == 2 && elem.len() == 6 {
+                // Stress at the centroid.
+                let Ok((b, _)) = Self::tri6_b_matrix(mesh, elem, [1.0 / 3.0; 3]) else {
+                    von_mises.push(0.0);
+                    continue;
+                };
+                let mut strain = [0.0; 3];
+                for (i, row) in b.iter().enumerate() {
+                    for (col, value) in row.iter().enumerate() {
+                        strain[i] += value * displacement[elem[col / 2] * 2 + col % 2];
+                    }
+                }
+                let sigma_x = c11 * strain[0] + c12 * strain[1];
+                let sigma_y = c12 * strain[0] + c11 * strain[1];
+                let tau_xy = c33 * strain[2];
+                let sigma_z = if plane_stress {
+                    0.0
+                } else {
+                    nu * (sigma_x + sigma_y)
+                };
+                von_mises.push(
+                    (0.5 * ((sigma_x - sigma_y).powi(2)
+                        + (sigma_y - sigma_z).powi(2)
+                        + (sigma_z - sigma_x).powi(2))
+                        + 3.0 * tau_xy * tau_xy)
                         .sqrt(),
                 );
             } else if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 && elem.len() == 4 {
@@ -1013,6 +1112,22 @@ impl FeaEngine {
                         f_global[ni] += heat_source * area / 3.0;
                     }
                 }
+            } else if mesh.element_type == ElementType::Tri6 && mesh.dim == 2 {
+                let mut area = 0.0;
+                for l in Self::TRI6_GAUSS {
+                    let (b, a) = Self::tri6_b_matrix(mesh, elem, l)?;
+                    area = a;
+                    // Nodal gradients: dN_i/dx = b[0][2i], dN_i/dy = b[1][2i + 1].
+                    for r in 0..6 {
+                        for c in 0..6 {
+                            let k = b[0][2 * r] * b[0][2 * c] + b[1][2 * r + 1] * b[1][2 * c + 1];
+                            k_global.add(elem[r], elem[c], conductivity * k * area / 3.0);
+                        }
+                    }
+                }
+                for &mid in &elem[3..6] {
+                    f_global[mid] += heat_source * area / 3.0;
+                }
             } else if mesh.element_type == ElementType::Quad4 && mesh.dim == 2 {
                 if elem.len() != 4 {
                     return Err(AlgebraError::EvaluationError(
@@ -1138,6 +1253,69 @@ impl FeaEngine {
             reaction_forces: reactions,
             max_magnitude: max_t,
         })
+    }
+
+    /// Area coordinates of the three edge-midpoint Gauss points of a triangle (exact for
+    /// quadratics, weight A/3 each).
+    const TRI6_GAUSS: [[f64; 3]; 3] = [[0.5, 0.5, 0.0], [0.0, 0.5, 0.5], [0.5, 0.0, 0.5]];
+
+    /// The 3 x 12 strain-displacement matrix of a straight-sided quadratic triangle at the area
+    /// coordinates `l` (strain `[exx, eyy, gxy]`, unknowns `[u0, v0, u1, ...]` over the six nodes:
+    /// corners, then midpoints of edges 0-1, 1-2, 2-0) and the element area. A degenerate or
+    /// clockwise triangle, or midside nodes that are not at the edge midpoints (a curved
+    /// element, which this formulation does not support), is an error.
+    fn tri6_b_matrix(
+        mesh: &FeaMesh,
+        elem: &[usize],
+        l: [f64; 3],
+    ) -> AlgebraResult<([[f64; 12]; 3], f64)> {
+        let fail = |why: &str| AlgebraError::EvaluationError(format!("Tri6 element: {why}"));
+        if elem.len() != 6 {
+            return Err(fail("needs six nodes"));
+        }
+        let p: Vec<&Vec<f64>> = elem.iter().map(|&n| &mesh.nodes[n]).collect();
+        let det =
+            (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+        if det <= 1e-14 {
+            return Err(fail("degenerate or clockwise (non-positive area)"));
+        }
+        let scale = det.sqrt();
+        for (m, (a, b)) in [(3, (0, 1)), (4, (1, 2)), (5, (2, 0))] {
+            for axis in 0..2 {
+                if (p[m][axis] - 0.5 * (p[a][axis] + p[b][axis])).abs() > 1e-9 * scale {
+                    return Err(fail(
+                        "midside nodes must lie at the edge midpoints (curved edges are not supported)",
+                    ));
+                }
+            }
+        }
+        // Gradients of the area coordinates: dL_i/dx = (y_j - y_k) / 2A, dL_i/dy = (x_k - x_j) / 2A.
+        let bx = [p[1][1] - p[2][1], p[2][1] - p[0][1], p[0][1] - p[1][1]];
+        let cy = [p[2][0] - p[1][0], p[0][0] - p[2][0], p[1][0] - p[0][0]];
+        let dl = |i: usize| [bx[i] / det, cy[i] / det];
+        // dN/dL_j for each node's shape function at `l`.
+        let dn_dl: [[f64; 3]; 6] = [
+            [4.0 * l[0] - 1.0, 0.0, 0.0],
+            [0.0, 4.0 * l[1] - 1.0, 0.0],
+            [0.0, 0.0, 4.0 * l[2] - 1.0],
+            [4.0 * l[1], 4.0 * l[0], 0.0],
+            [0.0, 4.0 * l[2], 4.0 * l[1]],
+            [4.0 * l[2], 0.0, 4.0 * l[0]],
+        ];
+        let mut b = [[0.0; 12]; 3];
+        for (i, row) in dn_dl.iter().enumerate() {
+            let mut gx = 0.0;
+            let mut gy = 0.0;
+            for j in 0..3 {
+                gx += row[j] * dl(j)[0];
+                gy += row[j] * dl(j)[1];
+            }
+            b[0][2 * i] = gx;
+            b[1][2 * i + 1] = gy;
+            b[2][2 * i] = gy;
+            b[2][2 * i + 1] = gx;
+        }
+        Ok((b, det / 2.0))
     }
 
     /// The 3 x 8 strain-displacement matrix of a bilinear quadrilateral at the natural point

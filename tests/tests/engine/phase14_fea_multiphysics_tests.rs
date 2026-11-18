@@ -719,3 +719,117 @@ fn hexahedral_elements_pass_the_patch_tests_on_a_distorted_mesh() {
     flipped.elements[0].swap(3, 7);
     assert!(FeaEngine::solve(&flipped, &physics, &[]).is_err());
 }
+
+#[test]
+fn quadratic_triangles_represent_quadratic_solutions_exactly() {
+    let elastic = |nu: f64, bf: Vec<f64>, plane_stress: bool| PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 200.0,
+        poissons_ratio: nu,
+        density: 1.0,
+        body_force: bf,
+        plane_stress,
+    };
+    let fix = |group: &str, dof_index: usize, value: f64| FeaBoundaryCondition::FixedDisplacement {
+        group_name: group.into(),
+        dof_index,
+        value,
+    };
+
+    // A plate hanging under its own weight with nu = 0: v(y) = -g (H^2 - y^2) / (2 E), a
+    // quadratic that linear triangles cannot reproduce but quadratic ones do exactly.
+    let (w, h, g, e) = (2.0_f64, 3.0, 5.0, 200.0);
+    let mesh = FeaMesh::plate_2d_tri6(w, h, 2, 3);
+    assert_eq!(mesh.elements.len(), 12);
+    assert!(mesh.elements.iter().all(|el| el.len() == 6));
+    let sol = FeaEngine::solve(
+        &mesh,
+        &elastic(0.0, vec![0.0, -g], true),
+        &[fix("top", 0, 0.0), fix("top", 1, 0.0)],
+    )
+    .unwrap();
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = -g * (h * h - p[1] * p[1]) / (2.0 * e);
+        assert!(
+            (sol.nodal_values[i * 2 + 1] - want).abs() < 1e-10,
+            "node {i} at y={}: {}",
+            p[1],
+            sol.nodal_values[i * 2 + 1]
+        );
+        assert!(sol.nodal_values[i * 2].abs() < 1e-10);
+    }
+    // The support carries the whole weight: g * W * H (unit thickness).
+    let total: f64 = mesh.boundary_groups["top"]
+        .iter()
+        .map(|&n| sol.reaction_forces[n * 2 + 1])
+        .sum();
+    assert!((total - g * w * h).abs() < 1e-8, "reaction {total}");
+
+    // Uniaxial patch test with stress, plane stress and plane strain.
+    for plane_stress in [true, false] {
+        let (len, height, d, nu) = (4.0_f64, 2.0, 0.02, 0.3);
+        let mesh = FeaMesh::plate_2d_tri6(len, height, 4, 2);
+        let sol = FeaEngine::solve(
+            &mesh,
+            &elastic(nu, vec![0.0, 0.0], plane_stress),
+            &[
+                fix("left", 0, 0.0),
+                fix("right", 0, d),
+                fix("bottom", 1, 0.0),
+            ],
+        )
+        .unwrap();
+        let eps = d / len;
+        let sx = if plane_stress {
+            e * eps
+        } else {
+            e * eps / (1.0 - nu * nu)
+        };
+        let vm = if plane_stress {
+            sx
+        } else {
+            let sz = nu * sx;
+            (0.5 * (sx * sx + sz * sz + (sz - sx).powi(2))).sqrt()
+        };
+        for (k, v) in sol.von_mises_stresses.iter().enumerate() {
+            assert!(
+                (v - vm).abs() < 1e-9 * vm,
+                "plane_stress={plane_stress} element {k}: {v} vs {vm}"
+            );
+        }
+    }
+
+    // Heat: a uniform source between cold ends gives T = q x (L - x) / (2 k), quadratic.
+    let (l, k, q) = (4.0_f64, 2.0, 3.0);
+    let mesh = FeaMesh::plate_2d_tri6(l, 1.0, 2, 1);
+    let heat = PhysicsDiscipline::HeatConduction {
+        thermal_conductivity: k,
+        heat_capacity: 1.0,
+        density: 1.0,
+        internal_heat_source: q,
+    };
+    let cold = |g: &str| FeaBoundaryCondition::PrescribedTemperature {
+        group_name: g.into(),
+        temperature: 0.0,
+    };
+    let sol = FeaEngine::solve(&mesh, &heat, &[cold("left"), cold("right")]).unwrap();
+    for (i, p) in mesh.nodes.iter().enumerate() {
+        let want = q * p[0] * (l - p[0]) / (2.0 * k);
+        assert!(
+            (sol.nodal_values[i] - want).abs() < 1e-9,
+            "node {i}: {} vs {want}",
+            sol.nodal_values[i]
+        );
+    }
+
+    // A curved (non-midpoint) midside node is rejected rather than silently mis-integrated.
+    let mut curved = FeaMesh::plate_2d_tri6(1.0, 1.0, 1, 1);
+    curved.nodes[4][0] += 0.1;
+    assert!(
+        FeaEngine::solve(
+            &curved,
+            &elastic(0.3, vec![0.0, 0.0], true),
+            &[fix("left", 0, 0.0), fix("left", 1, 0.0)]
+        )
+        .is_err()
+    );
+}

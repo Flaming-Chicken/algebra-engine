@@ -500,3 +500,89 @@ fn the_cartan_operation_accepts_vector_fields_with_expression_components() {
         .starts_with("ERROR")
     );
 }
+
+#[test]
+fn hodge_star_for_a_diagonal_metric_in_curvilinear_coordinates() {
+    // Spherical coordinates (r, theta, phi), metric diag(1, r^2, r^2 sin^2 theta).
+    let g = ExprGraph::new();
+    let c: Vec<ExprId> = ["r", "t", "p"].iter().map(|n| g.symbol(n)).collect();
+    let metric = [expr(&g, "1"), expr(&g, "r^2"), expr(&g, "r^2 * sin(t)^2")];
+    let point = [2.0, 0.9, 0.3]; // r, theta, phi
+    let (r, th) = (point[0], point[1]);
+
+    let dr = SymbolicForm::one_form(&c, &[expr(&g, "1"), expr(&g, "0"), expr(&g, "0")]).unwrap();
+    let dth = SymbolicForm::one_form(&c, &[expr(&g, "0"), expr(&g, "1"), expr(&g, "0")]).unwrap();
+    let dph = SymbolicForm::one_form(&c, &[expr(&g, "0"), expr(&g, "0"), expr(&g, "1")]).unwrap();
+    let value = |f: &SymbolicForm, blade: &[usize]| at(f, &g, &point, blade);
+
+    // star dr = r^2 sin(theta) dtheta^dphi; star dtheta = -sin(theta) dr^dphi;
+    // star dphi = dr^dtheta / sin(theta).
+    let s = dr.hodge_star_diagonal(&g, &metric).unwrap();
+    assert!((value(&s, &[1, 2]) - r * r * th.sin()).abs() < 1e-12);
+    let s = dth.hodge_star_diagonal(&g, &metric).unwrap();
+    assert!((value(&s, &[0, 2]) + th.sin()).abs() < 1e-12);
+    let s = dph.hodge_star_diagonal(&g, &metric).unwrap();
+    assert!((value(&s, &[0, 1]) - 1.0 / th.sin()).abs() < 1e-12);
+
+    // star star = +1 on a Riemannian 3-manifold, for a mixed form.
+    let mixed =
+        SymbolicForm::one_form(&c, &[expr(&g, "r"), expr(&g, "t"), expr(&g, "p*r")]).unwrap();
+    let twice = mixed
+        .hodge_star_diagonal(&g, &metric)
+        .unwrap()
+        .hodge_star_diagonal(&g, &metric)
+        .unwrap();
+    for blade in [[0usize], [1], [2]] {
+        assert!(
+            (value(&twice, &blade) - value(&mixed, &blade)).abs() < 1e-10,
+            "{blade:?}"
+        );
+    }
+
+    // The volume form: star 1 = r^2 sin(theta) dr^dtheta^dphi.
+    let one = SymbolicForm::function(&c, expr(&g, "1"));
+    let vol = one.hodge_star_diagonal(&g, &metric).unwrap();
+    assert!((value(&vol, &[0, 1, 2]) - r * r * th.sin()).abs() < 1e-12);
+
+    // The Euclidean and Minkowski metrics reproduce the existing flat Hodge star.
+    let flat_coords: Vec<ExprId> = ["x", "y", "z", "w"].iter().map(|n| g.symbol(n)).collect();
+    let form = SymbolicForm::one_form(
+        &flat_coords,
+        &[expr(&g, "x"), expr(&g, "y"), expr(&g, "z"), expr(&g, "w")],
+    )
+    .unwrap();
+    let p4 = [0.4, 0.5, 0.6, 0.7];
+    for (metric, minkowski) in [
+        (
+            [expr(&g, "1"), expr(&g, "1"), expr(&g, "1"), expr(&g, "1")],
+            false,
+        ),
+        (
+            [expr(&g, "-1"), expr(&g, "1"), expr(&g, "1"), expr(&g, "1")],
+            true,
+        ),
+    ] {
+        let a = form
+            .hodge_star_diagonal(&g, &metric)
+            .unwrap()
+            .evaluate(&g, &p4)
+            .unwrap();
+        let b = form
+            .hodge_star(&g, minkowski)
+            .unwrap()
+            .evaluate(&g, &p4)
+            .unwrap();
+        for blade in [[1usize, 2, 3], [0, 2, 3], [0, 1, 3], [0, 1, 2]] {
+            let key = FormBasis {
+                indices: blade.to_vec(),
+            };
+            let (x, y) = (
+                a.get(&key).copied().unwrap_or(0.0),
+                b.get(&key).copied().unwrap_or(0.0),
+            );
+            assert!((x - y).abs() < 1e-12, "{blade:?}: {x} vs {y}");
+        }
+    }
+    // A wrong-length metric is an error.
+    assert!(form.hodge_star_diagonal(&g, &metric[..2]).is_err());
+}

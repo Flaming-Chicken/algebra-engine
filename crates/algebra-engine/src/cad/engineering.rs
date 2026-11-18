@@ -1041,6 +1041,8 @@ impl NacaAirfoil {
             mesh.add_triangle(top_centre, last + i, last + nxt);
         }
 
+        // The sweep builds the surface with the normals pointing into the solid; flip them.
+        mesh.reverse_orientation();
         mesh
     }
 }
@@ -1128,6 +1130,8 @@ impl HelicalSpring {
             mesh.add_triangle(top_centre, top + k, top + nxt);
         }
 
+        // The sweep builds the surface with the normals pointing into the solid; flip them.
+        mesh.reverse_orientation();
         mesh
     }
 }

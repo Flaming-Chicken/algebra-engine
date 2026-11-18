@@ -1666,3 +1666,109 @@ fn gear_end_caps_are_unfolded_triangulations() {
         assert_eq!(wrong, 0, "internal gear cap at z={z}");
     }
 }
+
+#[test]
+fn every_cad_builder_produces_an_outward_oriented_closed_mesh() {
+    // `compute_volume` is an absolute value, so an inside-out mesh (normals into the solid) passes
+    // every closure and volume check. The signed volume exposes it: the airfoil, the spring and
+    // the cube were all built inside out.
+    use algebra_engine::cad::{
+        CustomShape, CycloidalGear, HelicalSpring, InternalGear, InvoluteGear, Mesh3D, NacaAirfoil,
+        ThreadedScrew,
+    };
+    let mut chamfered = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+    chamfered.head_chamfer = 0.7;
+    chamfered.socket_depth = 5.0;
+    let l_shape = [
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 1.0],
+        [1.0, 1.0],
+        [1.0, 2.0],
+        [0.0, 2.0],
+    ];
+    let builders: Vec<(&str, Mesh3D)> = vec![
+        (
+            "involute spur",
+            InvoluteGear::spur(2.0, 20, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "involute small pinion",
+            InvoluteGear::spur(2.0, 12, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "helical",
+            InvoluteGear::helical(1.5, 17, 8.0, 20.0).generate_3d_mesh(),
+        ),
+        (
+            "cycloidal",
+            CycloidalGear::new(2.0, 24, 6.0).generate_3d_mesh(),
+        ),
+        (
+            "internal",
+            InternalGear::new(2.0, 40, 5.0).generate_3d_mesh(),
+        ),
+        (
+            "airfoil",
+            NacaAirfoil::new("2412", 100.0, 300.0).generate_3d_mesh(),
+        ),
+        (
+            "symmetric airfoil",
+            NacaAirfoil::new("0012", 1.0, 1.0).generate_3d_mesh(),
+        ),
+        (
+            "spring",
+            HelicalSpring::new(2.0, 20.0, 5.0, 6.0).generate_3d_mesh(),
+        ),
+        (
+            "hex bolt",
+            ThreadedScrew::metric_bolt(8.0, 1.25, 30.0).generate_3d_mesh(),
+        ),
+        (
+            "socket screw",
+            ThreadedScrew::socket_screw(6.0, 1.0, 20.0).generate_3d_mesh(),
+        ),
+        ("chamfered socket screw", chamfered.generate_3d_mesh()),
+        (
+            "lead screw",
+            ThreadedScrew::lead_screw(12.0, 3.0, 60.0).generate_3d_mesh(),
+        ),
+        ("cube", Mesh3D::cube(1.0, 2.0, 3.0)),
+        ("extrusion ccw", Mesh3D::extrude_profile(&l_shape, 1.5)),
+        (
+            "extrusion cw",
+            Mesh3D::extrude_profile(&[[0.0, 0.0], [0.0, 2.0], [2.0, 2.0], [2.0, 0.0]], 1.5),
+        ),
+        (
+            "implicit sphere",
+            CustomShape::ParametricImplicit {
+                expr_str: "x^2 + y^2 + z^2 - 1".into(),
+                bbox: algebra_engine::cad::BoundingBox3D::new([-1.5; 3], [1.5; 3]),
+            }
+            .to_tri_mesh()
+            .unwrap(),
+        ),
+    ];
+    for (name, mesh) in &builders {
+        assert!(mesh.is_closed(), "{name}: not closed");
+        assert!(
+            mesh.is_outward_oriented(),
+            "{name}: normals point into the solid (signed volume {})",
+            mesh.signed_volume()
+        );
+        assert!(
+            (mesh.signed_volume() - mesh.compute_volume()).abs() < 1e-9 * mesh.compute_volume()
+        );
+    }
+
+    // reverse_orientation turns any of them inside out and back.
+    let mut cube = Mesh3D::cube(1.0, 1.0, 1.0);
+    cube.reverse_orientation();
+    assert!(cube.is_closed() && !cube.is_outward_oriented() && cube.signed_volume() < 0.0);
+    cube.reverse_orientation();
+    assert!(cube.is_outward_oriented());
+    // An open mesh is never "outward oriented".
+    let mut open = Mesh3D::cube(1.0, 1.0, 1.0);
+    open.triangles.pop();
+    assert!(!open.is_outward_oriented());
+}

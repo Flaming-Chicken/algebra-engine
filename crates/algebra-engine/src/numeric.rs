@@ -351,30 +351,179 @@ impl NumericalEval for ExprGraph {
     }
 }
 
-/// Numerical evaluation of Bessel function of the first kind $J_n(x)$ via power series.
-pub fn eval_bessel_j(n: i64, x: f64) -> f64 {
-    let sign = if n < 0 {
-        if n % 2 != 0 { -1.0 } else { 1.0 }
-    } else {
-        1.0
-    };
-    let n_abs = n.unsigned_abs() as usize;
-    let half_x = x / 2.0;
-    let mut term = half_x.powi(n_abs as i32);
-    let mut fact_n = 1.0;
-    for k in 1..=n_abs {
-        fact_n *= k as f64;
+/// Nodes and weights of the 24-point Gauss–Legendre rule on `[-1, 1]` (Newton's method on `P_24`).
+fn gauss_legendre_24() -> &'static ([f64; 24], [f64; 24]) {
+    use std::sync::OnceLock;
+    static RULE: OnceLock<([f64; 24], [f64; 24])> = OnceLock::new();
+    RULE.get_or_init(|| {
+        const N: usize = 24;
+        let (mut nodes, mut weights) = ([0.0; N], [0.0; N]);
+        for i in 0..N / 2 {
+            let mut x = (std::f64::consts::PI * (i as f64 + 0.75) / (N as f64 + 0.5)).cos();
+            let mut dp = 1.0;
+            for _ in 0..100 {
+                let (mut p0, mut p1) = (1.0, x);
+                for k in 2..=N {
+                    let kf = k as f64;
+                    let p2 = ((2.0 * kf - 1.0) * x * p1 - (kf - 1.0) * p0) / kf;
+                    p0 = p1;
+                    p1 = p2;
+                }
+                dp = N as f64 * (x * p1 - p0) / (x * x - 1.0);
+                let dx = p1 / dp;
+                x -= dx;
+                if dx.abs() < 1e-16 {
+                    break;
+                }
+            }
+            nodes[i] = -x;
+            nodes[N - 1 - i] = x;
+            let w = 2.0 / ((1.0 - x * x) * dp * dp);
+            weights[i] = w;
+            weights[N - 1 - i] = w;
+        }
+        (nodes, weights)
+    })
+}
+
+/// `integral_a^b f` by `panels` equal panels of the 24-point Gauss–Legendre rule.
+fn integrate_gl(f: &dyn Fn(f64) -> f64, a: f64, b: f64, panels: usize) -> f64 {
+    let (nodes, weights) = gauss_legendre_24();
+    let width = (b - a) / panels as f64;
+    let mut total = 0.0;
+    for p in 0..panels {
+        let (lo, hi) = (a + p as f64 * width, a + (p + 1) as f64 * width);
+        let (mid, half) = (0.5 * (lo + hi), 0.5 * (hi - lo));
+        let mut panel = 0.0;
+        for (x, w) in nodes.iter().zip(weights) {
+            panel += w * f(mid + half * x);
+        }
+        total += half * panel;
     }
-    term /= fact_n;
-    let mut sum = term;
-    for m in 1..40 {
-        term *= -(half_x * half_x) / (m as f64 * (m + n_abs) as f64);
-        sum += term;
-        if term.abs() < 1e-15 * sum.abs().max(1e-15) {
+    total
+}
+
+/// `integral_0^infinity f(t) dt` for an integrand that decays like `exp(-rate(t))`: dyadic panels
+/// `[h, 2h]`, `[2h, 4h]`, ... starting from a first panel `[0, h]` of width `h`, up to `t_max`.
+fn integrate_half_line(f: &dyn Fn(f64) -> f64, h: f64, t_max: f64) -> f64 {
+    // Each dyadic panel is cut in four: the integrands are strongly varying near the cut-off.
+    let mut total = integrate_gl(f, 0.0, h, 4);
+    let mut lo = h;
+    while lo < t_max {
+        let hi = 2.0 * lo;
+        total += integrate_gl(f, lo, hi, 4);
+        lo = hi;
+    }
+    total
+}
+
+/// The point beyond which `exp(-(x * kernel(t)) + order * t)` is below `exp(-745)` (underflow).
+fn decay_limit(x: f64, order: f64, kernel: &dyn Fn(f64) -> f64) -> f64 {
+    let mut t = 1.0;
+    while t < 800.0 && x * kernel(t) - order * t < 800.0 {
+        t *= 1.25;
+    }
+    t
+}
+
+/// Hankel's asymptotic expansion of `J_n(x)` and `Y_n(x)` for `x` large against `n^2`.
+fn bessel_hankel(n: i64, x: f64) -> (f64, f64) {
+    let mu = 4.0 * (n * n) as f64;
+    let (mut p, mut q) = (1.0, 0.0);
+    let mut term = 1.0;
+    let mut previous = f64::INFINITY;
+    for k in 1..60 {
+        let kf = k as f64;
+        term *= (mu - (2.0 * kf - 1.0).powi(2)) / (kf * 8.0 * x);
+        if term.abs() > previous || term.abs() < 1e-17 {
             break;
         }
+        previous = term.abs();
+        // Terms alternate between Q (odd k) and P (even k) with signs -, -, +, +, ...
+        match k % 4 {
+            1 => q += term,
+            2 => p -= term,
+            3 => q -= term,
+            _ => p += term,
+        }
     }
-    sign * sum
+    let chi = x - (0.5 * n as f64 + 0.25) * std::f64::consts::PI;
+    let scale = (2.0 / (std::f64::consts::PI * x)).sqrt();
+    (
+        scale * (p * chi.cos() - q * chi.sin()),
+        scale * (p * chi.sin() + q * chi.cos()),
+    )
+}
+
+/// `J_nu(x)` for `x > 0` and any real order, by Schläfli's integral
+/// `(1/pi) int_0^pi cos(nu t - x sin t) dt - (sin(nu pi)/pi) int_0^inf exp(-x sinh t - nu t) dt`.
+fn bessel_j_real_order(nu: f64, x: f64) -> f64 {
+    let pi = std::f64::consts::PI;
+    let panels = (((x + nu.abs()) * pi / 8.0).ceil() as usize).max(1);
+    let first = integrate_gl(&|t| (nu * t - x * t.sin()).cos(), 0.0, pi, panels) / pi;
+    let sin_nu_pi = (nu * pi).sin();
+    if nu.fract() == 0.0 || sin_nu_pi.abs() < 1e-300 {
+        return first;
+    }
+    let limit = decay_limit(x, -nu, &|t| t.sinh());
+    let second = integrate_half_line(
+        &|t| (-x * t.sinh() - nu * t).exp(),
+        (0.5 / x).min(0.5),
+        limit,
+    );
+    first - sin_nu_pi / pi * second
+}
+
+/// `K_nu(x)` for `x > 0` by `int_0^inf exp(-x cosh t) cosh(nu t) dt`.
+fn bessel_k_real_order(nu: f64, x: f64) -> f64 {
+    let nu = nu.abs();
+    let limit = decay_limit(x, nu, &|t| t.cosh());
+    integrate_half_line(
+        &|t| (-x * t.cosh()).exp() * (nu * t).cosh(),
+        (1.0_f64).min(2.0 / x.sqrt()),
+        limit,
+    )
+}
+
+/// Numerical evaluation of the Bessel function of the first kind $J_n(x)$ for integer order.
+///
+/// Uses Bessel's integral $J_n(x) = \frac{1}{2\pi}\int_0^{2\pi}\cos(n\tau - x\sin\tau)\,d\tau$ with the
+/// trapezoid rule, which for a periodic analytic integrand converges exponentially and, unlike the
+/// power series, does not lose all its digits to cancellation for large $x$; Hankel's asymptotic
+/// expansion takes over for $x > 2000$ when $4 n^2 < x$.
+pub fn eval_bessel_j(n: i64, x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if n < 0 {
+        let sign = if n % 2 != 0 { -1.0 } else { 1.0 };
+        return sign * eval_bessel_j(-n, x);
+    }
+    if x < 0.0 {
+        let sign = if n % 2 != 0 { -1.0 } else { 1.0 };
+        return sign * eval_bessel_j(n, -x);
+    }
+    if x == 0.0 {
+        return if n == 0 { 1.0 } else { 0.0 };
+    }
+    if x.is_infinite() {
+        return 0.0;
+    }
+    if x > 2000.0 && 4.0 * (n * n) as f64 <= x {
+        return bessel_hankel(n, x).0;
+    }
+    // The trapezoid rule aliases J_{n + N}; J_k(x) is negligible once k - x exceeds about
+    // 16 (x / 2)^(1/3) (the Airy-type transition region), so take N beyond that.
+    let points = (x + 18.0 * (x / 2.0).cbrt()).ceil() as usize + (n as usize) + 48;
+    let step = 2.0 * std::f64::consts::PI / points as f64;
+    let nf = n as f64;
+    let sum: f64 = (0..points)
+        .map(|k| {
+            let tau = k as f64 * step;
+            (nf * tau - x * tau.sin()).cos()
+        })
+        .sum();
+    sum / points as f64
 }
 
 /// Numerical evaluation of Gamma function $\Gamma(x)$ via Lanczos approximation.
@@ -418,12 +567,35 @@ pub fn eval_gamma(x: f64) -> f64 {
     sqrt_two_pi * t.powf(z + 0.5) * (-t).exp() * x_acc
 }
 
-/// Numerical evaluation of Log-Gamma function $\ln\Gamma(x)$.
+/// Numerical evaluation of the log-gamma function $\ln|\Gamma(x)|$, without overflow for large $x$
+/// (Lanczos in logarithmic form; the reflection formula for $x < 1/2$).
 pub fn eval_log_gamma(x: f64) -> f64 {
-    if x <= 0.0 && x.fract() == 0.0 {
+    if x.is_nan() || (x <= 0.0 && x.fract() == 0.0) {
         return f64::NAN;
     }
-    eval_gamma(x).abs().ln()
+    let pi = std::f64::consts::PI;
+    if x < 0.5 {
+        return (pi / (pi * x).sin()).abs().ln() - eval_log_gamma(1.0 - x);
+    }
+    // Shift the argument above 12 with ln Gamma(x) = ln Gamma(x + k) - sum ln(x + i), then Stirling's
+    // series (error below 1e-17 there).
+    let (mut y, mut shift) = (x, 0.0);
+    while y < 12.0 {
+        shift += y.ln();
+        y += 1.0;
+    }
+    let inv = 1.0 / y;
+    let inv2 = inv * inv;
+    let series = inv
+        * (1.0 / 12.0
+            + inv2
+                * (-1.0 / 360.0
+                    + inv2
+                        * (1.0 / 1260.0
+                            + inv2
+                                * (-1.0 / 1680.0
+                                    + inv2 * (1.0 / 1188.0 - inv2 * 691.0 / 360360.0)))));
+    (y - 0.5) * y.ln() - y + 0.5 * (2.0 * pi).ln() + series - shift
 }
 
 /// Numerical evaluation of Digamma function $\psi(x) = \frac{d}{dx} \ln\Gamma(x)$.
@@ -448,12 +620,18 @@ pub fn eval_digamma(mut x: f64) -> f64 {
     result
 }
 
-/// Numerical evaluation of Beta function $B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}$.
+/// Numerical evaluation of the Beta function $B(a, b) = \frac{\Gamma(a)\Gamma(b)}{\Gamma(a+b)}$,
+/// through log-gamma so that large arguments do not overflow.
 pub fn eval_beta(a: f64, b: f64) -> f64 {
+    if a > 0.0 && b > 0.0 {
+        return (eval_log_gamma(a) + eval_log_gamma(b) - eval_log_gamma(a + b)).exp();
+    }
     eval_gamma(a) * eval_gamma(b) / eval_gamma(a + b)
 }
 
-/// Numerical evaluation of Error function $\text{erf}(x)$.
+/// Numerical evaluation of the error function $\mathrm{erf}(x)$ to about 15 digits: the Maclaurin
+/// series $\frac{2}{\sqrt\pi}e^{-x^2}\sum_n \frac{2^n x^{2n+1}}{(2n+1)!!}$ (positive terms) for
+/// $|x| < 3$ and the continued fraction for $\mathrm{erfc}$ beyond.
 pub fn eval_erf(x: f64) -> f64 {
     if x.is_nan() {
         return f64::NAN;
@@ -461,30 +639,59 @@ pub fn eval_erf(x: f64) -> f64 {
     if x == 0.0 {
         return 0.0;
     }
-    let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let x_abs = x.abs();
-    if x_abs > 6.0 {
-        return sign;
-    }
-    // High-precision Chebyshev rational approximation
-    let a1 = 0.254829592;
-    let a2 = -0.284496736;
-    let a3 = 1.421413741;
-    let a4 = -1.453152027;
-    let a5 = 1.061405429;
-    let p = 0.3275911;
-    let t = 1.0 / (1.0 + p * x_abs);
-    let y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-x_abs * x_abs).exp();
-    sign * y
+    let ax = x.abs();
+    let value = if ax < 3.0 {
+        let mut term = ax;
+        let mut sum = ax;
+        for n in 1..400 {
+            term *= 2.0 * ax * ax / (2.0 * n as f64 + 1.0);
+            sum += term;
+            if term < 1e-17 * sum {
+                break;
+            }
+        }
+        2.0 / std::f64::consts::PI.sqrt() * (-ax * ax).exp() * sum
+    } else {
+        1.0 - erfc_continued_fraction(ax)
+    };
+    if x < 0.0 { -value } else { value }
 }
 
-/// Numerical evaluation of Complementary Error function $\text{erfc}(x) = 1 - \text{erf}(x)$.
+/// `erfc(x)` for `x >= 3` by the continued fraction
+/// `e^{-x^2}/sqrt(pi) / (x + (1/2)/(x + 1/(x + (3/2)/(x + ...))))`.
+fn erfc_continued_fraction(x: f64) -> f64 {
+    let mut fraction = x;
+    for k in (1..=80).rev() {
+        fraction = x + (k as f64 / 2.0) / fraction;
+    }
+    (-x * x).exp() / (std::f64::consts::PI.sqrt() * fraction)
+}
+
+/// Numerical evaluation of the complementary error function $\mathrm{erfc}(x) = 1 - \mathrm{erf}(x)$,
+/// without the cancellation of `1 - erf(x)` for large $x$.
 pub fn eval_erfc(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x >= 3.0 {
+        return erfc_continued_fraction(x);
+    }
+    if x <= -3.0 {
+        return 2.0 - erfc_continued_fraction(-x);
+    }
     1.0 - eval_erf(x)
 }
 
-/// Numerical evaluation of Riemann Zeta function $\zeta(s)$.
+/// Numerical evaluation of the Riemann zeta function $\zeta(s)$ for real $s \ne 1$.
+///
+/// Euler–Maclaurin summation, valid for every real $s \ne 1$ (it continues $\zeta$ analytically to
+/// $s < 1$): $\sum_{k<N} k^{-s} + \frac{N^{1-s}}{s-1} + \frac{N^{-s}}2 +
+/// \sum_{j\ge1}\frac{B_{2j}}{(2j)!}\,s(s+1)\cdots(s+2j-2)\,N^{-s-2j+1}$ with $N = 24$; the
+/// functional equation handles $s < 0$.
 pub fn eval_zeta(s: f64) -> f64 {
+    if s.is_nan() {
+        return f64::NAN;
+    }
     if (s - 1.0).abs() < 1e-15 {
         return f64::INFINITY;
     }
@@ -496,6 +703,7 @@ pub fn eval_zeta(s: f64) -> f64 {
         if n % 2 == 0 {
             return 0.0;
         }
+        // zeta(-n) = -B_{n+1} / (n + 1)
         match n {
             1 => return -1.0 / 12.0,
             3 => return 1.0 / 120.0,
@@ -510,33 +718,40 @@ pub fn eval_zeta(s: f64) -> f64 {
             2.0_f64.powf(s) * pi.powf(s - 1.0) * (pi * s / 2.0).sin() * eval_gamma(1.0 - s);
         return factor * eval_zeta(1.0 - s);
     }
-    // Exact values for positive even integers
-    if s > 0.0 && s.fract() == 0.0 {
-        let n = s as i64;
-        if n % 2 == 0 {
-            let pi = std::f64::consts::PI;
-            match n {
-                2 => return pi * pi / 6.0,
-                4 => return pi.powi(4) / 90.0,
-                6 => return pi.powi(6) / 945.0,
-                8 => return pi.powi(8) / 9450.0,
-                10 => return pi.powi(10) / 93555.0,
-                _ => {}
-            }
-        }
+    if s > 60.0 {
+        // 1 + 2^-s + 3^-s + ...: converged to double precision after a few terms.
+        return (1..=8).map(|k| (k as f64).powf(-s)).sum();
     }
-    // Dirichlet eta acceleration
-    let mut sum = 0.0;
-    for k in 1..=2000 {
-        let sign = if k % 2 == 1 { 1.0 } else { -1.0 };
-        let term = sign / (k as f64).powf(s);
+    const N: usize = 24;
+    let n = N as f64;
+    let mut sum: f64 = (1..N).map(|k| (k as f64).powf(-s)).sum();
+    sum += n.powf(1.0 - s) / (s - 1.0) + 0.5 * n.powf(-s);
+    // B_{2j} / (2j)!
+    let bernoulli = [
+        1.0 / 12.0,
+        -1.0 / 720.0,
+        1.0 / 30240.0,
+        -1.0 / 1209600.0,
+        1.0 / 47900160.0,
+        -691.0 / 1307674368000.0,
+        1.0 / 74724249600.0,
+        -3617.0 / 10670622842880000.0,
+        43867.0 / 5109094217170944000.0,
+        -174611.0 / 802857662698291200000.0,
+    ];
+    let mut rising = s; // s (s+1) ... (s + 2j - 2)
+    let mut power = n.powf(-s - 1.0); // N^{-s-2j+1} for j = 1
+    for (j, b) in bernoulli.iter().enumerate() {
+        let jf = (j + 1) as f64;
+        let term = b * rising * power;
         sum += term;
-        if term.abs() < 1e-14 * sum.abs() {
+        if term.abs() < 1e-17 * sum.abs() {
             break;
         }
+        rising *= (s + 2.0 * jf - 1.0) * (s + 2.0 * jf);
+        power /= n * n;
     }
-    let denom = 1.0 - 2.0_f64.powf(1.0 - s);
-    sum / denom
+    sum
 }
 
 /// Numerical evaluation of Lambert W function $W_0(x)$ via Halley's cubic iteration.
@@ -616,78 +831,141 @@ pub fn eval_ci(x: f64) -> f64 {
     sum
 }
 
-/// Numerical evaluation of Airy function $\text{Ai}(x)$.
+/// Numerical evaluation of the Airy function $\mathrm{Ai}(x)$.
+///
+/// For $x > 0$, $\mathrm{Ai}(x) = \frac1\pi\sqrt{x/3}\,K_{1/3}(\zeta)$ and for $x < 0$,
+/// $\mathrm{Ai}(-x) = \frac{\sqrt x}{3}\left(J_{1/3}(\zeta) + J_{-1/3}(\zeta)\right)$, with
+/// $\zeta = \frac23 |x|^{3/2}$; for $|x| > 10$ the asymptotic expansions (DLMF 9.7) are used.
 pub fn eval_airy_ai(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
     if x.abs() < 1e-12 {
-        return 0.3550280538878172; // 1 / (3^(2/3) * Gamma(2/3))
-    }
-    // High-precision series or asymptotic
-    let f_val = 0.3550280538878172;
-    let g_val = -0.2588194037928068; // -1 / (3^(1/3) * Gamma(1/3))
-    let x3 = x * x * x;
-    let mut f_sum = 1.0;
-    let mut g_sum = x;
-    let mut f_term = 1.0;
-    let mut g_term = x;
-    for k in 1..30 {
-        let k_f = k as f64;
-        f_term *= x3 / ((3.0 * k_f - 1.0) * (3.0 * k_f - 2.0) * (3.0 * k_f));
-        g_term *= x3 / ((3.0 * k_f) * (3.0 * k_f - 1.0) * (3.0 * k_f + 1.0));
-        f_sum += f_term;
-        g_sum += g_term;
-        if f_term.abs() < 1e-15 && g_term.abs() < 1e-15 {
-            break;
-        }
-    }
-    f_val * f_sum + g_val * g_sum
-}
-
-/// Numerical evaluation of Bessel function of the second kind $Y_n(x)$.
-pub fn eval_bessel_y(n: i64, x: f64) -> f64 {
-    if x <= 0.0 {
-        return f64::NAN;
-    }
-    // Approximation via J_n and limit
-    let eps = 1e-5;
-    let j_plus = eval_bessel_j(n, x + eps);
-    let j_minus = eval_bessel_j(n, x - eps);
-    (j_plus - j_minus) / (2.0 * eps)
-}
-
-/// Numerical evaluation of Modified Bessel function of the first kind $I_n(x)$.
-pub fn eval_bessel_i(n: i64, x: f64) -> f64 {
-    let n_abs = n.unsigned_abs() as usize;
-    let half_x = x / 2.0;
-    let mut term = half_x.powi(n_abs as i32);
-    let mut fact_n = 1.0;
-    for k in 1..=n_abs {
-        fact_n *= k as f64;
-    }
-    term /= fact_n;
-    let mut sum = term;
-    for m in 1..40 {
-        term *= (half_x * half_x) / (m as f64 * (m + n_abs) as f64);
-        sum += term;
-        if term.abs() < 1e-15 * sum.abs() {
-            break;
-        }
-    }
-    sum
-}
-
-/// Numerical evaluation of Modified Bessel function of the second kind $K_n(x)$.
-pub fn eval_bessel_k(n: i64, x: f64) -> f64 {
-    if x <= 0.0 {
-        return f64::NAN;
+        return 0.355_028_053_887_817_2; // 1 / (3^(2/3) * Gamma(2/3))
     }
     let pi = std::f64::consts::PI;
-    let i_n = eval_bessel_i(n, x);
-    let i_neg_n = eval_bessel_i(-n, x);
-    // For integers: K_n(x) = (pi / 2) * lim_{v -> n} (I_{-v}(x) - I_v(x)) / sin(v*pi)
-    let eps = 1e-4;
-    let i1 = eval_bessel_i(n, x);
-    let i2 = eval_bessel_i(n + 1, x);
-    (pi / 2.0) * (i_neg_n + i_n) / (2.0 * (x + 1.0)).sqrt() + (i2 - i1) * eps
+    let z = x.abs();
+    let zeta = 2.0 / 3.0 * z.powf(1.5);
+    if z > 10.0 {
+        // u_k = Gamma(3k + 1/2) / (54^k k! Gamma(k + 1/2)).
+        let mut u = vec![1.0];
+        for k in 1..40 {
+            let kf = k as f64;
+            let prev = u[k - 1];
+            u.push(
+                prev * (6.0 * kf - 5.0) * (6.0 * kf - 3.0) * (6.0 * kf - 1.0)
+                    / ((2.0 * kf - 1.0) * 216.0 * kf),
+            );
+        }
+        if x > 0.0 {
+            let mut sum = 0.0;
+            let mut power = 1.0;
+            let mut previous = f64::INFINITY;
+            for (k, uk) in u.iter().enumerate() {
+                let term = uk * power;
+                if term.abs() > previous {
+                    break;
+                }
+                previous = term.abs();
+                sum += if k % 2 == 0 { term } else { -term };
+                power /= zeta;
+            }
+            return (-zeta).exp() / (2.0 * pi.sqrt() * z.powf(0.25)) * sum;
+        }
+        let (mut even, mut odd) = (0.0, 0.0);
+        let mut power = 1.0;
+        let mut previous = f64::INFINITY;
+        for (k, uk) in u.iter().enumerate() {
+            let term = uk * power;
+            if term.abs() > previous {
+                break;
+            }
+            previous = term.abs();
+            let pair = (k / 2) % 2 == 0;
+            if k % 2 == 0 {
+                even += if pair { term } else { -term };
+            } else {
+                odd += if pair { term } else { -term };
+            }
+            power /= zeta;
+        }
+        let phase = zeta + pi / 4.0;
+        return (phase.sin() * even - phase.cos() * odd) / (pi.sqrt() * z.powf(0.25));
+    }
+    if x > 0.0 {
+        (z / 3.0).sqrt() / pi * bessel_k_real_order(1.0 / 3.0, zeta)
+    } else {
+        z.sqrt() / 3.0
+            * (bessel_j_real_order(1.0 / 3.0, zeta) + bessel_j_real_order(-1.0 / 3.0, zeta))
+    }
+}
+
+/// Numerical evaluation of the Bessel function of the second kind $Y_n(x)$ for integer order, $x > 0$.
+///
+/// $$Y_n(x) = \frac1\pi\int_0^\pi \sin(x\sin\theta - n\theta)\,d\theta -
+///   \frac1\pi\int_0^\infty \left(e^{nt} + (-1)^n e^{-nt}\right) e^{-x\sinh t}\,dt,$$
+/// by Gauss–Legendre quadrature; Hankel's expansion for $x > 2000$.
+pub fn eval_bessel_y(n: i64, x: f64) -> f64 {
+    if x.is_nan() || x <= 0.0 {
+        return f64::NAN;
+    }
+    if n < 0 {
+        let sign = if n % 2 != 0 { -1.0 } else { 1.0 };
+        return sign * eval_bessel_y(-n, x);
+    }
+    if x.is_infinite() {
+        return 0.0;
+    }
+    if x > 2000.0 && 4.0 * (n * n) as f64 <= x {
+        return bessel_hankel(n, x).1;
+    }
+    let pi = std::f64::consts::PI;
+    let nf = n as f64;
+    let panels = (((x + nf) * pi / 8.0).ceil() as usize).max(1);
+    let first = integrate_gl(&|t| (x * t.sin() - nf * t).sin(), 0.0, pi, panels) / pi;
+    let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+    let limit = decay_limit(x, nf, &|t| t.sinh());
+    let second = integrate_half_line(
+        &|t| ((nf * t).exp() + sign * (-nf * t).exp()) * (-x * t.sinh()).exp(),
+        (0.5 / x).min(0.5),
+        limit,
+    );
+    first - second / pi
+}
+
+/// Numerical evaluation of the modified Bessel function of the first kind $I_n(x)$ by its power
+/// series (all terms are positive for $x \ge 0$, so there is no cancellation).
+pub fn eval_bessel_i(n: i64, x: f64) -> f64 {
+    let n_abs = n.unsigned_abs() as usize;
+    let half_x = x.abs() / 2.0;
+    let mut term = 1.0;
+    for k in 1..=n_abs {
+        term *= half_x / k as f64;
+    }
+    let mut sum = term;
+    for m in 1..5000 {
+        term *= (half_x * half_x) / (m as f64 * (m + n_abs) as f64);
+        sum += term;
+        if term < 1e-17 * sum {
+            break;
+        }
+    }
+    // I_{-n} = I_n and I_n(-x) = (-1)^n I_n(x).
+    if x < 0.0 && n_abs % 2 == 1 { -sum } else { sum }
+}
+
+/// Numerical evaluation of the modified Bessel function of the second kind $K_n(x)$, $x > 0$.
+///
+/// $K_n(x) = \int_0^\infty e^{-x\cosh t}\cosh(nt)\,dt$ by Gauss–Legendre quadrature (the integrand
+/// is smooth and decays double-exponentially).
+pub fn eval_bessel_k(n: i64, x: f64) -> f64 {
+    if x.is_nan() || x <= 0.0 {
+        return f64::NAN;
+    }
+    if x.is_infinite() {
+        return 0.0;
+    }
+    bessel_k_real_order(n.unsigned_abs() as f64, x)
 }
 
 /// Exact arbitrary-precision evaluation over $\mathbb{Q}$ when the expression contains

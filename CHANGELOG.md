@@ -47,6 +47,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `SymbolicForm::hodge_star_metric`: Hodge star for a general symmetric metric with symbolic entries.
 - Cartan operation `HodgeStarMatrix`: Hodge star for a general symmetric metric matrix given as expressions.
 - Integration: `P(x) * (a x + b)^e` for a polynomial `P` and a non-integer rational `e` (`x * sqrt(x + 1)`, `x / sqrt(x + 1)`, `x^2 * (x + 1)^(3/2)`, ...) by exact substitution; it used to be an error.
+- Fixed: `Ai`, `Y_n`, `K_n`, `J_n` for large arguments, `ζ`, `B(a, b)`, `ln Γ`, `erf` and `erfc` returned wrong values (`Ai(1)`, `Y0(1)`, `K0(1)`, `ζ(0.5)`, `J0(40) = -1.5e8`, `B(200, 200) = NaN`); they are now accurate to about 1e-12 and checked against tables and identities.
 - `mcts::{LearnedPolicy, PolicyFeatures}`, `MctsPolicyHead::compute_policy_with`, `MctsSearchEngine::{with_policy, train_policy, search_with_root_stats}`: a trainable linear policy that starts equal to the heuristic and is trained from the engine's own search statistics; JSON persistence.
 - `zeilberger_proof::{prove_recurrence, check_certificate, Poly2, SymbolicTerm}`: proves a Zeilberger recurrence for all `n` by rebuilding the certificate as a rational function of `n` and checking the telescoping identity symbolically.
 - `zeilberger::{zeilberger, telescoping_at}`: creative telescoping by specialisation and interpolation (recurrences for binomial, squared-binomial and Delannoy sums, verified beyond the fitted range; not an all-n proof).

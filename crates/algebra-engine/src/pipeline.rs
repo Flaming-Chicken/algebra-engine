@@ -106,7 +106,7 @@ impl CadFeaBridge {
         }
         let per_layer = gear.generate_2d_profile(6).len() + 48;
         let total = mesh_3d.vertices.len();
-        if total % per_layer != 0 || total / per_layer < 2 {
+        if !total.is_multiple_of(per_layer) || total / per_layer < 2 {
             return None;
         }
         let layers = total / per_layer;

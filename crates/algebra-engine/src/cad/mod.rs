@@ -1094,8 +1094,10 @@ impl Mesh3D {
         !self.triangles.is_empty() && self.boundary_edge_count() == 0
     }
 
-    /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
-    pub fn compute_volume(&self) -> f64 {
+    /// Signed enclosed volume by the divergence theorem: positive when the triangle normals point
+    /// out of the solid (counter-clockwise seen from outside), negative for an inside-out mesh.
+    /// Only meaningful for a closed mesh.
+    pub fn signed_volume(&self) -> f64 {
         let mut signed_vol = 0.0;
         for t in &self.triangles {
             let v0 = self.vertices[t[0]];
@@ -1109,7 +1111,24 @@ impl Mesh3D {
             let dot = v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2];
             signed_vol += dot / 6.0;
         }
-        signed_vol.abs()
+        signed_vol
+    }
+
+    /// Compute solid enclosed volume via the divergence theorem: $V = \frac{1}{6} \sum_T \mathbf{v}_0 \cdot (\mathbf{v}_1 \times \mathbf{v}_2)$.
+    pub fn compute_volume(&self) -> f64 {
+        self.signed_volume().abs()
+    }
+
+    /// Reverse the winding of every triangle (an inside-out closed mesh becomes outward-oriented).
+    pub fn reverse_orientation(&mut self) {
+        for tri in &mut self.triangles {
+            tri.swap(1, 2);
+        }
+    }
+
+    /// Whether the mesh is closed and its normals point out of the solid (positive signed volume).
+    pub fn is_outward_oriented(&self) -> bool {
+        self.is_closed() && self.signed_volume() > 0.0
     }
 
     /// Compute geometric centroid: $\mathbf{C} = \frac{1}{N} \sum \mathbf{v}_i$.
@@ -1424,8 +1443,8 @@ impl Mesh3D {
             [1, 5, 6, 2],
         ];
         for q in quads {
-            mesh.add_triangle(q[0], q[1], q[2]);
-            mesh.add_triangle(q[0], q[2], q[3]);
+            mesh.add_triangle(q[0], q[2], q[1]);
+            mesh.add_triangle(q[0], q[3], q[2]);
         }
         mesh
     }

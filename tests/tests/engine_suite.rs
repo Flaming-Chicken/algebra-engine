@@ -6,6 +6,8 @@
 mod analysis_tests;
 #[path = "engine/limits_series_audit_tests.rs"]
 mod limits_series_audit_tests;
+#[path = "engine/solve_known_roots_tests.rs"]
+mod solve_known_roots_tests;
 
 #[path = "engine/branch_tests.rs"]
 mod branch_tests;

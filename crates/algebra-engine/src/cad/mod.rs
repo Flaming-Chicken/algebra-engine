@@ -509,6 +509,13 @@ pub enum GeometricEntity {
         p1: String,
         p2: String,
     },
+    /// A straight line through two 3-D points (given by entity name); used by the line
+    /// constraints (parallel, perpendicular, angle).
+    Line3D {
+        name: String,
+        p1: String,
+        p2: String,
+    },
     Circle2D {
         name: String,
         center: String,
@@ -660,6 +667,37 @@ impl GeometricConstraintSolver {
                 _ => Err(fail(format!("`{name}` is not a Line2D"))),
             }
         };
+        // The direction p2 - p1 of a `Line3D` (both points must be 3-D); `None` for other entities.
+        let line3 = |name: &str| -> Option<AlgebraResult<[f64; 3]>> {
+            let Some(GeometricEntity::Line3D { p1, p2, .. }) = self.entities.get(name) else {
+                return None;
+            };
+            Some((|| {
+                let (a, b) = (point_any(p1)?, point_any(p2)?);
+                if a.len() != 3 || b.len() != 3 {
+                    return Err(fail(format!("`{name}` needs two 3-D points")));
+                }
+                Ok([b[0] - a[0], b[1] - a[1], b[2] - a[2]])
+            })())
+        };
+        // Both names are 3-D lines: their directions; one of them only: an error (no mixing).
+        let lines3 = |a: &str, b: &str| -> AlgebraResult<Option<([f64; 3], [f64; 3])>> {
+            match (line3(a), line3(b)) {
+                (Some(da), Some(db)) => Ok(Some((da?, db?))),
+                (None, None) => Ok(None),
+                _ => Err(fail(format!(
+                    "`{a}` and `{b}` must both be Line2D or both be Line3D"
+                ))),
+            }
+        };
+        let cross3 = |a: [f64; 3], b: [f64; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let dot3 = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         let direction = |l: ([f64; 2], [f64; 2])| [l.1[0] - l.0[0], l.1[1] - l.0[1]];
         let cross = |a: [f64; 2], b: [f64; 2]| a[0] * b[1] - a[1] * b[0];
         let dot = |a: [f64; 2], b: [f64; 2]| a[0] * b[0] + a[1] * b[1];
@@ -679,12 +717,25 @@ impl GeometricConstraintSolver {
                 Ok(vec![dist - d])
             }
             GeometricConstraint::Parallel(a, b) => {
+                if let Some((da, db)) = lines3(a, b)? {
+                    // Parallel in space: the cross product of the directions vanishes.
+                    return Ok(cross3(da, db).to_vec());
+                }
                 Ok(vec![cross(direction(line(a)?), direction(line(b)?))])
             }
             GeometricConstraint::Perpendicular(a, b) => {
+                if let Some((da, db)) = lines3(a, b)? {
+                    return Ok(vec![dot3(da, db)]);
+                }
                 Ok(vec![dot(direction(line(a)?), direction(line(b)?))])
             }
             GeometricConstraint::Angle(a, b, theta) => {
+                if let Some((da, db)) = lines3(a, b)? {
+                    // In space only the (unsigned) angle between the directions is defined:
+                    // cos of it equals dot / (|a||b|).
+                    let norm = |v: [f64; 3]| dot3(v, v).sqrt().max(1e-12);
+                    return Ok(vec![dot3(da, db) / (norm(da) * norm(db)) - theta.cos()]);
+                }
                 // The angle from line a to line b is theta: cross cos(theta) - dot sin(theta) = 0,
                 // and the unit-direction normalisation keeps the scale comparable to lengths.
                 let (da, db) = (direction(line(a)?), direction(line(b)?));

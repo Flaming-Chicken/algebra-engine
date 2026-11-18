@@ -1478,3 +1478,123 @@ fn internal_gears_are_inside_out_rings_with_the_right_tooth_thickness() {
     let gear = InternalGear::new(2.0, 40, 5.0);
     assert!((gear.center_distance(16) - 24.0).abs() < 1e-12);
 }
+
+#[test]
+fn screw_heads_can_be_chamfered_and_have_a_key_socket() {
+    use algebra_engine::cad::{BoltHeadType, ThreadedScrew};
+    use std::f64::consts::PI;
+
+    let base_volume = |screw: &ThreadedScrew| {
+        let mut plain = screw.clone();
+        plain.head_chamfer = 0.0;
+        plain.socket_depth = 0.0;
+        plain.generate_3d_mesh().compute_volume()
+    };
+
+    let cases: Vec<(&str, ThreadedScrew)> = {
+        let mut hex = ThreadedScrew::metric_bolt(8.0, 1.25, 30.0);
+        hex.head_chamfer = 0.8;
+        let mut cap = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+        cap.socket_depth = 4.0;
+        let mut both = ThreadedScrew::socket_screw(10.0, 1.5, 30.0);
+        both.head_chamfer = 0.7;
+        both.socket_depth = 5.0;
+        let mut hex_socket = ThreadedScrew::metric_bolt(12.0, 1.75, 40.0);
+        hex_socket.head_chamfer = 1.0;
+        hex_socket.socket_depth = 3.0;
+        vec![
+            ("chamfered hex", hex),
+            ("socket cap", cap),
+            ("chamfer + socket", both),
+            ("hex with socket", hex_socket),
+        ]
+    };
+
+    for (name, screw) in cases {
+        let mesh = screw.generate_3d_mesh();
+        assert!(
+            mesh.is_closed(),
+            "{name}: {} boundary edges",
+            mesh.boundary_edge_count()
+        );
+
+        // Independent head volume: prism area x height, minus the chamfer wedge and the socket.
+        let d = screw.nominal_diameter;
+        let (across_flats, hexagonal, height) = match screw.head_type {
+            BoltHeadType::Hexagonal => (1.6 * d, true, 0.65 * d),
+            BoltHeadType::SocketCap => (1.5 * d, false, d),
+            _ => unreachable!(),
+        };
+        let half = across_flats / 2.0;
+        let area = if hexagonal {
+            2.0 * 3.0_f64.sqrt() * half * half
+        } else {
+            PI * half * half
+        };
+        let c = screw.effective_chamfer();
+        let f = 1.0 - c / half;
+        let mut cut = area * c - area * c * (1.0 + f + f * f) / 3.0;
+        if let Some((key, depth)) = screw.effective_socket() {
+            cut += 2.0 * 3.0_f64.sqrt() * (key / 2.0).powi(2) * depth;
+        }
+        let expected = base_volume(&screw) - cut;
+        let volume = mesh.compute_volume();
+        assert!(
+            (volume - expected).abs() < 2e-3 * expected,
+            "{name}: volume {volume} vs {expected}"
+        );
+        assert!(
+            volume < base_volume(&screw),
+            "{name}: features must remove material"
+        );
+
+        // The socket floor is below the top face and the outline narrows at the top.
+        let top = screw.total_length + height;
+        if let Some((_, depth)) = screw.effective_socket() {
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .any(|v| (v[2] - (top - depth)).abs() < 1e-9)
+            );
+        }
+        let top_radius = mesh
+            .vertices
+            .iter()
+            .filter(|v| (v[2] - top).abs() < 1e-9)
+            .map(|v| v[0].hypot(v[1]))
+            .fold(0.0, f64::max);
+        let full_radius = mesh
+            .vertices
+            .iter()
+            .map(|v| v[0].hypot(v[1]))
+            .fold(0.0, f64::max);
+        if c > 0.0 {
+            assert!(
+                top_radius < full_radius - 0.5 * c,
+                "{name}: top {top_radius} vs {full_radius}"
+            );
+        }
+    }
+
+    // Absurd settings are clamped or ignored, never producing an invalid solid.
+    let mut silly = ThreadedScrew::metric_bolt(6.0, 1.0, 20.0);
+    silly.head_chamfer = 100.0;
+    silly.socket_depth = 100.0;
+    assert!(silly.effective_chamfer() < 0.45 * 4.8);
+    assert!(
+        silly.effective_socket().is_none(),
+        "the socket cannot fit inside a heavily chamfered head"
+    );
+    assert!(silly.generate_3d_mesh().is_closed());
+    let mut deep = ThreadedScrew::socket_screw(8.0, 1.25, 20.0);
+    deep.socket_depth = 100.0;
+    let (_, depth) = deep.effective_socket().unwrap();
+    assert!((depth - 0.9 * 8.0).abs() < 1e-12);
+    assert!(deep.generate_3d_mesh().is_closed());
+    // A stud has no head to cut.
+    let mut stud = ThreadedScrew::metric_bolt(8.0, 1.25, 20.0);
+    stud.head_type = BoltHeadType::None;
+    stud.socket_depth = 3.0;
+    stud.head_chamfer = 1.0;
+    assert!(stud.effective_socket().is_none() && stud.effective_chamfer() == 0.0);
+}

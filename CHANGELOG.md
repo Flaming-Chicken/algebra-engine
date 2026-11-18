@@ -54,6 +54,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - `gosper::{gosper, QPoly, GosperSum}`: Gosper's algorithm for indefinite hypergeometric summation in exact rational arithmetic (the building block of Zeilberger's creative telescoping, which is still open).
 - `summation` handles polynomial times geometric summands (`k*2^k`, `(1/2)^k`, ...) in closed form via Gosper's algorithm.
 - Geometric constraint solver: `Line3D` with parallel, perpendicular and angle constraints in space.
+- Geometric constraint solver: point-to-line distances (2-D and 3-D); a distance of zero puts a point on a line.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.
 - `Mesh3D::from_implicit` meshes `f(x,y,z)=0` inside a box by marching tetrahedra (closed, outward-oriented; volumes of a sphere and torus within a few percent), and `CustomShape::ParametricImplicit` now uses it.

@@ -63,3 +63,38 @@ fn exports_of_an_empty_document_are_valid_skeletons() {
     assert!(to_sympy("").contains("import sympy as sp"));
     assert!(to_lean("").contains("import Mathlib"));
 }
+
+#[test]
+fn html_report_is_escaped_structured_and_printable() {
+    use urae_notebook::export::to_html_report;
+    let doc = "# Title <b>\n## Section\n// prose & more\n\nx^2 + 1\n2 + 3\n";
+    let html = to_html_report(
+        "My <report>",
+        doc,
+        &[None, None, None, None, None, Some("5".into())],
+    );
+
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    // Everything user-supplied is escaped: no raw tag from the document or the title survives.
+    assert!(html.contains("<h1>Title &lt;b&gt;</h1>"), "{html}");
+    assert!(html.contains("My &lt;report&gt;"));
+    assert!(!html.contains("<b>") && !html.contains("<report>"));
+    assert!(html.contains("<h2>Section</h2>"));
+    assert!(html.contains("<p>prose &amp; more</p>"));
+    // Formula blocks carry the result only where one was supplied (line index 5 is `2 + 3`).
+    assert!(html.contains("<code>x^2 + 1</code></div>"));
+    assert!(html.contains("<code>2 + 3</code><div class=\"result\">= 5</div>"));
+    assert_eq!(html.matches("class=\"result\"").count(), 1);
+    // Printable and inert: a print stylesheet, no script.
+    assert!(html.contains("@media print"));
+    assert!(!html.to_lowercase().contains("<script"));
+
+    // A hostile line cannot inject markup.
+    let evil = to_html_report("t", "<script>alert(1)</script>", &[]);
+    assert!(!evil.contains("<script>alert"));
+    assert!(evil.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+
+    // An empty document is still a valid page, and short result slices are fine.
+    let empty = to_html_report("empty", "", &[]);
+    assert!(empty.contains("<body>") && empty.contains("</html>"));
+}

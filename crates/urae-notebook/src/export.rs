@@ -237,3 +237,62 @@ pub fn to_lean(document: &str) -> String {
     }
     out
 }
+
+/// Escape text for HTML element content and attribute values.
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Render the document as one self-contained, printable HTML page (inline CSS, no script).
+///
+/// `results[i]` is the evaluated output of document line `i` (`None` when the line has none, or
+/// the slice is shorter than the document). Lines starting with `#` become headings (the number
+/// of `#` sets the level, 1 to 3), `//` lines become paragraphs, a blank line separates
+/// paragraphs, and every other line is shown as a formula block, followed by its result when
+/// there is one. All text is escaped. A print stylesheet drops the page chrome and avoids
+/// breaking a formula block across pages, so the browser's *Print to PDF* gives a clean report.
+pub fn to_html_report(title: &str, document: &str, results: &[Option<String>]) -> String {
+    let mut body = String::new();
+    for (i, raw) in document.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('#') {
+            let level = 1 + rest.chars().take_while(|&c| c == '#').count();
+            let text = rest.trim_start_matches('#').trim();
+            let level = level.min(3);
+            body.push_str(&format!("<h{level}>{}</h{level}>\n", html_escape(text)));
+        } else if let Some(rest) = line.strip_prefix("//") {
+            body.push_str(&format!("<p>{}</p>\n", html_escape(rest.trim())));
+        } else {
+            body.push_str(&format!(
+                "<div class=\"formula\"><code>{}</code>",
+                html_escape(line)
+            ));
+            if let Some(Some(result)) = results.get(i)
+                && !result.trim().is_empty()
+            {
+                body.push_str(&format!(
+                    "<div class=\"result\">= {}</div>",
+                    html_escape(result.trim())
+                ));
+            }
+            body.push_str("</div>\n");
+        }
+    }
+    format!(
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>{t}</title>\n<style>\n\
+         body {{ font-family: Georgia, serif; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }}\n\
+         h1, h2, h3 {{ font-family: system-ui, sans-serif; }}\n\
+         .formula {{ background: #f5f5f7; border: 1px solid #ddd; border-radius: 6px; padding: .6rem .9rem; margin: .6rem 0; break-inside: avoid; }}\n\
+         .formula code {{ font-family: ui-monospace, monospace; }}\n\
+         .result {{ color: #0a5; font-weight: 600; margin-top: .25rem; }}\n\
+         @media print {{ body {{ margin: 0; max-width: none; }} .formula {{ background: none; }} }}\n\
+         </style>\n</head>\n<body>\n<h1 class=\"title\">{t}</h1>\n{body}</body>\n</html>\n",
+        t = html_escape(title)
+    )
+}

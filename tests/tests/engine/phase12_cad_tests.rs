@@ -78,7 +78,8 @@ fn test_cad_2d_decomposition_circle() {
     circle.terms.insert(vec![0, 0], -1.0); // -1
 
     let cad_2d = CadEngine::decompose(&[circle], &vars, 1e-8).unwrap();
-    assert!(cad_2d.count_leaf_cells() >= 5);
+    // Exactly 13 cells: fibres of 1, 3, 5, 3 and 1 cells over x < -1, -1, (-1, 1), 1 and x > 1.
+    assert_eq!(cad_2d.count_leaf_cells(), 13);
 }
 
 #[test]

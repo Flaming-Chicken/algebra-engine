@@ -238,3 +238,6 @@ mod guess_tests;
 
 #[path = "engine/zeilberger_tests.rs"]
 mod zeilberger_tests;
+
+#[path = "engine/cad_projection_tests.rs"]
+mod cad_projection_tests;

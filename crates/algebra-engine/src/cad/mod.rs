@@ -7,14 +7,17 @@
 //! - **Cylindrical Algebraic Decomposition**: Decomposes $\mathbb{R}^n$ into a finite union of
 //!   connected, disjoint, sign-invariant semi-algebraic cells $\mathbb{R}^n = \bigcup_{i} C_i$
 //!   for a set of polynomials $\mathcal{F} = \{f_1, \dots, f_m\} \subset \mathbb{Q}[x_1, \dots, x_n]$.
-//! - **Projection Phase (Collins & McCallum)**:
-//!   Recursively projects polynomials $\mathcal{F}_k \subset \mathbb{Q}[x_1, \dots, x_k]$ to
-//!   $\mathcal{F}_{k-1} \subset \mathbb{Q}[x_1, \dots, x_{k-1}]$ using Principal Subresultant
-//!   Coefficients ($\operatorname{psc}$), Discriminants $\operatorname{disc}(f, x_k)$, and
-//!   Resultants $\operatorname{res}(f, g, x_k)$.
+//! - **Projection Phase (McCallum)**:
+//!   For one and two variables the projection is exact ([`projection`]): the leading coefficient,
+//!   the discriminant $\operatorname{disc}(f, y)$ of each polynomial and the resultant
+//!   $\operatorname{res}(f, g, y)$ of each pair, over $\mathbb{Q}[x]$. Three or more variables are
+//!   rejected with an error (the multivariate projection is not implemented), as are inputs with a
+//!   repeated or common factor in $y$ (their discriminant or resultant vanishes identically).
 //! - **Base & Lifting Phase**:
-//!   Isolates real roots of univariate projection polynomials via Sturm/VAS bisection, constructing
-//!   sample points for **Sections** ($x_k = \alpha$) and **Sectors** ($x_k \in (\alpha_i, \alpha_{i+1})$).
+//!   Real roots are isolated exactly with Sturm sequences; the base cells are cut at the roots of
+//!   the projection polynomials, and each fibre is decomposed at the real roots of the polynomials
+//!   restricted to a sample point (a tangency, which a sample only approximates, is detected through
+//!   the critical points of the fibre polynomial and merged into one root).
 //! - **Quantifier Elimination (Tarski-Seidenberg Decision Procedure)**:
 //!   Eliminates quantifiers $\forall, \exists$ over first-order real arithmetic formulas:
 //!   $$
@@ -31,6 +34,7 @@
 
 pub mod bvh;
 pub mod engineering;
+pub mod projection;
 
 pub use bvh::{BvhIntersection, BvhNode, BvhTree, Ray3D};
 pub use engineering::{
@@ -232,6 +236,12 @@ impl CadEngine {
             ));
         }
 
+        if n > 2 {
+            return Err(AlgebraError::EvaluationError(format!(
+                "CAD with {n} variables is not supported: the exact projection phase is implemented \
+                 for one and two variables, and lifting without a projection is unsound"
+            )));
+        }
         // Recursive cylindrical construction starting from base 1D space
         Self::decompose_recursive(polys, vars, 0, &[], precision_eps)
     }
@@ -265,7 +275,8 @@ impl CadEngine {
         }
 
         // 1. Project polynomials to find univariate roots in current level variable x_{level}
-        let roots = Self::isolate_cross_section_roots(polys, level, current_sample, eps)?;
+        let roots =
+            Self::isolate_cross_section_roots(polys, vars.len(), level, current_sample, eps)?;
 
         // 2. Form interleaved Sections and Sectors along the coordinate line
         let mut sample_coords = Vec::new();
@@ -324,98 +335,115 @@ impl CadEngine {
         })
     }
 
-    /// Isolate sorted real roots of polynomials evaluated on current base sample.
+    /// Sorted, distinct real roots that cut the coordinate line of variable `var_idx` into cells.
+    ///
+    /// For the base variable of a two-variable decomposition these are the roots of the McCallum
+    /// projection (coefficients, discriminants and resultants, see [`projection`]); otherwise they
+    /// are the real roots of the polynomials restricted to the fibre over `base_sample`, found by
+    /// exact Sturm isolation. A tangency (a double root of a fibre polynomial, which a sample
+    /// point only approximates) is detected through the critical points of the fibre polynomial
+    /// and reported as a single root.
     fn isolate_cross_section_roots(
         polys: &[CadPolynomial],
+        n_vars: usize,
         var_idx: usize,
         base_sample: &[f64],
         eps: f64,
     ) -> AlgebraResult<Vec<f64>> {
-        let mut all_roots = Vec::new();
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        use num_traits::{Signed, ToPrimitive};
+        let exact = |c: f64| -> AlgebraResult<BigRational> {
+            BigRational::from_float(c).ok_or_else(|| {
+                AlgebraError::EvaluationError("CAD polynomials need finite coefficients".into())
+            })
+        };
+        let mut roots: Vec<f64> = Vec::new();
 
-        for p in polys {
-            // Substitute base coordinates to produce univariate polynomial in x_{var_idx}
-            let deg = p.degree_wrt(var_idx);
-            if deg == 0 {
-                continue;
-            }
-
-            // Extract univariate coefficients c_0, c_1, ..., c_d
-            let mut uni_coeffs = vec![0.0; deg + 1];
-            for (exp, &coeff) in &p.terms {
-                let e = exp.get(var_idx).copied().unwrap_or(0);
-                // Evaluate remaining variables
-                let mut term_val = coeff;
-                for (i, &other_e) in exp.iter().enumerate() {
-                    if i != var_idx && other_e > 0 {
-                        let xi = base_sample.get(i).copied().unwrap_or(0.0);
-                        term_val *= xi.powi(other_e as i32);
+        if n_vars == 2 && var_idx == 0 {
+            // Projection phase: the polynomials as polynomials in y (variable 1) over Q[x].
+            let mut bipolys = Vec::new();
+            for p in polys {
+                let mut coeffs: Vec<Vec<BigRational>> = Vec::new();
+                for (exp, &c) in &p.terms {
+                    let (ex, ey) = (
+                        exp.first().copied().unwrap_or(0),
+                        exp.get(1).copied().unwrap_or(0),
+                    );
+                    while coeffs.len() <= ey {
+                        coeffs.push(Vec::new());
                     }
+                    while coeffs[ey].len() <= ex {
+                        coeffs[ey].push(BigRational::from_integer(BigInt::from(0)));
+                    }
+                    coeffs[ey][ex] += exact(c)?;
                 }
-                uni_coeffs[e] += term_val;
+                bipolys.push(projection::BiPoly {
+                    coeffs: coeffs.into_iter().map(crate::gosper::QPoly::new).collect(),
+                });
             }
-
-            // Solve univariate roots
-            if deg == 1 && uni_coeffs[1].abs() > 1e-12 {
-                let r = -uni_coeffs[0] / uni_coeffs[1];
-                all_roots.push(r);
-            } else if deg == 2 && uni_coeffs[2].abs() > 1e-12 {
-                let a = uni_coeffs[2];
-                let b = uni_coeffs[1];
-                let c = uni_coeffs[0];
-                let disc = b * b - 4.0 * a * c;
-                if disc >= -1e-14 {
-                    let sqrt_d = disc.max(0.0).sqrt();
-                    all_roots.push((-b - sqrt_d) / (2.0 * a));
-                    all_roots.push((-b + sqrt_d) / (2.0 * a));
-                }
-            } else {
-                // Approximate bisection / Newton isolation
-                let samples: [f64; 9] = [-10.0, -5.0, -2.0, -1.0, 0.0, 1.0, 2.0, 5.0, 10.0];
-                for i in 0..samples.len() - 1 {
-                    let x0: f64 = samples[i];
-                    let x1: f64 = samples[i + 1];
-                    let v0: f64 = uni_coeffs
-                        .iter()
-                        .enumerate()
-                        .map(|(k, &c)| c * x0.powi(k as i32))
-                        .sum();
-                    let v1: f64 = uni_coeffs
-                        .iter()
-                        .enumerate()
-                        .map(|(k, &c)| c * x1.powi(k as i32))
-                        .sum();
-                    if v0 * v1 <= 0.0 {
-                        let mut lo: f64 = x0;
-                        let mut hi: f64 = x1;
-                        for _ in 0..40 {
-                            let mid: f64 = (lo + hi) / 2.0;
-                            let v_mid: f64 = uni_coeffs
-                                .iter()
-                                .enumerate()
-                                .map(|(k, &c)| c * mid.powi(k as i32))
-                                .sum();
-                            if v_mid.abs() < eps {
-                                lo = mid;
-                                break;
-                            }
-                            if v0 * v_mid <= 0.0 {
-                                hi = mid;
-                            } else {
-                                lo = mid;
+            let projected = projection::project(&bipolys)
+                .map_err(|e| AlgebraError::EvaluationError(format!("CAD projection: {e}")))?;
+            for p in projection::coprime_basis(&projected) {
+                roots.extend(projection::real_roots(&p).iter().filter_map(|r| r.to_f64()));
+            }
+        } else {
+            // Fibre over `base_sample` (empty for a single variable): substitute exactly.
+            for p in polys {
+                let mut coeffs: Vec<BigRational> = Vec::new();
+                for (exp, &c) in &p.terms {
+                    let mut term = exact(c)?;
+                    for (i, &e) in exp.iter().enumerate() {
+                        if i != var_idx && e > 0 {
+                            let xi = exact(base_sample.get(i).copied().unwrap_or(0.0))?;
+                            for _ in 0..e {
+                                term *= xi.clone();
                             }
                         }
-                        all_roots.push((lo + hi) / 2.0);
+                    }
+                    let e = exp.get(var_idx).copied().unwrap_or(0);
+                    while coeffs.len() <= e {
+                        coeffs.push(BigRational::from_integer(BigInt::from(0)));
+                    }
+                    coeffs[e] += term;
+                }
+                let q = crate::gosper::QPoly::new(coeffs);
+                if q.degree().is_none_or(|d| d == 0) {
+                    continue;
+                }
+                roots.extend(projection::real_roots(&q).iter().filter_map(|r| r.to_f64()));
+                // Tangencies: a critical point where the polynomial is (numerically) zero.
+                let dq = crate::gosper::QPoly::new(
+                    (1..=q.degree().unwrap_or(0))
+                        .map(|i| q.coeff(i) * BigRational::from_integer(BigInt::from(i as i64)))
+                        .collect(),
+                );
+                let scale = projection::scale_of(&q);
+                for yc in projection::real_roots(&dq) {
+                    let value = q.eval(&yc).abs().to_f64().unwrap_or(f64::INFINITY);
+                    if value <= 1e-9 * scale {
+                        if let Some(y) = yc.to_f64() {
+                            roots.push(y);
+                        }
                     }
                 }
             }
         }
 
-        // Sort and deduplicate roots
-        all_roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        all_roots.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-
-        Ok(all_roots)
+        // Sort, and merge roots closer than the tolerance (the same root found twice, or a
+        // tangency seen as two nearby roots).
+        roots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let tolerance = eps.max(1e-7);
+        let mut merged: Vec<f64> = Vec::new();
+        for r in roots {
+            match merged.last_mut() {
+                Some(last) if (r - *last).abs() <= tolerance * (1.0 + last.abs()) => {
+                    *last = 0.5 * (*last + r);
+                }
+                _ => merged.push(r),
+            }
+        }
+        Ok(merged)
     }
 }
 

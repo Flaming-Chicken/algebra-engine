@@ -117,18 +117,38 @@ impl CadFeaBridge {
             .copied()
             .filter(|t| t.iter().all(|&i| i < per_layer))
             .collect();
-        if bottom.is_empty() {
+        let mut fea = FeaMesh::new(3, ElementType::Tet4);
+        for v in &mesh_3d.vertices {
+            fea.add_node(v.to_vec());
+        }
+        Self::stack_prisms(&mut fea, &bottom, layers, &|layer, local| {
+            layer * per_layer + local
+        })?;
+        Some(fea)
+    }
+
+    /// Fill a stack of identical layers with tetrahedra: every base triangle (given by *local*
+    /// vertex ids) is extruded between consecutive layers and each prism is cut into three
+    /// tetrahedra. `node(layer, local)` gives the FEA node of a local vertex in a layer.
+    ///
+    /// Local ids are sorted before cutting so neighbouring prisms split their shared quad faces
+    /// along the same diagonal (a conforming mesh). `None` if a base triangle is degenerate or
+    /// changes orientation between layers (a strong twist that would give inverted tetrahedra).
+    fn stack_prisms(
+        fea: &mut FeaMesh,
+        base: &[[usize; 3]],
+        layers: usize,
+        node: &dyn Fn(usize, usize) -> usize,
+    ) -> Option<()> {
+        if base.is_empty() || layers < 2 {
             return None;
         }
-        // The same triangle at every layer must keep its orientation: a strong helical twist
-        // rotates the outline against the (unrotated) bore ring and can fold a triangle, which
-        // would give inverted tetrahedra. Then the solid mesh is not used.
         let area = |layer: usize, t: &[usize; 3]| {
-            let v = |i: usize| mesh_3d.vertices[i + layer * per_layer];
+            let v = |i: usize| &fea.nodes[node(layer, i)];
             let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
             (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
         };
-        for tri in &bottom {
+        for tri in base {
             let reference = area(0, tri);
             if reference.abs() < 1e-12 {
                 return None;
@@ -137,25 +157,71 @@ impl CadFeaBridge {
                 return None;
             }
         }
+        for layer in 0..layers - 1 {
+            for tri in base {
+                let mut v = *tri;
+                v.sort_unstable();
+                let lo = |i: usize| node(layer, i);
+                let hi = |i: usize| node(layer + 1, i);
+                let (p0, p1, p2) = (v[0], v[1], v[2]);
+                fea.add_element(vec![lo(p0), lo(p1), lo(p2), hi(p2)]);
+                fea.add_element(vec![lo(p0), lo(p1), hi(p1), hi(p2)]);
+                fea.add_element(vec![lo(p0), hi(p0), hi(p1), hi(p2)]);
+            }
+        }
+        Some(())
+    }
+
+    /// Tetrahedral solid mesh of a wing: the outline cap (a fan from the section centroid) is
+    /// extruded through the spanwise sections. The FEA nodes are the CAD vertices followed by one
+    /// extra centroid node per intermediate section (the CAD mesh only has centroids at the two
+    /// ends). `None` for a strongly twisted wing whose sections would fold the prisms.
+    fn extruded_airfoil_solid(airfoil: &NacaAirfoil, mesh_3d: &Mesh3D) -> Option<FeaMesh> {
+        let n_prof = airfoil.generate_2d_coordinates(20).len();
+        let sections = 8;
+        // Layout of `generate_3d_mesh`: sections * n_prof outline vertices, then the bottom and
+        // top centroids.
+        if mesh_3d.vertices.len() != sections * n_prof + 2 {
+            return None;
+        }
+        let (bottom_centre, top_centre) = (sections * n_prof, sections * n_prof + 1);
         let mut fea = FeaMesh::new(3, ElementType::Tet4);
         for v in &mesh_3d.vertices {
             fea.add_node(v.to_vec());
         }
-        for layer in 0..layers - 1 {
-            let (lo, hi) = (layer * per_layer, (layer + 1) * per_layer);
-            for tri in &bottom {
-                // Sort by vertex index so neighbouring prisms cut their shared quad faces along
-                // the same diagonal (a conforming mesh).
-                let mut v = *tri;
-                v.sort_unstable();
-                let (p0, p1, p2) = (v[0], v[1], v[2]);
-                let up = |i: usize| i + (hi - lo);
-                let base = |i: usize| i + lo;
-                fea.add_element(vec![base(p0), base(p1), base(p2), up(base(p2))]);
-                fea.add_element(vec![base(p0), base(p1), up(base(p1)), up(base(p2))]);
-                fea.add_element(vec![base(p0), up(base(p0)), up(base(p1)), up(base(p2))]);
-            }
+        // Centroid of each intermediate section, at the section's own twist.
+        let mut middle = Vec::new();
+        for s in 1..sections - 1 {
+            let ring: Vec<&Vec<f64>> = (0..n_prof).map(|i| &fea.nodes[s * n_prof + i]).collect();
+            let cx = ring.iter().map(|p| p[0]).sum::<f64>() / n_prof as f64;
+            let cy = ring.iter().map(|p| p[1]).sum::<f64>() / n_prof as f64;
+            let z = ring[0][2];
+            middle.push((cx, cy, z));
         }
+        let first_extra = fea.nodes.len();
+        for (cx, cy, z) in &middle {
+            fea.add_node(vec![*cx, *cy, *z]);
+        }
+        // Base triangles: the fan around the bottom centroid, in local ids (the centroid is local
+        // id `n_prof`).
+        let base: Vec<[usize; 3]> = mesh_3d
+            .triangles
+            .iter()
+            .filter(|t| t.contains(&bottom_centre))
+            .map(|t| t.map(|i| if i == bottom_centre { n_prof } else { i }))
+            .collect();
+        let node = |layer: usize, local: usize| {
+            if local < n_prof {
+                layer * n_prof + local
+            } else if layer == 0 {
+                bottom_centre
+            } else if layer == sections - 1 {
+                top_centre
+            } else {
+                first_extra + layer - 1
+            }
+        };
+        Self::stack_prisms(&mut fea, &base, sections, &node)?;
         Some(fea)
     }
 
@@ -225,9 +291,15 @@ impl CadFeaBridge {
     }
 
     /// Convert a NACA Airfoil wing to a simulation `FeaMesh` with `"wing_root"` and `"wing_tip"`.
+    ///
+    /// The wing is meshed as a **solid** of linear tetrahedra (the section is extruded through the
+    /// spanwise sections, see [`CadFeaBridge::gear_to_fea`] for the scheme), so structural
+    /// analysis is real 3-D elasticity; a strongly twisted wing keeps the surface triangulation.
+    /// The FEA nodes are the CAD vertices plus one extra centroid node per intermediate section.
     pub fn airfoil_to_fea(airfoil: &NacaAirfoil) -> FeaMesh {
         let mesh_3d = airfoil.generate_3d_mesh();
-        let mut fea = Self::mesh3d_to_fea(&mesh_3d);
+        let mut fea = Self::extruded_airfoil_solid(airfoil, &mesh_3d)
+            .unwrap_or_else(|| Self::mesh3d_to_fea(&mesh_3d));
 
         let span = airfoil.span;
         let mut root_nodes = Vec::new();

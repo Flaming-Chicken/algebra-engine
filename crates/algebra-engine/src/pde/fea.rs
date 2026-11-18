@@ -32,6 +32,8 @@ pub enum ElementType {
     Quad4,
     /// 3D Linear 4-node tetrahedral element.
     Tet4,
+    /// 3D Quadratic 10-node tetrahedral element.
+    Tet10,
     /// 3D Linear 8-node hexahedral element.
     Hex8,
     /// $N$-Dimensional Simplex with $(N+1)$ nodes.
@@ -215,6 +217,52 @@ impl FeaMesh {
         mesh.add_boundary_group("right", (0..=ny).map(|j| id(nx, j)).collect());
         mesh.add_boundary_group("bottom", (0..=nx).map(|i| id(i, 0)).collect());
         mesh.add_boundary_group("top", (0..=nx).map(|i| id(i, ny)).collect());
+        mesh
+    }
+
+    /// A rectangular block of quadratic tetrahedra (Tet10): the [`FeaMesh::box_3d`] tetrahedra
+    /// with a node at the middle of every edge. Element nodes are the four corners, then the
+    /// midpoints of edges 0-1, 1-2, 2-0, 0-3, 1-3 and 2-3. The boundary groups include the
+    /// midside nodes on each face.
+    pub fn box_3d_tet10(lx: f64, ly: f64, lz: f64, nx: usize, ny: usize, nz: usize) -> Self {
+        let linear = Self::box_3d(lx, ly, lz, nx, ny, nz);
+        let mut mesh = Self::new(3, ElementType::Tet10);
+        for node in &linear.nodes {
+            mesh.add_node(node.clone());
+        }
+        let mut midpoints: HashMap<(usize, usize), usize> = HashMap::new();
+        for elem in &linear.elements {
+            let mut ids = elem.clone();
+            for (a, b) in [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)] {
+                let key = (elem[a].min(elem[b]), elem[a].max(elem[b]));
+                let id = *midpoints.entry(key).or_insert_with(|| {
+                    let (pa, pb) = (&mesh.nodes[elem[a]], &mesh.nodes[elem[b]]);
+                    let m = (0..3).map(|k| (pa[k] + pb[k]) / 2.0).collect();
+                    mesh.add_node(m)
+                });
+                ids.push(id);
+            }
+            mesh.add_element(ids);
+        }
+        let eps = 1e-9 * lx.max(ly).max(lz);
+        let extent = [lx, ly, lz];
+        let mut groups: [Vec<usize>; 6] = Default::default();
+        for (i, p) in mesh.nodes.iter().enumerate() {
+            for axis in 0..3 {
+                if p[axis].abs() < eps {
+                    groups[[0, 2, 4][axis]].push(i);
+                }
+                if (p[axis] - extent[axis]).abs() < eps {
+                    groups[[1, 3, 5][axis]].push(i);
+                }
+            }
+        }
+        for (name, nodes) in ["left", "right", "bottom", "top", "front", "back"]
+            .into_iter()
+            .zip(groups)
+        {
+            mesh.add_boundary_group(name, nodes);
+        }
         mesh
     }
 
@@ -728,6 +776,41 @@ impl FeaEngine {
                     }
                 }
 
+                ElementType::Tet10 if mesh.dim == 3 => {
+                    let d = Self::solid_constitutive(e_mod, nu);
+                    let mut volume = 0.0;
+                    for l in Self::TET10_GAUSS {
+                        let (grads, v) = Self::tet10_gradients(mesh, elem, l)?;
+                        volume = v;
+                        let b = Self::solid_b_matrix::<30>(&grads);
+                        for r in 0..30 {
+                            for c in 0..30 {
+                                let mut val = 0.0;
+                                for i in 0..6 {
+                                    for j in 0..6 {
+                                        val += b[i][r] * d[i][j] * b[j][c];
+                                    }
+                                }
+                                k_global.add(
+                                    elem[r / 3] * 3 + r % 3,
+                                    elem[c / 3] * 3 + c % 3,
+                                    val * volume / 4.0,
+                                );
+                            }
+                        }
+                    }
+                    // Consistent body force: corner functions integrate to -V/20, midside ones to V/5.
+                    for (local, &ni) in elem.iter().enumerate() {
+                        let share = if local < 4 {
+                            -volume / 20.0
+                        } else {
+                            volume / 5.0
+                        };
+                        for (dof, &bf) in body_force.iter().enumerate().take(3) {
+                            f_global[ni * 3 + dof] += bf * share;
+                        }
+                    }
+                }
                 ElementType::Hex8 if mesh.dim == 3 => {
                     if elem.len() != 8 {
                         return Err(AlgebraError::EvaluationError(
@@ -861,7 +944,32 @@ impl FeaEngine {
         let mut von_mises = Vec::new();
         let (c11, c12, c33) = Self::plane_constitutive(e_mod, nu, plane_stress);
         for elem in &mesh.elements {
-            if mesh.element_type == ElementType::Hex8 && mesh.dim == 3 && elem.len() == 8 {
+            if mesh.element_type == ElementType::Tet10 && mesh.dim == 3 && elem.len() == 10 {
+                // Stress at the centroid.
+                let Ok((grads, _)) = Self::tet10_gradients(mesh, elem, [0.25; 4]) else {
+                    von_mises.push(0.0);
+                    continue;
+                };
+                let b = Self::solid_b_matrix::<30>(&grads);
+                let d = Self::solid_constitutive(e_mod, nu);
+                let mut strain = [0.0; 6];
+                for (i, row) in b.iter().enumerate() {
+                    for (col, value) in row.iter().enumerate() {
+                        strain[i] += value * displacement[elem[col / 3] * 3 + col % 3];
+                    }
+                }
+                let mut s = [0.0; 6];
+                for i in 0..6 {
+                    for j in 0..6 {
+                        s[i] += d[i][j] * strain[j];
+                    }
+                }
+                von_mises.push(
+                    (0.5 * ((s[0] - s[1]).powi(2) + (s[1] - s[2]).powi(2) + (s[2] - s[0]).powi(2))
+                        + 3.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]))
+                        .sqrt(),
+                );
+            } else if mesh.element_type == ElementType::Hex8 && mesh.dim == 3 && elem.len() == 8 {
                 // Stress at the element centre.
                 let Some((grads, _)) = Self::hex8_gradients(mesh, elem, 0.0, 0.0, 0.0) else {
                     von_mises.push(0.0);
@@ -1155,6 +1263,26 @@ impl FeaEngine {
                         f_global[elem[r]] += heat_source * n_i * det;
                     }
                 }
+            } else if mesh.element_type == ElementType::Tet10 && mesh.dim == 3 {
+                let mut volume = 0.0;
+                for l in Self::TET10_GAUSS {
+                    let (grads, v) = Self::tet10_gradients(mesh, elem, l)?;
+                    volume = v;
+                    for r in 0..10 {
+                        for c in 0..10 {
+                            let dot: f64 = (0..3).map(|a| grads[r][a] * grads[c][a]).sum();
+                            k_global.add(elem[r], elem[c], conductivity * dot * volume / 4.0);
+                        }
+                    }
+                }
+                for (local, &ni) in elem.iter().enumerate() {
+                    let share = if local < 4 {
+                        -volume / 20.0
+                    } else {
+                        volume / 5.0
+                    };
+                    f_global[ni] += heat_source * share;
+                }
             } else if mesh.element_type == ElementType::Hex8 && mesh.dim == 3 {
                 if elem.len() != 8 {
                     return Err(AlgebraError::EvaluationError(
@@ -1365,6 +1493,79 @@ impl FeaEngine {
             b[2][2 * i + 1] = dx;
         }
         Some((b, det))
+    }
+
+    /// Barycentric coordinates of the four Gauss points of a tetrahedron (exact for quadratics,
+    /// weight V/4 each).
+    const TET10_GAUSS: [[f64; 4]; 4] = [
+        [
+            0.585_410_196_624_968_5,
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+        ],
+        [
+            0.138_196_601_125_010_5,
+            0.585_410_196_624_968_5,
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+        ],
+        [
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+            0.585_410_196_624_968_5,
+            0.138_196_601_125_010_5,
+        ],
+        [
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+            0.138_196_601_125_010_5,
+            0.585_410_196_624_968_5,
+        ],
+    ];
+
+    /// Physical shape-function gradients of a straight-sided quadratic tetrahedron at the
+    /// barycentric point `l`, and its volume. Node order: four corners, then the midpoints of
+    /// edges 0-1, 1-2, 2-0, 0-3, 1-3, 2-3. A degenerate element, or midside nodes not at the
+    /// edge midpoints (a curved element), is an error.
+    fn tet10_gradients(
+        mesh: &FeaMesh,
+        elem: &[usize],
+        l: [f64; 4],
+    ) -> AlgebraResult<([[f64; 3]; 10], f64)> {
+        let fail = |why: &str| AlgebraError::EvaluationError(format!("Tet10 element: {why}"));
+        if elem.len() != 10 {
+            return Err(fail("needs ten nodes"));
+        }
+        let Some((dl, volume)) = Self::tet4_gradients(mesh, &elem[..4]) else {
+            return Err(fail("degenerate (zero volume)"));
+        };
+        const EDGES: [(usize, usize); 6] = [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)];
+        let scale = volume.cbrt();
+        for (m, &(a, b)) in EDGES.iter().enumerate() {
+            for axis in 0..3 {
+                let mid = 0.5 * (mesh.nodes[elem[a]][axis] + mesh.nodes[elem[b]][axis]);
+                if (mesh.nodes[elem[4 + m]][axis] - mid).abs() > 1e-9 * scale {
+                    return Err(fail(
+                        "midside nodes must lie at the edge midpoints (curved edges are not supported)",
+                    ));
+                }
+            }
+        }
+        let mut grads = [[0.0; 3]; 10];
+        for i in 0..4 {
+            // N_i = L_i (2 L_i - 1): dN_i/dL_i = 4 L_i - 1.
+            for axis in 0..3 {
+                grads[i][axis] = (4.0 * l[i] - 1.0) * dl[i][axis];
+            }
+        }
+        for (m, &(a, b)) in EDGES.iter().enumerate() {
+            // N = 4 L_a L_b: gradient 4 (L_b grad L_a + L_a grad L_b).
+            for axis in 0..3 {
+                grads[4 + m][axis] = 4.0 * (l[b] * dl[a][axis] + l[a] * dl[b][axis]);
+            }
+        }
+        Ok((grads, volume))
     }
 
     /// Natural-coordinate signs of the eight Hex8 nodes (bottom face counter-clockwise, then top).

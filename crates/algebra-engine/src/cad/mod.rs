@@ -533,6 +533,12 @@ pub enum GeometricEntity {
         name: String,
         coords: [Option<f64>; 3],
     },
+    /// A point in `R^n` (any `n >= 1`); unknown coordinates are `None`. Distance and
+    /// coincidence constraints work between points of the same dimension.
+    PointND {
+        name: String,
+        coords: Vec<Option<f64>>,
+    },
     HyperSphereND {
         name: String,
         dim: usize,
@@ -590,6 +596,11 @@ impl GeometricConstraintSolver {
                 GeometricEntity::Point3D { coords, .. } if coords.iter().all(|c| c.is_some()) => {
                     solved_coords.insert(name.clone(), coords.iter().flatten().copied().collect());
                 }
+                GeometricEntity::PointND { coords, .. }
+                    if !coords.is_empty() && coords.iter().all(|c| c.is_some()) =>
+                {
+                    solved_coords.insert(name.clone(), coords.iter().flatten().copied().collect());
+                }
                 _ => {}
             }
         }
@@ -604,7 +615,11 @@ impl GeometricConstraintSolver {
                     let is_point = |n: &String| {
                         matches!(
                             self.entities.get(n),
-                            Some(GeometricEntity::Point2D { .. } | GeometricEntity::Point3D { .. })
+                            Some(
+                                GeometricEntity::Point2D { .. }
+                                    | GeometricEntity::Point3D { .. }
+                                    | GeometricEntity::PointND { .. }
+                            )
                         )
                     };
                     if !(is_point(p1_name) && is_point(p2_name)) {
@@ -964,6 +979,9 @@ impl GeometricConstraintSolver {
             let known: Vec<Option<f64>> = match self.entities.get(name) {
                 Some(GeometricEntity::Point2D { x, y, .. }) => vec![*x, *y],
                 Some(GeometricEntity::Point3D { coords, .. }) => coords.to_vec(),
+                Some(GeometricEntity::PointND { coords, .. }) if !coords.is_empty() => {
+                    coords.clone()
+                }
                 _ => continue,
             };
             let start = solved.get(name).cloned();

@@ -761,3 +761,100 @@ fn planes_in_space_give_distances_and_parallel_perpendicular_constraints() {
         .is_err()
     );
 }
+
+fn point_nd(name: &str, coords: &[Option<f64>]) -> (String, GeometricEntity) {
+    (
+        name.to_string(),
+        GeometricEntity::PointND {
+            name: name.to_string(),
+            coords: coords.to_vec(),
+        },
+    )
+}
+
+#[test]
+fn points_in_any_dimension_are_solved_from_distances() {
+    // 4-D: P is 2 from the origin and sqrt 3 from e1, e2, e3, so P = (1, 1, 1, +-1).
+    let origin = [Some(0.0); 4];
+    let unit = |i: usize| {
+        let mut c = [Some(0.0); 4];
+        c[i] = Some(1.0);
+        c
+    };
+    let solved = solver(
+        vec![
+            point_nd("O", &origin),
+            point_nd("E1", &unit(0)),
+            point_nd("E2", &unit(1)),
+            point_nd("E3", &unit(2)),
+            point_nd("P", &[None, None, None, None]),
+        ],
+        vec![
+            C::Distance("O".into(), "P".into(), 2.0),
+            C::Distance("E1".into(), "P".into(), 3.0_f64.sqrt()),
+            C::Distance("E2".into(), "P".into(), 3.0_f64.sqrt()),
+            C::Distance("E3".into(), "P".into(), 3.0_f64.sqrt()),
+        ],
+    )
+    .solve()
+    .unwrap();
+    let p = &solved["P"];
+    assert_eq!(p.len(), 4);
+    assert!(
+        (p[0] - 1.0).abs() < 1e-6
+            && (p[1] - 1.0).abs() < 1e-6
+            && (p[2] - 1.0).abs() < 1e-6
+            && (p[3].abs() - 1.0).abs() < 1e-6,
+        "{p:?}"
+    );
+
+    // 1-D: B is 3 from A = 1, so B = 4 or -2; and coincidence in 5-D.
+    let solved = solver(
+        vec![point_nd("A", &[Some(1.0)]), point_nd("B", &[None])],
+        vec![C::Distance("A".into(), "B".into(), 3.0)],
+    )
+    .solve()
+    .unwrap();
+    assert!(
+        (solved["B"][0] - 4.0).abs() < 1e-8 || (solved["B"][0] + 2.0).abs() < 1e-8,
+        "{:?}",
+        solved["B"]
+    );
+    let solved = solver(
+        vec![
+            point_nd(
+                "A",
+                &[Some(1.0), Some(-2.0), Some(3.0), Some(0.5), Some(7.0)],
+            ),
+            point_nd("B", &[None; 5]),
+        ],
+        vec![C::Coincident("A".into(), "B".into())],
+    )
+    .solve()
+    .unwrap();
+    assert_eq!(solved["B"], solved["A"]);
+
+    // Different dimensions cannot be related, and an inconsistent set is reported.
+    let mismatch = solver(
+        vec![
+            point_nd("A", &[Some(0.0); 4]),
+            point_nd("B", &[Some(0.0); 3]),
+        ],
+        vec![C::Distance("A".into(), "B".into(), 1.0)],
+    )
+    .solve();
+    assert!(mismatch.is_err());
+    let impossible = solver(
+        vec![
+            point_nd("A", &[Some(0.0); 4]),
+            point_nd("B", &[Some(1.0), Some(0.0), Some(0.0), Some(0.0)]),
+            point_nd("P", &[None; 4]),
+        ],
+        vec![
+            C::Distance("A".into(), "P".into(), 0.1),
+            C::Distance("B".into(), "P".into(), 0.1),
+        ],
+    )
+    .solve();
+    assert!(impossible.is_err());
+}

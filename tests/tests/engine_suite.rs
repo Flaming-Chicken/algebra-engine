@@ -229,3 +229,6 @@ mod symbolic_cartan_tests;
 
 #[path = "engine/gosper_tests.rs"]
 mod gosper_tests;
+
+#[path = "engine/geometric_summation_tests.rs"]
+mod geometric_summation_tests;

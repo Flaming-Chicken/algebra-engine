@@ -867,13 +867,199 @@ impl SymbolicCalculus for ExprGraph {
             Ok(self.mul([expr, count]))
         } else if let Some(coeffs) = polynomial_coefficients(self, expr, wrt) {
             sum_polynomial(self, &coeffs, lower, upper)
+        } else if let Some((poly, base)) = polynomial_times_geometric(self, expr, wrt) {
+            sum_polynomial_geometric(self, &poly, &base, lower, upper)
         } else {
             Err(AlgebraError::EvaluationError(
-                "summation: only polynomial summands in the summation variable are supported"
+                "summation: only polynomial summands, and polynomial times c^k with a rational \
+                 constant c, are supported"
                     .into(),
             ))
         }
     }
+}
+
+/// The exact rational value of a constant expression built from integers, rationals, negation,
+/// sums, differences, products and quotients; `None` if it contains anything else.
+fn constant_rational(graph: &ExprGraph, id: ExprId) -> Option<num_rational::BigRational> {
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    use num_traits::Zero;
+    match &graph.get(id).kind {
+        ExprKind::Number(Number::Integer(i)) => Some(BigRational::from_integer(BigInt::from(*i))),
+        ExprKind::Number(Number::Rational(n, d)) => {
+            Some(BigRational::new(BigInt::from(*n), BigInt::from(*d)))
+        }
+        ExprKind::Neg(x) => constant_rational(graph, *x).map(|v| -v),
+        ExprKind::Add(ts) => ts.iter().try_fold(BigRational::zero(), |acc, &t| {
+            Some(acc + constant_rational(graph, t)?)
+        }),
+        ExprKind::Sub(l, r) => Some(constant_rational(graph, *l)? - constant_rational(graph, *r)?),
+        ExprKind::Mul(fs) => fs
+            .iter()
+            .try_fold(BigRational::from_integer(1.into()), |acc, &f| {
+                Some(acc * constant_rational(graph, f)?)
+            }),
+        ExprKind::Div(l, r) => {
+            let d = constant_rational(graph, *r)?;
+            (!d.is_zero()).then(|| constant_rational(graph, *l).map(|n| n / d))?
+        }
+        _ => None,
+    }
+}
+
+/// A rational constant `c` and a polynomial `p(k)` with rational coefficients such that
+/// `expr = p(k) * c^k`, found by structure: sums of terms that each have one factor `c^k` (a
+/// numeric base with exponent `var`) and a polynomial in `var` for the rest, all with the same
+/// base. `None` for anything else (including `c = 1`, a plain polynomial).
+fn polynomial_times_geometric(
+    graph: &ExprGraph,
+    expr: ExprId,
+    var: SymbolId,
+) -> Option<(crate::gosper::QPoly, num_rational::BigRational)> {
+    use crate::gosper::QPoly;
+    use num_traits::One;
+    // `c^k` with a constant base and the summation variable as the exponent.
+    let geometric = |id: ExprId| -> Option<num_rational::BigRational> {
+        let ExprKind::Pow(base, exponent) = graph.get(id).kind.clone() else {
+            return None;
+        };
+        let ExprKind::Symbol(s) = graph.get(exponent).kind else {
+            return None;
+        };
+        if s != var {
+            return None;
+        }
+        constant_rational(graph, base)
+    };
+    // One term: exactly one `c^k` factor, the rest a polynomial with rational coefficients.
+    let term = |id: ExprId| -> Option<(QPoly, num_rational::BigRational)> {
+        let (base, rest): (Option<num_rational::BigRational>, Vec<ExprId>) =
+            match &graph.get(id).kind {
+                ExprKind::Mul(factors) => {
+                    let mut base = None;
+                    let mut rest = Vec::new();
+                    for &f in factors.iter() {
+                        match (geometric(f), base.is_some()) {
+                            (Some(c), false) => base = Some(c),
+                            (Some(_), true) => return None,
+                            (None, _) => rest.push(f),
+                        }
+                    }
+                    (base, rest)
+                }
+                ExprKind::Neg(inner) => {
+                    let (p, c) = polynomial_times_geometric(graph, *inner, var)?;
+                    return Some((p.scale(&-num_rational::BigRational::one()), c));
+                }
+                _ => (geometric(id), Vec::new()),
+            };
+        let base = base?;
+        let rest_expr = if rest.is_empty() {
+            graph.integer(1)
+        } else {
+            graph.mul(rest)
+        };
+        let coeffs = polynomial_coefficients(graph, rest_expr, var)?;
+        let rational: Option<Vec<num_rational::BigRational>> = coeffs
+            .iter()
+            .map(|&c| constant_rational(graph, c))
+            .collect();
+        Some((QPoly::new(rational?), base))
+    };
+    let (poly, base) = match &graph.get(expr).kind {
+        ExprKind::Add(terms) => {
+            let mut parts = terms.iter().map(|&t| term(t));
+            let (mut poly, base) = parts.next()??;
+            for part in parts {
+                let (p, c) = part?;
+                if c != base {
+                    return None;
+                }
+                poly = poly.add(&p);
+            }
+            (poly, base)
+        }
+        _ => term(expr)?,
+    };
+    (!base.is_one()).then_some((poly, base))
+}
+
+/// `sum_{k=lower}^{upper} p(k) c^k` by Gosper's algorithm: the antidifference is `q(k) c^k` with
+/// `q` a polynomial, so the sum is `q(upper + 1) c^(upper + 1) - q(lower) c^lower`. The result is
+/// checked against the defining identity `c q(k + 1) - q(k) = p(k)` before it is returned.
+fn sum_polynomial_geometric(
+    graph: &ExprGraph,
+    poly: &crate::gosper::QPoly,
+    base: &num_rational::BigRational,
+    lower: ExprId,
+    upper: ExprId,
+) -> AlgebraResult<ExprId> {
+    use crate::gosper::gosper;
+    use num_traits::One;
+    let fail = |msg: String| AlgebraError::EvaluationError(format!("summation: {msg}"));
+    if poly.is_zero() {
+        return Ok(graph.integer(0));
+    }
+    // t(k) = p(k) c^k has ratio c p(k+1) / p(k).
+    let shifted = poly.shift(&num_rational::BigRational::one());
+    let found = gosper(&shifted.scale(base), poly)
+        .map_err(&fail)?
+        .ok_or_else(|| {
+            fail("this term has no closed-form antidifference (Gosper's algorithm)".into())
+        })?;
+    // z(k) = R(k) t(k) = (num / den) p(k) c^k, so q = num * p / den (exact for these terms).
+    let (q, rem) = found
+        .numerator
+        .mul(poly)
+        .div_rem(&found.denominator)
+        .ok_or_else(|| fail("zero denominator in the antidifference".into()))?;
+    if !rem.is_zero() {
+        return Err(fail(
+            "the antidifference is not a polynomial multiple of c^k".into(),
+        ));
+    }
+    // Verify c q(k+1) - q(k) = p(k).
+    let check = q
+        .shift(&num_rational::BigRational::one())
+        .scale(base)
+        .sub(&q);
+    if check != *poly {
+        return Err(fail("internal check of the antidifference failed".into()));
+    }
+
+    // Build q(m) c^m as an expression for m = upper + 1 and m = lower.
+    let c_expr = {
+        let (n, d) = (base.numer(), base.denom());
+        match (i64::try_from(n.clone()).ok(), i64::try_from(d.clone()).ok()) {
+            (Some(n), Some(1)) => graph.integer(n),
+            (Some(n), Some(d)) => graph.number(Number::Rational(n, d)),
+            _ => return Err(fail("the base is too large".into())),
+        }
+    };
+    let coefficient = |r: &num_rational::BigRational| -> AlgebraResult<ExprId> {
+        let (n, d) = (
+            i64::try_from(r.numer().clone()),
+            i64::try_from(r.denom().clone()),
+        );
+        match (n, d) {
+            (Ok(n), Ok(1)) => Ok(graph.integer(n)),
+            (Ok(n), Ok(d)) => Ok(graph.number(Number::Rational(n, d))),
+            _ => Err(fail("a coefficient is too large".into())),
+        }
+    };
+    let at = |m: ExprId| -> AlgebraResult<ExprId> {
+        // Horner evaluation of q at the expression m.
+        let mut value = graph.integer(0);
+        for i in (0..=q.degree().unwrap_or(0)).rev() {
+            value = graph.add([graph.mul([value, m]), coefficient(&q.coeff(i))?]);
+        }
+        Ok(graph.mul([value, graph.pow(c_expr, m)]))
+    };
+    let one = graph.integer(1);
+    let top = at(graph.add([upper, one]))?;
+    let bottom = at(lower)?;
+    Ok(graph.sub(top, bottom))
 }
 
 /// Largest power of the summation variable summed in closed form (Faulhaber coefficients stay in `i64`).

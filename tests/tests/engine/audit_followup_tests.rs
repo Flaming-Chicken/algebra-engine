@@ -257,7 +257,7 @@ fn quadratic_with_real_roots_integrates_to_logs() {
             .unwrap_or_else(|e| panic!("`{src}` did not integrate: {e}"));
         let text = value(&format!("integrate {src}, x"));
         assert!(
-            text.contains("ln") && !text.contains("arctan"),
+            text.contains("ln") && !text.contains("atan"),
             "{src}: {text}"
         );
         let back = graph.diff(antiderivative, x_sym);
@@ -270,8 +270,8 @@ fn quadratic_with_real_roots_integrates_to_logs() {
             );
         }
     }
-    // Positive constant is still an arctan.
-    assert!(value("integrate 1/(x^2 + 4), x").contains("arctan"));
+    // Positive constant is still an arctan (printed with the canonical name `atan`).
+    assert!(value("integrate 1/(x^2 + 4), x").contains("atan"));
 }
 
 // --- Difference of squares with multi-term roots ----------------------------

@@ -101,15 +101,79 @@ fn test_zeilberger_creative_telescoping_binomial_sum() {
     assert_eq!(proof.recurrence_coeffs[0], "-2.0");
     assert_eq!(proof.recurrence_coeffs[1], "1.0");
 
-    // Numerical point check at n = 4, k = 2:
-    // F(n, k) = binom(4, 2) = 6
-    // F(n+1, k) = binom(5, 2) = 10
-    // G(n, k) = (k / (n + 1 - k)) * binom(n, k) = (2 / 3) * 6 = 4.0
-    // G(n, k+1) = (3 / 2) * binom(4, 3) = (3 / 2) * 4 = 6.0
-    // LHS = -2 * 6 + 1 * 10 = -2
-    // RHS = G(n, k+1) - G(n, k) = 6 - 4 = 2 (sign conventions match Telescoping identity)
-    let valid = ZeilbergerAlgorithm::verify_certificate_point(6.0, 10.0, 4.0, 6.0, -2.0, 1.0);
-    assert!(valid || proof.order == 1);
+    // Numerical point check at n = 4, k = 2 with the certificate G(n, k) = -k / (n + 1 - k) * binom(n, k):
+    // F(n, k) = binom(4, 2) = 6, F(n+1, k) = binom(5, 2) = 10,
+    // G(n, 2) = -(2 / 3) * 6 = -4, G(n, 3) = -(3 / 2) * 4 = -6,
+    // LHS = -2 * 6 + 1 * 10 = -2 and RHS = G(n, 3) - G(n, 2) = -6 - (-4) = -2.
+    assert_eq!(proof.certificate_r_nk, "-k / (n + 1 - k)");
+    assert!(ZeilbergerAlgorithm::verify_certificate_point(
+        6.0, 10.0, -4.0, -6.0, -2.0, 1.0
+    ));
+    // The certificate with the opposite sign (what an earlier version shipped) must be rejected: the
+    // old assertion `valid || order == 1` was always true and hid it.
+    assert!(!ZeilbergerAlgorithm::verify_certificate_point(
+        6.0, 10.0, 4.0, 6.0, -2.0, 1.0
+    ));
+}
+
+fn binom(n: i64, k: i64) -> num_rational::BigRational {
+    use num_bigint::BigInt;
+    if n < 0 || k < 0 || k > n {
+        return num_rational::BigRational::from_integer(BigInt::from(0));
+    }
+    num_rational::BigRational::from_integer((0..k).fold(BigInt::from(1), |acc, i| {
+        acc * BigInt::from(n - i) / BigInt::from(i + 1)
+    }))
+}
+
+fn q(n: i64) -> num_rational::BigRational {
+    num_rational::BigRational::from_integer(num_bigint::BigInt::from(n))
+}
+
+#[test]
+fn the_hard_coded_certificates_satisfy_the_telescoping_identity_exactly() {
+    // Binomial sum: binom(n+1, k) - 2 binom(n, k) = G(k+1) - G(k) with G(k) = -k/(n+1-k) binom(n, k)
+    // = -binom(n, k-1), for every k including the boundary.
+    let g = |n: i64, k: i64| -binom(n, k - 1);
+    for n in 0..12 {
+        for k in 0..=n + 1 {
+            assert_eq!(
+                binom(n + 1, k) - q(2) * binom(n, k),
+                g(n, k + 1) - g(n, k),
+                "n = {n}, k = {k}"
+            );
+        }
+        // And the closed form in the certificate string equals -binom(n, k-1) where it is defined.
+        for k in 1..=n {
+            let r = -q(k) / q(n + 1 - k);
+            assert_eq!(r * binom(n, k), g(n, k), "n = {n}, k = {k}");
+        }
+    }
+    assert_eq!(
+        ZeilbergerAlgorithm::prove_binomial_sum().certificate_r_nk,
+        "-k / (n + 1 - k)"
+    );
+
+    // Vandermonde: (n+1) F(n+1, k) - (a+b-n) F(n, k) = G(k+1) - G(k) with F = binom(a,k) binom(b,n-k)
+    // and G = R F, R = -k (b - n + k) / (n + 1 - k), for k < n + 1 (R has a pole at k = n + 1, where
+    // F(n, k) = 0 and the boundary term is taken as the limit, so only k <= n - 1 is checked).
+    let f = |a: i64, b: i64, n: i64, k: i64| binom(a, k) * binom(b, n - k);
+    let mut checked = 0;
+    for (a, b) in [(3, 4), (5, 2), (6, 6), (0, 5), (7, 1)] {
+        for n in 0..(a + b) {
+            for k in 0..n {
+                let gk = |k: i64| -q(k) * q(b - n + k) / q(n + 1 - k) * f(a, b, n, k);
+                let lhs = q(n + 1) * f(a, b, n + 1, k) - q(a + b - n) * f(a, b, n, k);
+                assert_eq!(lhs, gk(k + 1) - gk(k), "a = {a}, b = {b}, n = {n}, k = {k}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 100);
+    assert_eq!(
+        ZeilbergerAlgorithm::prove_vandermonde().certificate_r_nk,
+        "-k * (b - n + k) / (n + 1 - k)"
+    );
 }
 
 #[test]

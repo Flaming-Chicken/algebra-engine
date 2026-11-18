@@ -277,3 +277,101 @@ fn a_bored_gear_is_meshed_as_a_solid_and_analysed_with_real_elasticity() {
         ElementType::Tri3
     );
 }
+
+#[test]
+fn a_wing_is_meshed_as_a_solid_and_bends_under_a_tip_load() {
+    use algebra_engine::pde::ElementType;
+    let mut wing = NacaAirfoil::new("2412", 100.0, 600.0);
+    let fea = CadFeaBridge::airfoil_to_fea(&wing);
+    let cad = wing.generate_3d_mesh();
+    assert_eq!(fea.element_type, ElementType::Tet4);
+    // The CAD vertices come first, followed by one extra centroid node per interior section.
+    assert_eq!(fea.nodes.len(), cad.vertices.len() + 6);
+    for (n, v) in fea.nodes.iter().zip(&cad.vertices) {
+        assert_eq!(n.as_slice(), v.as_slice());
+    }
+    // The tetrahedra fill the wing exactly.
+    let tets: f64 = fea.elements.iter().map(|e| tet_volume(&fea, e)).sum();
+    let solid = cad.compute_volume();
+    assert!(
+        (tets - solid).abs() < 1e-8 * solid,
+        "tets {tets} vs solid {solid}"
+    );
+    assert!(fea.elements.iter().all(|e| tet_volume(&fea, e) > 1e-12));
+    // No node is left out of the mesh (an unused node would make the system singular).
+    let mut used = vec![false; fea.nodes.len()];
+    for e in &fea.elements {
+        for &i in e {
+            used[i] = true;
+        }
+    }
+    assert!(used.iter().all(|u| *u), "every node belongs to an element");
+
+    // A tip load in +y with the root clamped: the wing deflects towards +y, more towards the tip,
+    // and the root reactions balance the load.
+    let force = [0.0, 40.0, 0.0];
+    let mut pipeline = SimulationPipeline::from_cad(cad.clone());
+    pipeline.fea_mesh = fea.clone();
+    pipeline = pipeline.with_physics(PhysicsDiscipline::LinearElasticity {
+        youngs_modulus: 70_000.0,
+        poissons_ratio: 0.33,
+        density: 2700.0,
+        body_force: vec![0.0, 0.0, 0.0],
+        plane_stress: false,
+    });
+    for dof in 0..3 {
+        pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::FixedDisplacement {
+            group_name: "wing_root".into(),
+            dof_index: dof,
+            value: 0.0,
+        });
+    }
+    pipeline = pipeline.with_boundary_condition(FeaBoundaryCondition::PointForce {
+        group_name: "wing_tip".into(),
+        force_vector: force.to_vec(),
+    });
+    let result = pipeline.run_analysis().expect("wing structural analysis");
+    let uy = |z: f64| {
+        let nodes: Vec<usize> = (0..cad.vertices.len())
+            .filter(|&i| (cad.vertices[i][2] - z).abs() < 1e-6)
+            .collect();
+        nodes
+            .iter()
+            .map(|&i| result.solution.nodal_values[i * 3 + 1])
+            .sum::<f64>()
+            / nodes.len() as f64
+    };
+    let (mid, tip) = (uy(600.0 * 3.0 / 7.0), uy(600.0));
+    assert!(
+        tip > mid && mid > 0.0,
+        "deflection grows towards the tip: mid {mid}, tip {tip}"
+    );
+    let root = &result.fea_mesh.boundary_groups["wing_root"];
+    for (dof, f) in force.iter().enumerate() {
+        let reaction: f64 = root
+            .iter()
+            .map(|&n| result.solution.reaction_forces[n * 3 + dof])
+            .sum();
+        assert!(
+            // Tolerance relative to the size of the whole load (a component that should be zero
+            // carries solver noise of that order).
+            (reaction + f).abs() < 1e-5 * 40.0,
+            "dof {dof}: {reaction} vs {f}"
+        );
+    }
+
+    // A twisted wing (rotated sections never fold) is a solid as well.
+    wing.twist_deg = 8.0;
+    let twisted = CadFeaBridge::airfoil_to_fea(&wing);
+    assert_eq!(twisted.element_type, ElementType::Tet4);
+    let tets: f64 = twisted
+        .elements
+        .iter()
+        .map(|e| tet_volume(&twisted, e))
+        .sum();
+    let solid = wing.generate_3d_mesh().compute_volume();
+    assert!(
+        (tets - solid).abs() < 0.02 * solid,
+        "twisted tets {tets} vs solid {solid}"
+    );
+}

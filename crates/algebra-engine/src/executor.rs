@@ -1969,7 +1969,17 @@ impl OperationExecutor {
                             ),
                             Err(e) => OperationResult::error(e.to_string()),
                         },
-                        Err(e) => OperationResult::error(e),
+                        Err(e) => match sym_parse(form_str, *dim).and_then(|f| {
+                            f.hodge_star(graph, *is_minkowski)
+                                .map_err(|x| x.to_string())
+                        }) {
+                            Ok(star) => sym_report(
+                                format!("Hodge Star ⋆({form_str})"),
+                                &star,
+                                "\\star\\omega",
+                            ),
+                            Err(_) => OperationResult::error(e),
+                        },
                     },
                 }
             }

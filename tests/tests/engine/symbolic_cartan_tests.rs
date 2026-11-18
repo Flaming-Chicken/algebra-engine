@@ -305,3 +305,96 @@ fn symbolic_form_parsing_handles_signs_parentheses_and_degrees() {
     assert_eq!(zero.degree, 2);
     assert_eq!(zero.to_text(&g), "0");
 }
+
+#[test]
+fn hodge_star_codifferential_and_the_laplacian() {
+    let (g, c) = setup();
+
+    // star(f dx) = f dy^dz, star(f dy) = -f dx^dz, star(f dz) = f dx^dy on Euclidean R^3.
+    let w = SymbolicForm::one_form(&c, &[expr(&g, "x*y"), expr(&g, "z"), expr(&g, "x^2")]).unwrap();
+    let s = w.hodge_star(&g, false).unwrap();
+    for p in &POINTS {
+        let [x, y, z] = *p;
+        assert!((at(&s, &g, p, &[1, 2]) - x * y).abs() < 1e-9);
+        assert!((at(&s, &g, p, &[0, 2]) + z).abs() < 1e-9);
+        assert!((at(&s, &g, p, &[0, 1]) - x * x).abs() < 1e-9);
+    }
+    // star star = +1 on R^3 for every degree.
+    let ss = s.hodge_star(&g, false).unwrap();
+    for p in &POINTS {
+        for blade in [[0usize], [1], [2]] {
+            assert!((at(&ss, &g, p, &blade) - at(&w, &g, p, &blade)).abs() < 1e-9);
+        }
+    }
+
+    // It agrees with the constant-coefficient implementation on constant forms.
+    let names: Vec<String> = ["x", "y", "z"].iter().map(|s| s.to_string()).collect();
+    for text in ["2 dx - 3 dz", "dx^dy + 4 dy^dz", "5"] {
+        for minkowski in [false, true] {
+            let constant = algebra_engine::cartan::DifferentialForm::parse(text, 3, &names)
+                .unwrap()
+                .hodge_star(minkowski)
+                .unwrap();
+            let symbolic = SymbolicForm::parse(&g, text, &names)
+                .unwrap()
+                .hodge_star(&g, minkowski)
+                .unwrap();
+            let values = symbolic.evaluate(&g, &POINTS[0]).unwrap();
+            for (basis, v) in &constant.terms {
+                let got = values.get(basis).copied().unwrap_or(0.0);
+                assert!(
+                    (got - v).abs() < 1e-12,
+                    "{text} minkowski={minkowski} {basis:?}"
+                );
+            }
+        }
+    }
+
+    // Codifferential of a 1-form is minus the divergence: delta(P dx + Q dy + R dz) = -(P_x + Q_y + R_z).
+    let v = SymbolicForm::one_form(
+        &c,
+        &[expr(&g, "x^2"), expr(&g, "y * z"), expr(&g, "sin(z)")],
+    )
+    .unwrap();
+    let delta = v.codifferential(&g).unwrap();
+    for p in &POINTS {
+        let [x, y, z] = *p;
+        let div = 2.0 * x + z + z.cos();
+        assert!(
+            (at(&delta, &g, p, &[]) + div).abs() < 1e-9,
+            "got {}",
+            at(&delta, &g, p, &[])
+        );
+    }
+
+    // Laplace-de Rham on functions is minus the Laplacian.
+    let f = SymbolicForm::function(&c, expr(&g, "x^2 + 3*y^2 + sin(z)"));
+    let lap = f.laplace_de_rham(&g).unwrap();
+    for p in &POINTS {
+        let want = -(2.0 + 6.0 - p[2].sin());
+        assert!((at(&lap, &g, p, &[]) - want).abs() < 1e-9);
+    }
+    // On a 1-form it acts componentwise on a flat space: Delta(f dx) = (-lap f) dx.
+    let one =
+        SymbolicForm::one_form(&c, &[expr(&g, "x^3 + y^2"), expr(&g, "0"), expr(&g, "0")]).unwrap();
+    let lap1 = one.laplace_de_rham(&g).unwrap();
+    for p in &POINTS {
+        assert!((at(&lap1, &g, p, &[0]) + (6.0 * p[0] + 2.0)).abs() < 1e-9);
+        assert!(at(&lap1, &g, p, &[1]).abs() < 1e-9);
+        assert!(at(&lap1, &g, p, &[2]).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn the_cartan_operation_computes_a_symbolic_hodge_star() {
+    use algebra_core::operation::CartanOpKind::HodgeStar;
+    let out = run(HodgeStar {
+        form_str: "x^2 dx".into(),
+        dim: 3,
+        is_minkowski: false,
+    });
+    assert!(
+        out.contains("dy∧dz") && out.contains("(degree 2)") && !out.starts_with("ERROR"),
+        "{out}"
+    );
+}

@@ -199,6 +199,69 @@ impl SymbolicForm {
         Ok(out)
     }
 
+    /// Hodge star on `R^n` with the standard orientation: `star(f dx^I) = +/- f dx^J`, where `J` is
+    /// the complement of `I` and the sign is the parity of the permutation `(I, J)`. With
+    /// `is_minkowski`, blades containing `dx^0` also change sign (the convention of
+    /// [`crate::cartan::DifferentialForm::hodge_star`]).
+    pub fn hodge_star(&self, g: &ExprGraph, is_minkowski: bool) -> AlgebraResult<Self> {
+        let n = self.coords.len();
+        let mut out = Self::zero(&self.coords, n - self.degree);
+        for (basis, &c) in &self.terms {
+            let complement: Vec<usize> = (0..n).filter(|i| !basis.indices.contains(i)).collect();
+            let mut full = basis.indices.clone();
+            full.extend(&complement);
+            let (_, sign) = FormBasis::new(full);
+            let metric = if is_minkowski && basis.indices.contains(&0) {
+                -1
+            } else {
+                1
+            };
+            let term = signed(g, c, sign * metric);
+            let key = FormBasis {
+                indices: complement,
+            };
+            let merged = match out.terms.get(&key) {
+                Some(&existing) => g.add([existing, term]),
+                None => term,
+            };
+            out.terms.insert(key, merged);
+        }
+        Ok(out)
+    }
+
+    /// Codifferential `delta = (-1)^{n(k+1)+1} star d star` (Euclidean metric): it lowers the
+    /// degree by one, and `delta` of a 1-form is minus the divergence.
+    pub fn codifferential(&self, g: &ExprGraph) -> AlgebraResult<Self> {
+        if self.degree == 0 {
+            return Ok(Self::zero(&self.coords, 0));
+        }
+        let n = self.coords.len() as i64;
+        let k = self.degree as i64;
+        let sign = if (n * (k + 1) + 1) % 2 == 0 { 1 } else { -1 };
+        let inner = self.hodge_star(g, false)?.exterior_derivative(g)?;
+        let out = inner.hodge_star(g, false)?;
+        Ok(Self {
+            coords: out.coords,
+            degree: out.degree,
+            terms: out
+                .terms
+                .into_iter()
+                .map(|(b, c)| (b, signed(g, c, sign)))
+                .collect(),
+        })
+    }
+
+    /// Laplace-de Rham operator `d delta + delta d` (Euclidean metric); on functions it is minus
+    /// the usual Laplacian.
+    pub fn laplace_de_rham(&self, g: &ExprGraph) -> AlgebraResult<Self> {
+        let a = self.exterior_derivative(g)?.codifferential(g)?;
+        let b = self.codifferential(g)?.exterior_derivative(g)?;
+        if self.degree == 0 {
+            return Ok(a);
+        }
+        a.add(g, &b)
+    }
+
     /// Lie derivative along `X` by Cartan's formula `L_X = i_X d + d i_X`.
     pub fn lie_derivative(&self, g: &ExprGraph, vector: &[ExprId]) -> AlgebraResult<Self> {
         let a = self.exterior_derivative(g)?.interior_product(g, vector)?;

@@ -358,7 +358,7 @@ fn hodge_star_codifferential_and_the_laplacian() {
     .unwrap();
     let delta = v.codifferential(&g).unwrap();
     for p in &POINTS {
-        let [x, y, z] = *p;
+        let [x, _, z] = *p;
         let div = 2.0 * x + z + z.cos();
         assert!(
             (at(&delta, &g, p, &[]) + div).abs() < 1e-9,

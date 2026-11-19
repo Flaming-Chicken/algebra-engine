@@ -733,3 +733,107 @@ fn exact_trigonometric_values_at_multiples_of_pi_over_twelve() {
     assert_eq!(run("cos(pi/4)"), "1/2 · √(2)");
     assert_eq!(run("sin(pi/12)"), "-1/4 · √(2) + 1/4 · √(6)");
 }
+
+#[test]
+fn propositional_formulas_are_classified_like_their_truth_tables() {
+    // Brute force over every assignment of (p, q, r) decides the expected class.
+    type Formula = fn(bool, bool, bool) -> bool;
+    let cases: [(&str, Formula); 10] = [
+        ("p and not p", |p, _, _| p && !p),
+        ("p or not p", |p, _, _| p || !p),
+        ("p implies q", |p, q, _| !p || q),
+        ("(p implies q) iff (not p or q)", |p, q, _| {
+            (!p || q) == (!p || q)
+        }),
+        ("p xor q", |p, q, _| p ^ q),
+        ("not (p and q) iff (not p or not q)", |p, q, _| {
+            !(p && q) == (!p || !q)
+        }),
+        ("(p and q) or r", |p, q, r| (p && q) || r),
+        ("p -> (q -> p)", |p, q, _| !p || (!q || p)),
+        ("(p -> q) and (q -> r) and not (p -> r)", |p, q, r| {
+            (!p || q) && (!q || r) && !(!p || r)
+        }),
+        ("p & ~p", |p, _, _| p && !p),
+    ];
+    for (formula, f) in cases {
+        let mut values = Vec::new();
+        for bits in 0..8u8 {
+            values.push(f(bits & 1 == 1, bits & 2 != 0, bits & 4 != 0));
+        }
+        // The formula may not mention every variable; evaluating over all three still decides the class.
+        let expected = if values.iter().all(|v| !v) {
+            "contradiction"
+        } else if values.iter().all(|v| *v) {
+            "tautology"
+        } else {
+            "contingent"
+        };
+        let out = run(formula);
+        assert!(
+            out.contains(expected),
+            "{formula}: expected {expected}, got {out}"
+        );
+    }
+    // Arithmetic that happens to contain words is not logic.
+    assert_eq!(run("x + 1"), "x + 1");
+}
+
+#[test]
+fn finite_set_expressions_agree_with_hash_sets() {
+    use std::collections::BTreeSet;
+    let show = |s: &BTreeSet<i32>| {
+        format!(
+            "{{{}}}",
+            s.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")
+        )
+    };
+    let samples: [(Vec<i32>, Vec<i32>); 4] = [
+        (vec![1, 2, 3], vec![3, 4]),
+        (vec![5, -1, 2, 2], vec![2, 5, 9]),
+        (vec![], vec![1]),
+        (vec![7], vec![7]),
+    ];
+    for (a, b) in samples {
+        let (sa, sb): (BTreeSet<i32>, BTreeSet<i32>) =
+            (a.iter().copied().collect(), b.iter().copied().collect());
+        let text = |v: &Vec<i32>| {
+            format!(
+                "{{{}}}",
+                v.iter().map(i32::to_string).collect::<Vec<_>>().join(",")
+            )
+        };
+        let (ta, tb) = (text(&a), text(&b));
+        assert_eq!(
+            run(&format!("{ta} union {tb}")),
+            show(&sa.union(&sb).copied().collect())
+        );
+        assert_eq!(
+            run(&format!("{ta} intersect {tb}")),
+            show(&sa.intersection(&sb).copied().collect())
+        );
+        assert_eq!(
+            run(&format!("{ta} minus {tb}")),
+            show(&sa.difference(&sb).copied().collect())
+        );
+        assert_eq!(
+            run(&format!("{ta} xor {tb}")),
+            show(&sa.symmetric_difference(&sb).copied().collect())
+        );
+        assert_eq!(
+            run(&format!("{ta} subset {tb}")),
+            sa.is_subset(&sb).to_string()
+        );
+        assert_eq!(run(&format!("size {ta}")), sa.len().to_string());
+        for x in [-1, 2, 3, 7, 100] {
+            assert_eq!(
+                run(&format!("{x} in {ta}")),
+                sa.contains(&x).to_string(),
+                "{x} in {ta}"
+            );
+        }
+    }
+    // Equal rationals are one element; `in` is not read as a domain declaration.
+    assert_eq!(run("{1/2, 0.5, 2/4} union {1}"), "{1/2, 1}");
+    assert_eq!(run("{1,2} cross {a,b}"), "{(1, a), (1, b), (2, a), (2, b)}");
+}

@@ -55,3 +55,40 @@ fn a_call_is_only_rewritten_when_it_is_the_whole_input() {
     // Unknown function calls stay expressions.
     assert_eq!(run("f(2)"), "f(2)");
 }
+
+#[test]
+fn a_product_prints_the_same_whatever_was_typed_before() {
+    // The stored factor order follows the order in which symbols were first seen, which made the same expression
+    // print differently depending on the session's history. Printing is now in a fixed order: numbers, then
+    // symbols and their powers by name, then function calls by name.
+    let primed_forwards = {
+        let mut s = UraeSession::new();
+        s.execute_line("a + b + c");
+        s.execute_line("simplify c*sin(x)*b*a*3*x^2")
+    };
+    let primed_backwards = {
+        let mut s = UraeSession::new();
+        s.execute_line("x + sin(x) + c + b + a");
+        s.execute_line("simplify c*sin(x)*b*a*3*x^2")
+    };
+    assert_eq!(primed_forwards.output_text, primed_backwards.output_text);
+    assert_eq!(primed_forwards.output_text, "3 · a · b · c · x^2 · sin(x)");
+    // Matrix products do not commute and keep their order.
+    let mut s = UraeSession::new();
+    let ab = s.execute_line("simplify [[0,1],[0,0]]*[[0,0],[1,0]]");
+    let ba = s.execute_line("simplify [[0,0],[1,0]]*[[0,1],[0,0]]");
+    assert_ne!(ab.output_text, ba.output_text);
+}
+
+#[test]
+fn a_product_of_matrix_literals_is_a_matrix_product() {
+    // Oracle: the product computed by hand. [[1,2],[3,4]] * [[0,1],[1,0]] = [[2,1],[4,3]].
+    let product = run("[[1,2],[3,4]]*[[0,1],[1,0]]");
+    assert_eq!(product, run("matmul [[1,2],[3,4]], [[0,1],[1,0]]"));
+    assert!(product.contains('2') && product.contains('4'), "{product}");
+    // Multiplying by the identity returns the matrix.
+    assert_eq!(run("[[1,2],[3,4]]*[[1,0],[0,1]]"), "[ 1, 2 ; 3, 4 ]");
+    assert_eq!(product, "[ 2, 1 ; 4, 3 ]");
+    // Not commutative: the order matters.
+    assert_ne!(product, run("[[0,1],[1,0]]*[[1,2],[3,4]]"));
+}

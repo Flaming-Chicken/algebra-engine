@@ -1612,6 +1612,28 @@ pub fn parse_domain_declaration(line: &str) -> Option<DomainBound> {
 /// parsed as an expression and echoed back unevaluated, which looks like an answer but is not one.
 fn normalize_call_syntax(input: &str) -> Option<String> {
     let input = input.trim();
+    // `[[1,2],[3,4]] * [[0,1],[1,0]]`: a product of two matrix literals is a matrix product.
+    if input.starts_with('[') && input.ends_with(']') {
+        let mut depth = 0usize;
+        for (i, c) in input.char_indices() {
+            match c {
+                '[' | '(' | '{' => depth += 1,
+                ']' | ')' | '}' => depth = depth.saturating_sub(1),
+                '*' if depth == 0 => {
+                    let (a, b) = (input[..i].trim(), input[i + 1..].trim());
+                    if a.starts_with("[[")
+                        && a.ends_with(']')
+                        && b.starts_with("[[")
+                        && b.ends_with(']')
+                    {
+                        return Some(format!("matmul {a}, {b}"));
+                    }
+                    return None;
+                }
+                _ => {}
+            }
+        }
+    }
     // `a mod b`
     if let Some((a, b)) = input.split_once(" mod ")
         && !a.contains(char::is_whitespace)

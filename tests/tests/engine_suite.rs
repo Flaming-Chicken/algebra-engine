@@ -10,12 +10,16 @@ mod factoring_speed_tests;
 mod limits_series_audit_tests;
 #[path = "engine/m1_wrong_answer_tests.rs"]
 mod m1_wrong_answer_tests;
+#[path = "engine/polynomial_system_branching_tests.rs"]
+mod polynomial_system_branching_tests;
 #[path = "engine/radical_integrals_tests.rs"]
 mod radical_integrals_tests;
 #[path = "engine/solve_known_roots_tests.rs"]
 mod solve_known_roots_tests;
 #[path = "engine/special_functions_tests.rs"]
 mod special_functions_tests;
+#[path = "engine/topology_betti_tests.rs"]
+mod topology_betti_tests;
 #[path = "engine/zeilberger_proof_tests.rs"]
 mod zeilberger_proof_tests;
 

@@ -14,7 +14,9 @@ use serde::{Deserialize, Serialize};
 /// - Bitmask 0b011 -> dx^0 \wedge dx^1
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct DifferentialForm {
+    /// Dimension of the underlying space.
     pub dim: usize,
+    /// Degree of the form (number of wedged differentials).
     pub degree: usize,
     /// Bitmask-indexed coefficients of length 2^D.
     pub blades: Vec<f64>,

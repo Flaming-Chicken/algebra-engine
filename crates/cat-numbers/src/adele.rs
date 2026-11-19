@@ -84,6 +84,7 @@ impl PadicNumber {
 pub struct AdeleNumber {
     /// Archimedean place component x_\infty \in \mathbb{R}.
     pub arch_num: i64,
+    /// Denominator of the archimedean component.
     pub arch_den: i64,
     /// Non-archimedean places x_p \in \mathbb{Q}_p for non-trivial primes.
     pub local_places: Vec<PadicNumber>,

@@ -14,7 +14,10 @@ pub enum CalculusKind {
     Stratonovich,
     /// Hilger time-scale calculus on arbitrary time domain: \epsilon^2 = \mu(t) \epsilon.
     /// Unifies continuous derivative (\mu = 0) and discrete difference (\mu = \Delta t).
-    HilgerTimeScale { graininess_mu_twelfths: i32 },
+    HilgerTimeScale {
+        /// The graininess $\mu$ of the time scale, in twelfths.
+        graininess_mu_twelfths: i32,
+    },
 }
 
 /// Unified 2nd-order Jet element over Weil algebra \mathbb{R}[\epsilon] / \mathcal{I}.

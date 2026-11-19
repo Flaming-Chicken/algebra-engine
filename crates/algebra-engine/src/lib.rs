@@ -80,6 +80,7 @@ pub mod recurrence;
 pub mod risch;
 mod risch_exptrig;
 mod risch_more;
+pub mod sequence_rule;
 pub mod series;
 mod series_fast;
 pub mod series_sums;

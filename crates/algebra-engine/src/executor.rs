@@ -1612,6 +1612,12 @@ impl OperationExecutor {
                         out,
                     )
                 }
+                NumberTheoryOpKind::Arithmetic { function, args } => {
+                    match crate::numbertheory::arithmetic_function(function, args) {
+                        Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                        Err(e) => OperationResult::error(e),
+                    }
+                }
                 NumberTheoryOpKind::IsPrime { n } => {
                     let prime = is_prime(*n);
                     let out = format!("is_prime({}) = {}", n, prime);

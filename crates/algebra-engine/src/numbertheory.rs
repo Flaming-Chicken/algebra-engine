@@ -2131,6 +2131,185 @@ pub fn decompose_universal(
     Ok(decompose_bigint(&n))
 }
 
+/// All positive divisors of `n` in increasing order, from its prime factorisation.
+pub fn divisors_of(n: u64) -> Vec<u64> {
+    let mut divisors = vec![1u64];
+    for (p, e) in integer_prime_factors(n) {
+        let len = divisors.len();
+        let mut power = 1u64;
+        for _ in 0..e {
+            power *= p;
+            for i in 0..len {
+                divisors.push(divisors[i] * power);
+            }
+        }
+    }
+    divisors.sort_unstable();
+    divisors
+}
+
+/// Euler's totient $\varphi(n) = n \prod_{p \mid n} (1 - 1/p)$.
+pub fn euler_totient(n: u64) -> u64 {
+    integer_prime_factors(n)
+        .into_iter()
+        .fold(n, |acc, (p, _)| acc / p * (p - 1))
+}
+
+/// The Möbius function: 0 if `n` has a squared prime factor, else $(-1)^k$ for `k` distinct primes.
+pub fn mobius(n: u64) -> i32 {
+    let factors = integer_prime_factors(n);
+    if factors.iter().any(|&(_, e)| e > 1) {
+        0
+    } else if factors.len().is_multiple_of(2) {
+        1
+    } else {
+        -1
+    }
+}
+
+/// Evaluate a named integer function. The text is the answer, written as an equation.
+pub fn arithmetic_function(name: &str, args: &[i64]) -> Result<String, String> {
+    let need = |k: usize| -> Result<(), String> {
+        if args.len() == k {
+            Ok(())
+        } else {
+            Err(format!(
+                "{name} takes {k} argument{}, got {}",
+                if k == 1 { "" } else { "s" },
+                args.len()
+            ))
+        }
+    };
+    let positive = |v: i64| -> Result<u64, String> {
+        u64::try_from(v)
+            .ok()
+            .filter(|&n| n >= 1)
+            .ok_or_else(|| format!("{name} needs a positive integer, got {v}"))
+    };
+    match name {
+        "totient" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("totient({n}) = {}", euler_totient(n)))
+        }
+        "next_prime" => {
+            need(1)?;
+            let mut n = u64::try_from(args[0]).unwrap_or(1).max(1);
+            loop {
+                n = n
+                    .checked_add(1)
+                    .ok_or("the next prime does not fit in 64 bits")?;
+                if is_prime(n) {
+                    return Ok(format!("next_prime({}) = {n}", args[0]));
+                }
+            }
+        }
+        "prev_prime" => {
+            need(1)?;
+            let mut n = u64::try_from(args[0]).unwrap_or(0);
+            while n > 2 {
+                n -= 1;
+                if is_prime(n) {
+                    return Ok(format!("prev_prime({}) = {n}", args[0]));
+                }
+            }
+            Err(format!("there is no prime below {}", args[0]))
+        }
+        "divisors" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            let d = divisors_of(n);
+            Ok(format!(
+                "divisors({n}) = [{}]",
+                d.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+            ))
+        }
+        "sigma" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            let sum: u128 = divisors_of(n).iter().map(|&d| d as u128).sum();
+            Ok(format!("sigma({n}) = {sum}"))
+        }
+        "tau" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("tau({n}) = {}", divisors_of(n).len()))
+        }
+        "mobius" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("mobius({n}) = {}", mobius(n)))
+        }
+        "mod_inverse" => {
+            need(2)?;
+            let m = positive(args[1])?;
+            if m < 2 {
+                return Err("the modulus must be at least 2".into());
+            }
+            let (mut old_r, mut r) = (args[0].rem_euclid(m as i64) as i128, m as i128);
+            let (mut old_s, mut s) = (1i128, 0i128);
+            while r != 0 {
+                let q = old_r / r;
+                (old_r, r) = (r, old_r - q * r);
+                (old_s, s) = (s, old_s - q * s);
+            }
+            if old_r != 1 {
+                return Err(format!(
+                    "{} has no inverse modulo {m}: gcd is {old_r}",
+                    args[0]
+                ));
+            }
+            Ok(format!(
+                "mod_inverse({}, {m}) = {}",
+                args[0],
+                old_s.rem_euclid(m as i128)
+            ))
+        }
+        "pow_mod" => {
+            need(3)?;
+            let (b, e, m) = (
+                args[0],
+                positive(args[1]).or_else(|_| {
+                    if args[1] == 0 {
+                        Ok(0)
+                    } else {
+                        Err("pow_mod needs a non-negative exponent".to_string())
+                    }
+                })?,
+                positive(args[2])?,
+            );
+            let base = b.rem_euclid(m as i64) as u64;
+            Ok(format!(
+                "pow_mod({b}, {e}, {m}) = {}",
+                pow_mod_u64(base, e, m)
+            ))
+        }
+        "primitive_root" => {
+            need(1)?;
+            let p = positive(args[0])?;
+            if !is_prime(p) {
+                return Err(format!("primitive_root needs a prime, got {p}"));
+            }
+            if p == 2 {
+                return Ok("primitive_root(2) = 1".into());
+            }
+            let prime_factors: Vec<u64> = integer_prime_factors(p - 1)
+                .into_iter()
+                .map(|(q, _)| q)
+                .collect();
+            let g = (2..p)
+                .find(|&g| {
+                    prime_factors
+                        .iter()
+                        .all(|&q| pow_mod_u64(g, (p - 1) / q, p) != 1)
+                })
+                .ok_or("no primitive root found")?;
+            Ok(format!("primitive_root({p}) = {g}"))
+        }
+        other => Err(format!("unknown integer function {other}")),
+    }
+}
+
 #[cfg(test)]
 mod montgomery_tests {
     use super::{Montgomery, gcd_u128, mul_wide_u128};

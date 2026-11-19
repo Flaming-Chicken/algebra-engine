@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: integer functions `totient`, `next_prime`, `prev_prime`, `divisors`, `sigma`, `tau`, `mobius`, `mod_inverse`, `pow_mod` and `primitive_root`, as calls (`totient(36)`) or commands (`totient 36`); previously `nextprime(100)` and `totient(36)` were echoed back unevaluated.
 - Fixed: the same product printed differently depending on what had been typed earlier in the session (`C1 · cos(x)` or `cos(x) · C1`), because the stored factor order follows the order symbols were first seen; products of commutative scalar factors now print in a fixed order (numbers, symbols and powers by name, functions by name). A product of two matrix literals (`[[1,2],[3,4]]*[[0,1],[1,0]]`) is evaluated as a matrix product instead of echoed.
 - Fixed: the call spellings `series(f, x, 0, 5)`, `taylor(...)`, `isprime(n)`, `factorint(n)`, `apart(f)`, `inverse(M)`, `det(M)`, `rank(M)`, `limit(f, x, a)`, `dsolve(...)` and the infix `a mod b` were parsed as expressions and echoed back unevaluated; they now evaluate like their command spellings.
 - Fixed: `integrate f from a to b` (and `integral of f from a to b`) returned the antiderivative with the bounds silently dropped; it now returns the value of the definite integral, accepts `dx` before `from`, and refuses a multi-variable integrand with bounds instead of guessing. `factor 360` returned `360`; it now returns the prime factorisation.

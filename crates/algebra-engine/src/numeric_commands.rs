@@ -1052,12 +1052,97 @@ fn paired(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutpu
     Ok(NumericOutput::Text(format!("correlation = {text}")))
 }
 
+/// Text-argument integer commands: radix conversion, listings, `pell(d)` and `diophantine(a x + b y = c)`.
+fn integer_text_commands(
+    graph: &ExprGraph,
+    name: &str,
+    args: &[String],
+) -> Result<NumericOutput, String> {
+    use num_bigint::BigInt;
+    let args = split_args(args);
+    let first = args.first().ok_or("an argument is needed")?;
+    let text = match name {
+        "dec2bin" | "bin2dec" | "dec2hex" | "hex" | "hex2dec" | "dec2oct" | "oct" | "oct2dec" => {
+            crate::intlist::radix(name, first)?
+        }
+        "subsets" | "powerset" | "power_set" | "permutations_list" => {
+            let labels: Vec<String> = list_items(first)
+                .iter()
+                .map(|i| {
+                    exact(graph, i)
+                        .map(|q| q_text(&q))
+                        .unwrap_or_else(|_| i.trim().to_string())
+                })
+                .collect();
+            crate::intlist::listing_text(name, &labels)?
+        }
+        "cycle_type" | "next_permutation" => {
+            let items: Vec<Q> = list_items(first)
+                .iter()
+                .map(|i| exact(graph, i))
+                .collect::<Result<_, _>>()?;
+            crate::intlist::listing(name, &items)?
+        }
+        "pell" => {
+            let d = exact(graph, first)?;
+            if !d.is_integer() {
+                return Err("pell needs an integer d".into());
+            }
+            let (x, y) = crate::intlist::pell(&d.to_integer())?;
+            format!("pell({d}): x^2 - {d} y^2 = 1 has the fundamental solution (x, y) = ({x}, {y})")
+        }
+        "diophantine" => {
+            let equation = parse(graph, first)?;
+            let (lhs, rhs) = match &graph.get(equation).kind {
+                ExprKind::Relational { lhs, rhs, .. } => (*lhs, *rhs),
+                _ => return Err("an equation `a x + b y = c` is needed".into()),
+            };
+            let difference = graph.simplify(graph.sub(lhs, rhs));
+            let mut symbols = BTreeSet::new();
+            collect_expr_symbols(graph, difference, &mut symbols);
+            let mut named: Vec<(String, SymbolId)> = symbols
+                .into_iter()
+                .map(|s| (graph.symbols.resolve(s).unwrap_or_default(), s))
+                .collect();
+            named.sort();
+            let [(xn, xs), (yn, ys)] = named.as_slice() else {
+                return Err("exactly two unknowns are needed".into());
+            };
+            let coefficient = |s: SymbolId| -> Result<BigInt, String> {
+                let d = graph.simplify(graph.diff(difference, s));
+                let q = crate::numeric::try_eval_exact(graph, d, &HashMap::new())
+                    .map_err(|e| e.to_string())?
+                    .ok_or("the equation must be linear with integer coefficients")?;
+                if q.is_integer() {
+                    Ok(q.to_integer())
+                } else {
+                    Err("the coefficients must be integers".to_string())
+                }
+            };
+            let (a, b) = (coefficient(*xs)?, coefficient(*ys)?);
+            let zero = graph.integer(0);
+            let constant = graph.substitute(graph.substitute(difference, *xs, zero), *ys, zero);
+            let c = -crate::numeric::try_eval_exact(graph, constant, &HashMap::new())
+                .map_err(|e| e.to_string())?
+                .filter(|q| q.is_integer())
+                .ok_or("the constant must be an integer")?
+                .to_integer();
+            crate::intlist::linear_diophantine(&a, &b, &c, xn, yn)?
+        }
+        other => return Err(format!("unknown command {other}")),
+    };
+    Ok(NumericOutput::Text(text))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "gradient" | "hessian" | "jacobian" | "divergence" | "curl" | "laplacian" | "cross"
         | "dot" | "norm" => crate::vectorcalc::run(graph, name, args),
         "product" => product(graph, args),
+        "dec2bin" | "bin2dec" | "dec2hex" | "hex" | "hex2dec" | "dec2oct" | "oct" | "oct2dec"
+        | "subsets" | "powerset" | "power_set" | "permutations_list" | "cycle_type"
+        | "next_permutation" | "pell" | "diophantine" => integer_text_commands(graph, name, args),
         "covariance" | "correlation" => paired(graph, name, args),
         "trigsimp" | "expand_trig" => trigonometric(graph, name, args),
         "matpow" => matrix_power(graph, args),
@@ -1115,6 +1200,18 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "dec2bin" => "dec2bin",
+        "bin2dec" => "bin2dec",
+        "dec2hex" | "hex" => "dec2hex",
+        "hex2dec" => "hex2dec",
+        "dec2oct" | "oct" => "dec2oct",
+        "oct2dec" => "oct2dec",
+        "subsets" | "powerset" | "power_set" => "subsets",
+        "permutations_list" | "all_permutations" => "permutations_list",
+        "cycle_type" => "cycle_type",
+        "next_permutation" => "next_permutation",
+        "pell" => "pell",
+        "diophantine" => "diophantine",
         "mode" => "mode",
         "range" => "range",
         "covariance" | "cov" => "covariance",

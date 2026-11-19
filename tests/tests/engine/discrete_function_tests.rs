@@ -391,3 +391,116 @@ fn modular_functions_against_brute_force() {
     assert_eq!(int("radical(360)"), 30);
     assert_eq!(int("gray_code(5)"), 7);
 }
+
+#[test]
+fn radix_listings_pell_and_linear_diophantine() {
+    // Radix conversion against Rust's own formatting.
+    for n in [0u64, 1, 10, 255, 4096, 123_456_789] {
+        assert_eq!(
+            run(&format!("dec2bin({n})")),
+            format!("dec2bin({n}) = {n:b}")
+        );
+        assert_eq!(
+            run(&format!("bin2dec({n:b})")),
+            format!("bin2dec({n:b}) = {n}")
+        );
+        assert_eq!(
+            run(&format!("dec2hex({n})")),
+            format!("dec2hex({n}) = {n:x}")
+        );
+        assert_eq!(
+            run(&format!("hex2dec({n:x})")),
+            format!("hex2dec({n:x}) = {n}")
+        );
+        assert_eq!(
+            run(&format!("dec2oct({n})")),
+            format!("dec2oct({n}) = {n:o}")
+        );
+    }
+    // 2^n subsets, n! permutations, all distinct.
+    for n in 0..=6usize {
+        let list = format!(
+            "[{}]",
+            (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+        );
+        let subsets = run(&format!("subsets({list})"));
+        assert_eq!(subsets.matches('[').count() - 1, 1 << n, "{subsets}");
+        let permutations = run(&format!("permutations_list({list})"));
+        let expected: usize = (1..=n).product();
+        assert_eq!(
+            permutations.matches('[').count() - 1,
+            expected,
+            "{permutations}"
+        );
+    }
+    assert!(run("subsets([a,b])").contains("[a, b]"));
+    // cycle type and the next permutation in lexicographic order.
+    assert_eq!(
+        run("cycle_type([2,1,4,3])"),
+        "cycle_type = [2, 2], cycles (1 2)(3 4)"
+    );
+    assert_eq!(
+        run("next_permutation([1,3,2])"),
+        "next_permutation = [2, 1, 3]"
+    );
+    // Pell: the printed solution satisfies the equation, and no smaller y does.
+    for d in [2i128, 3, 5, 6, 7, 13, 61, 109] {
+        let out = run(&format!("pell({d})"));
+        let pair = out.rsplit_once("= (").unwrap().1.trim_end_matches(')');
+        let (x, y): (i128, i128) = {
+            let (a, b) = pair.split_once(", ").unwrap();
+            (a.parse().unwrap(), b.parse().unwrap())
+        };
+        assert_eq!(x * x - d * y * y, 1, "{out}");
+        if y < 100_000 {
+            assert!(
+                (1..y).all(|k| {
+                    let s = d * k * k + 1;
+                    let r = (s as f64).sqrt() as i128;
+                    !(r - 1..=r + 1).any(|c| c * c == s)
+                }),
+                "{out} is not fundamental"
+            );
+        }
+    }
+    assert!(UraeSession::new().execute_line("pell(9)").is_error);
+    // Linear Diophantine equations: the parametrised family solves a x + b y = c for several t.
+    for (a, b, c) in [(3i128, 5i128, 1i128), (6, 9, 12), (-4, 10, 6), (7, -3, 2)] {
+        let out = run(&format!("diophantine({a}*x + ({b})*y = {c})"));
+        // x = p + q t, y = r + s t
+        let eval = |expr: &str, t: i128| -> i128 {
+            let expr = expr.trim().replace('·', "*");
+            let mut total = 0i128;
+            let mut sign = 1i128;
+            for token in expr.split_whitespace() {
+                match token {
+                    "+" => sign = 1,
+                    "-" => sign = -1,
+                    tok => {
+                        let value = match tok.strip_suffix("*t") {
+                            Some(k) => k.parse::<i128>().unwrap() * t,
+                            None => tok.parse::<i128>().unwrap(),
+                        };
+                        total += sign * value;
+                        sign = 1;
+                    }
+                }
+            }
+            total
+        };
+        let body = out.split("  (").next().unwrap();
+        let (xs, ys) = body.split_once(", ").unwrap();
+        let (xe, ye) = (
+            xs.split_once(" = ").unwrap().1,
+            ys.split_once(" = ").unwrap().1,
+        );
+        for t in [-3, 0, 1, 7] {
+            assert_eq!(a * eval(xe, t) + b * eval(ye, t), c, "{out} at t = {t}");
+        }
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("diophantine(6*x + 9*y = 4)")
+            .is_error
+    );
+}

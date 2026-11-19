@@ -325,6 +325,16 @@ impl NumericalEval for ExprGraph {
             ExprKind::Function { name, args } => {
                 let fn_name = self.symbols.resolve(*name).unwrap_or_default();
                 // Named formulas (`normal_cdf`, `circle_area`, `poisson_pmf`) stand for expressions.
+                // Incomplete gamma and beta functions and the chi-square, gamma, beta, t and F distributions.
+                if crate::distributions_f64::is_distribution_function(&fn_name) {
+                    let values: AlgebraResult<Vec<f64>> = args
+                        .iter()
+                        .map(|&a| self.evalf(a, ctx).map(|v| v.to_f64()))
+                        .collect();
+                    if let Some(result) = crate::distributions_f64::eval(&fn_name, &values?) {
+                        return Ok(BigValue::Real(result));
+                    }
+                }
                 if let Some(rewritten) = crate::formulary::rewrite(self, &fn_name, args) {
                     return self.evalf(rewritten, ctx);
                 }

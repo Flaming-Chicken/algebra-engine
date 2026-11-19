@@ -28,6 +28,7 @@ pub mod diffalg;
 pub mod diffeq;
 pub mod discrete;
 pub mod distributions;
+pub mod distributions_f64;
 pub mod exceptional_lie;
 pub mod executor;
 pub mod formulary;

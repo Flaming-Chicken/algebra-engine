@@ -76,6 +76,7 @@ pub mod smt;
 pub mod solver;
 pub mod sparse;
 pub mod special;
+pub mod special_exact;
 pub mod stream;
 pub mod symplectic;
 pub mod systems;

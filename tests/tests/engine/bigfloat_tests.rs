@@ -88,11 +88,14 @@ fn digits_are_correctly_rounded_and_formatted() {
 
 #[test]
 fn what_cannot_be_evaluated_is_an_error_not_a_guess() {
-    // A free symbol and a function with no arbitrary-precision implementation fall back to the f64 path (which says so).
-    let r = UraeSession::new().execute_line("N(gamma(1/2), 40)");
+    // A function with no arbitrary-precision implementation falls back to the f64 path, which does not claim 40
+    // digits (Bessel functions are not implemented at arbitrary precision).
+    let r = UraeSession::new().execute_line("N(besselj(0, 1), 40)");
     assert!(
-        !r.output_text.starts_with("1.77245385090551602729816748334"),
+        r.output_text.len() < 25,
         "should not claim 40 digits: {}",
         r.output_text
     );
+    // Gamma is, now: 40 digits of Gamma(1/2) = sqrt(pi).
+    assert!(n("gamma(1/2)", 40).starts_with("1.77245385090551602729816748334114518279"));
 }

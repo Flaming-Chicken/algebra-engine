@@ -282,6 +282,10 @@ fn eval_node(fx: &Fixed, graph: &ExprGraph, id: ExprId) -> AlgebraResult<BigInt>
                 }
                 "atan" => fx.atan(&x),
                 "abs" => Ok(x.abs()),
+                "gamma" => fx.gamma(&x),
+                "lgamma" | "log_gamma" | "lngamma" => fx.ln_gamma(&x),
+                "erf" => erf_fixed(fx, &x, false),
+                "erfc" => erf_fixed(fx, &x, true),
                 "sinh" | "cosh" | "tanh" => {
                     let (ex, enx) = (fx.exp(&x)?, fx.exp(&-x.clone())?);
                     match fname.as_str() {
@@ -382,4 +386,161 @@ fn to_decimal(value: &BigInt, bits: u32, digits: usize) -> String {
         format!("{}.{}", &text[..point as usize], &text[point as usize..])
     };
     if negative { format!("-{body}") } else { body }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Gamma, log-gamma, erf, erfc
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Bernoulli numbers `B_0 .. B_m` by the recurrence `B_n = -1/(n+1) sum_{k<n} C(n+1, k) B_k`.
+fn bernoulli_numbers(m: usize) -> Vec<BigRational> {
+    let mut b: Vec<BigRational> = vec![BigRational::one()];
+    for n in 1..=m {
+        let mut sum = BigRational::zero();
+        let mut binomial = BigInt::one(); // C(n+1, 0)
+        for (k, bk) in b.iter().enumerate().take(n) {
+            sum += BigRational::from_integer(binomial.clone()) * bk;
+            binomial = binomial * BigInt::from((n + 1 - k) as u64) / BigInt::from((k + 1) as u64);
+        }
+        b.push(-sum / BigRational::from_integer(BigInt::from((n + 1) as u64)));
+    }
+    b
+}
+
+impl Fixed {
+    /// `ln(2 pi)`
+    fn ln_two_pi(&self) -> AlgebraResult<BigInt> {
+        let two_pi = self.pi()? << 1;
+        self.ln(&two_pi)
+    }
+
+    /// `ln Gamma(z)` for a large positive `z` by Stirling's series (`z` at least about `0.4 p`).
+    fn ln_gamma_stirling(&self, z: &BigInt) -> AlgebraResult<BigInt> {
+        let half = self.one() >> 1;
+        let ln_z = self.ln(z)?;
+        let mut sum = self.mul(&(z - &half), &ln_z) - z + (self.ln_two_pi()? >> 1);
+        let terms = (self.p as usize) / 5 + 10;
+        let bernoulli = bernoulli_numbers(2 * terms);
+        let inv_z = self.div(&self.one(), z)?;
+        let inv_z2 = self.mul(&inv_z, &inv_z);
+        let mut power = inv_z; // z^-(2k-1)
+        for k in 1..=terms {
+            let coefficient = &bernoulli[2 * k]
+                / BigRational::from_integer(BigInt::from((2 * k * (2 * k - 1)) as u64));
+            let term = self.mul(&self.scale_rational(&coefficient), &power);
+            if term.is_zero() {
+                break;
+            }
+            sum += term;
+            power = self.mul(&power, &inv_z2);
+        }
+        Ok(sum)
+    }
+
+    /// `ln Gamma(x)` for `x > 0`, by shifting the argument up with the recurrence and applying Stirling.
+    fn ln_gamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if !x.is_positive() {
+            return Err(err("lgamma: the argument must be positive"));
+        }
+        let target = BigInt::from((self.p as u64 * 2 / 5) + 12);
+        let target_fixed = self.scale_rational(&BigRational::from_integer(target));
+        let mut shifted = x.clone();
+        let mut product = self.one();
+        let mut steps = 0u64;
+        while shifted < target_fixed {
+            product = self.mul(&product, &shifted);
+            shifted += self.one();
+            steps += 1;
+            if steps > 100_000 {
+                return Err(err("lgamma: the argument is too small"));
+            }
+        }
+        Ok(self.ln_gamma_stirling(&shifted)? - self.ln(&product)?)
+    }
+
+    /// `Gamma(x)`.
+    fn gamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if x.is_positive() {
+            return self.exp(&self.ln_gamma(x)?);
+        }
+        // Poles at zero and the negative integers.
+        let integer_part = x >> self.p;
+        if (&integer_part << self.p) == *x {
+            return Err(err("gamma has a pole at zero and the negative integers"));
+        }
+        // Reflection: Gamma(x) = pi / (sin(pi x) Gamma(1 - x))
+        let pi = self.pi()?;
+        let (sin_pi_x, _) = self.sin_cos(&self.mul(&pi, x))?;
+        let reflected = self.gamma(&(self.one() - x))?;
+        self.div(&pi, &self.mul(&sin_pi_x, &reflected))
+    }
+}
+
+/// Evaluate `erf(x)` (and, for `erfc`, `1 - erf(x)`) from the Maclaurin series with enough extra bits to absorb the
+/// cancellation (the terms reach `e^(x^2)`).
+fn erf_fixed(fx: &Fixed, x: &BigInt, complementary: bool) -> AlgebraResult<BigInt> {
+    let magnitude = (x.abs() >> fx.p.saturating_sub(8)).to_f64().unwrap_or(0.0) / 256.0;
+    if magnitude > 60.0 {
+        return Err(err("erf: the argument is too large for the series"));
+    }
+    let extra =
+        (1.45 * magnitude * magnitude * if complementary { 2.0 } else { 1.0 }).ceil() as u32 + 16;
+    let wide = Fixed { p: fx.p + extra };
+    let xw = x << extra;
+    let x2 = wide.mul(&xw, &xw);
+    // sum_{n>=0} (-1)^n x^(2n+1) / (n! (2n+1))
+    let mut term = xw.clone(); // x^(2n+1) / n!, signed
+    let mut sum = xw.clone();
+    for n in 1..(wide.p as i64 * 2) {
+        term = -wide.mul(&term, &x2) / n;
+        if term.is_zero() {
+            break;
+        }
+        sum += &term / (2 * n + 1);
+    }
+    // erf = 2/sqrt(pi) * sum
+    let two_over_sqrt_pi = wide.div(&(wide.one() << 1), &wide.sqrt(&wide.pi()?)?)?;
+    let erf = wide.mul(&two_over_sqrt_pi, &sum);
+    let value = if complementary { wide.one() - erf } else { erf };
+    Ok(value >> extra)
+}
+
+/// Correctly rounded `f64` values of the special functions, computed at high precision (the usual `f64` series and
+/// Lanczos approximations lose a few digits: `gamma(1/2)` came out with a relative error of `1e-13`).
+pub fn special_f64(name: &str, x: f64) -> Option<f64> {
+    if !x.is_finite() {
+        return None;
+    }
+    let bits = 192 + (2.9 * x * x).min(4000.0) as u32;
+    let fx = Fixed { p: bits };
+    let r = BigRational::from_float(x)?;
+    let fixed_x = fx.scale_rational(&r);
+    let to_f64 =
+        |v: &BigInt| -> Option<f64> { BigRational::new(v.clone(), BigInt::one() << bits).to_f64() };
+    let value = match name {
+        "gamma" => {
+            if x > 171.7 {
+                return Some(f64::INFINITY);
+            }
+            fx.gamma(&fixed_x).ok()?
+        }
+        "lgamma" => fx.ln_gamma(&fixed_x).ok()?,
+        "erf" => {
+            if x.abs() > 27.0 {
+                return Some(x.signum());
+            }
+            erf_fixed(&fx, &fixed_x, false).ok()?
+        }
+        "erfc" => {
+            if x > 27.3 {
+                return Some(0.0);
+            }
+            if x < -27.0 {
+                return Some(2.0);
+            }
+            erf_fixed(&fx, &fixed_x, true).ok()?
+        }
+        _ => return None,
+    };
+    to_f64(&value)
 }

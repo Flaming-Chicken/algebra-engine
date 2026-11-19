@@ -76,7 +76,7 @@ In order. Each item starts with a failing test and ends with a ledger update.
 1. ~~`F7` Poisson Dirichlet lifting, `F8` B-spline end point, `F10` rank and exponential, `F5` float hashing, `B13` Smith normal form, `B15` Shirshov factorisation~~ (done, 19 Nov 2026).
 2. ~~`B16` exact surreal values, `C16` polynomial systems by branching, `A14` exact Betti numbers~~ (done, 19 Nov 2026; a Conway normal form for true transfinite numbers and a rational univariate representation remain as design work).
 3. ~~`A13` equivalence tiers, `B17` Colombeau products, `B18` tangent functor rules, `B19` dimensions of `^` and calls, `C17` domain categories~~ (done, 19 Nov 2026).
-4. Unify the two surreal engines (`algebra-advanced`, `cat-numbers`) behind one exact representation.
+4. ~~Exact values in both surreal engines~~ (done, 19 Nov 2026); a shared Conway normal form for true transfinite numbers remains design work (M3).
 5. The rest of `F5` and `F10`, then the verification pass below.
 6. The verification pass: `A15`, `A16`, the rest of `B20`, Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.
 7. Then M2.

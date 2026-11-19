@@ -1207,3 +1207,40 @@ fn order_statistics_moments_and_point_geometry() {
         );
     }
 }
+
+#[test]
+fn elementary_identities_are_applied_to_plain_expressions() {
+    // Shown simplified, and the simplified form has the same value as the input at several points.
+    let cases = [
+        ("x + x", "2 · x"),
+        ("1*x", "x"),
+        ("sin(-x)", "-sin(x)"),
+        ("tan(-x)", "-tan(x)"),
+        ("abs(-x)", "abs(x)"),
+        ("exp(x)*exp(-x)", "1"),
+        ("exp(x)*exp(y)", "exp(x + y)"),
+        ("(-b)^2", "b^2"),
+        ("x^2*x^3", "x^5"),
+        ("(x+y)^2 - x^2 - 2*x*y - y^2", "0"),
+        ("a/b*b/a", "1"),
+    ];
+    for (input, expected) in cases {
+        let out = run(input);
+        assert_eq!(out, expected, "{input}");
+        let shown = out.replace('·', "*");
+        for (x, y, a, b) in [(0.7, -1.3, 2.1, -0.4), (-2.2, 0.5, 1.7, 3.3)] {
+            let vars = [
+                ("x", x.to_string()),
+                ("y", y.to_string()),
+                ("a", a.to_string()),
+                ("b", b.to_string()),
+            ];
+            let vars: Vec<(&str, &str)> = vars.iter().map(|(n, v)| (*n, v.as_str())).collect();
+            let (lhs, rhs) = (value(input, &vars), value(&shown, &vars));
+            assert!(
+                (lhs - rhs).abs() < 1e-9 * lhs.abs().max(1.0),
+                "{input} = {out}: {lhs} vs {rhs}"
+            );
+        }
+    }
+}

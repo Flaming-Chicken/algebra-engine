@@ -890,12 +890,9 @@ impl UraeSession {
             &exec_ctx.assumptions,
         )
         .ok()?;
-        if simplified == expr_id {
-            return None;
-        }
         let original = UnicodeFormatter.format(&self.graph, expr_id).ok()?;
         let reduced = UnicodeFormatter.format(&self.graph, simplified).ok()?;
-        if reduced.chars().count() >= original.chars().count() {
+        if reduced.chars().count() > original.chars().count() {
             return None;
         }
         let latex = LatexFormatter

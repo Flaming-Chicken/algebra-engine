@@ -54,6 +54,8 @@ mod special_functions_tests;
 mod topology_betti_tests;
 #[path = "engine/usability_probe_tests.rs"]
 mod usability_probe_tests;
+#[path = "engine/workspace_command_tests.rs"]
+mod workspace_command_tests;
 #[path = "engine/zeilberger_proof_tests.rs"]
 mod zeilberger_proof_tests;
 

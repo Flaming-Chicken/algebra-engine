@@ -298,6 +298,10 @@ impl RischIntegrator {
     pub fn integrate(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
         let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
         let x = graph.symbol(&wrt_name);
+        // A product of powers of x (`x^2 * (-2 x)`, `x^(-1) * x^3`) is one power: merge it first.
+        if let Some(merged) = Self::merge_powers_of_x(graph, expr, wrt, x) {
+            return Self::integrate(graph, merged, wrt);
+        }
         // A denominator with a repeated irreducible quadratic (or higher) factor, such as `1/(x^2+1)^2`: the
         // Hermite code below overflowed the stack on these, so partial fractions over Q go first.
         if crate::rational_pf::has_repeated_nonlinear_factor(graph, expr, wrt)
@@ -319,6 +323,56 @@ impl RischIntegrator {
                 crate::risch_more::fallback_integral(graph, expr, wrt, x).unwrap_or(Err(e))
             }
         }
+    }
+
+    /// `c * x^a * x^b * ...` with at least two powers of `x` and every other factor free of `x`, as `c * x^(a + b + ...)`.
+    fn merge_powers_of_x(
+        graph: &ExprGraph,
+        expr: ExprId,
+        wrt: SymbolId,
+        x: ExprId,
+    ) -> Option<ExprId> {
+        // Flatten nested products and negations into one list of factors.
+        fn flatten(graph: &ExprGraph, id: ExprId, out: &mut Vec<ExprId>) {
+            match &graph.get(id).kind {
+                ExprKind::Mul(fs) => {
+                    for &f in fs.iter() {
+                        flatten(graph, f, out);
+                    }
+                }
+                ExprKind::Neg(inner) => {
+                    out.push(graph.integer(-1));
+                    flatten(graph, *inner, out);
+                }
+                _ => out.push(id),
+            }
+        }
+        if !matches!(graph.get(expr).kind, ExprKind::Mul(_)) {
+            return None;
+        }
+        let mut factors = Vec::new();
+        flatten(graph, expr, &mut factors);
+        let (mut constants, mut exponents) = (Vec::new(), Vec::new());
+        for &f in factors.iter() {
+            if !graph.has_symbol(f, wrt) {
+                constants.push(f);
+            } else if f == x {
+                exponents.push(graph.integer(1));
+            } else if let ExprKind::Pow(base, e) = graph.get(f).kind
+                && base == x
+                && !graph.has_symbol(e, wrt)
+            {
+                exponents.push(e);
+            } else {
+                return None;
+            }
+        }
+        if exponents.len() < 2 {
+            return None;
+        }
+        let sum = crate::simplify::Simplifier::simplify(graph, graph.add(exponents)).ok()?;
+        constants.push(graph.pow(x, sum));
+        Some(graph.mul(constants))
     }
 
     fn integrate_main(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {

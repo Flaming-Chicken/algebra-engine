@@ -217,3 +217,17 @@ fn rational_functions_with_mixed_factors() {
         check(f, &[0.3, 0.7, 1.9, 2.6, 4.2]);
     }
 }
+
+#[test]
+fn products_of_powers_of_x_are_merged_before_integrating() {
+    // `x^2 * (-2 x)` was "Multi-factor product integration not matched".
+    for f in [
+        "x^2*(-2*x)",
+        "x^(-1)*x^3",
+        "3*x^2*x^(1/2)",
+        "-(x*x^2)*5",
+        "x^2*(-2*x)*(1/x)",
+    ] {
+        check(f, POSITIVE);
+    }
+}

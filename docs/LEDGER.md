@@ -12,10 +12,10 @@
 
 | Category | Items | Fixed | Partly fixed | Open | Stale | Partly different | Not verified |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| A, silent stubs | 16 | 9 | 4 | 0 | 1 | 0 | 2 |
+| A, silent stubs | 16 | 10 | 4 | 0 | 1 | 0 | 1 |
 | B, formula defects | 20 | 17 | 1 | 0 | 1 | 1 | 0 |
 | C, oversimplifications | 17 | 11 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **53** | **37** | **11** | **0** | **2** | **1** | **2** |
+| **Total** | **53** | **38** | **11** | **0** | **2** | **1** | **1** |
 
 The `R` findings (13) are all fixed except the remainder of `R1` (arbitrary CAD surface meshes still use the 3-D `Tri3` pseudo-stiffness). Tracks `D–J` (section 6) are mostly not verified: Track `F` is partly verified, with `F4`, `F5`, `F7`, `F8` and (in part) `F10` fixed. The counts are derived from the tables below; update both together.
 
@@ -40,7 +40,7 @@ The `R` findings (13) are all fixed except the remainder of `R1` (arbitrary CAD 
 | A13 | `EquivalenceClassifier::classify` | **Fixed (19 Nov 2026)** | `classify` returns `Option<EquivalenceKind>`: `SyntacticIdentity` for equal ids, `AlgebraicEquality` only when the difference simplifies to zero, `None` when no tier can show the two expressions equal (it used to answer `AlgebraicEquality` for every pair) (`morphism_morphism_tests`) |
 | A14 | `SimplicialComplex::betti_numbers` | **Fixed (19 Nov 2026)** | exact Betti numbers over the rationals: `beta_k = f_k - rank d_k - rank d_{k+1}` with the boundary matrices ranked in exact fraction arithmetic (a circle is `[1, 1]`; it was `[1, 0]`). Checked on the circle, filled triangle and tetrahedron, the 2-sphere, a wedge of circles, the 7-vertex torus (`1, 2, 1`) and the 6-vertex projective plane (`1, 0, 0`: its `Z/2` is torsion, invisible over `Q`), by `chi = sum (-1)^k beta_k` and `d d = 0`. `add_simplex` now treats its input as a set (repeated vertices were counted in the dimension) (`topology_betti_tests`) |
 | A15 | Galois and finite-field extension types | **Not verified** | not examined in this pass |
-| A16 | `crypto.rs` elliptic curves and Reed–Solomon | **Not verified** | not examined in this pass |
+| A16 | `crypto.rs` elliptic curves and Reed–Solomon | **Fixed (19 Nov 2026)** | verified, and four defects found and fixed. (1) `RationalEllipticCurve::new` overflowed `i128` for large coefficients (a panic in debug builds); it now refuses them. (2) `bad_reduction_places` truncated the discriminant to `u64` before factoring; it now factors in full and returns big integers. (3) split versus non-split multiplicative reduction used the criterion `(-2a / p)`; the right one is that `-c6` is a square, i.e. `(6b / p) = 1`, checked against the Frobenius trace (`+1` split, `-1` non-split) on 1,000+ curves. (4) `frobenius_trace(2)` counted only the points with `y = 0`; it now counts the solutions. Frobenius traces are checked against brute-force point counts. `ReedSolomonCode` was a pair of numbers with no code behind it: it now has a real systematic encoder, syndromes and a Berlekamp–Massey, Chien, Forney decoder over `GF(2^8)`, checked by zero syndromes, correction of `t` random errors in five codes up to `RS(255, 223)`, linearity and the Singleton bound (`crypto_crypto_tests`) |
 
 ## 4. B. Formula and algorithm defects
 

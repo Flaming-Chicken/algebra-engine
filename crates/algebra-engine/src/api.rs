@@ -644,6 +644,21 @@ impl<'g> Expr<'g> {
         }
     }
 
+    /// Simplify, and list the points the result no longer excludes: `x / x` gives `1` and `["x ≠ 0"]`,
+    /// `exp(ln x)` gives `x` and `["x > 0"]`. The identity holds where all the listed conditions hold.
+    pub fn simplify_with_conditions(&self) -> (Self, Vec<String>) {
+        match Simplifier::simplify_with_conditions(self.graph, self.id) {
+            Ok(r) => (
+                Self {
+                    graph: self.graph,
+                    id: r.expr,
+                },
+                r.describe_excluded(self.graph),
+            ),
+            Err(_) => (*self, Vec::new()),
+        }
+    }
+
     /// Simplification under explicit logical/domain assumptions (`x > 0`, etc.).
     pub fn simplify_with(&self, assumptions: &AssumptionsContext) -> Self {
         let simp = Simplifier::simplify_with_assumptions(self.graph, self.id, assumptions)

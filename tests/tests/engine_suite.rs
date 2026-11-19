@@ -18,6 +18,8 @@ mod poly_factor_tests;
 mod polynomial_system_branching_tests;
 #[path = "engine/radical_integrals_tests.rs"]
 mod radical_integrals_tests;
+#[path = "engine/simplify_conditions_tests.rs"]
+mod simplify_conditions_tests;
 #[path = "engine/solve_known_roots_tests.rs"]
 mod solve_known_roots_tests;
 #[path = "engine/special_functions_tests.rs"]

@@ -57,6 +57,7 @@ pub fn expression_depth(graph: &ExprGraph, root: ExprId) -> usize {
 }
 
 pub mod bridges;
+pub mod conditions;
 pub mod detector;
 pub mod dynamic;
 pub mod probabilistic;
@@ -66,6 +67,7 @@ pub use bridges::{
     AskeySchemeGroup, BridgeRouter, EulerBridgeGroup, HyperbolicIdentityGroup, IdentityGroup,
     ItoNilpotentBridgeGroup, LieAlgebraGroup, TransformClusterGroup, TrigIdentityGroup,
 };
+pub use conditions::{Condition, ConditionKind, ConditionedResult};
 pub use detector::{DetectedFeatures, DomainFeatureDetector};
 pub use dynamic::{AxiomaticRuleGenerator, DynamicRuleSelector};
 pub use probabilistic::{SCHWARTZ_ZIPPEL_PRIME, SchwartzZippel};

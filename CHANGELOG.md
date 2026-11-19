@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: `Simplifier::simplify_with_conditions` and `Expr::simplify_with_conditions` report the points a simplification excludes (`x / x` is `1` for `x ≠ 0`; `exp(ln x)` is `x` for `x > 0`; `tan(x) cos(x)` is `sin(x)` for `cos(x) ≠ 0`).
 - Fixed: input nested a hundred levels deep (`sin(sin(...))`, `x^(x^(...))`) overflowed the stack and aborted the process; the parser and the simplifier now refuse nesting beyond 64 levels with an error.
 - Added: a deterministic panic hunt (`panic_hunt_tests`) over the parser, simplifier, differentiation and integration; the production panic count is recounted with the compiler (three documented overload panics).
 - Fixed: `SmtExpr::from_graph` turned big integers, big rationals, scientific notation and constants into `0.0`, rounded rationals through `f64` and accepted `NaN`; numbers are now exact, and a constant or non-finite float is an error. Negative numerals print as `(- n)`, as SMT-LIB requires.

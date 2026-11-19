@@ -20,6 +20,8 @@ mod linalg_oracle_tests;
 mod m1_wrong_answer_tests;
 #[path = "engine/natural_spelling_tests.rs"]
 mod natural_spelling_tests;
+#[path = "engine/ode_residual_tests.rs"]
+mod ode_residual_tests;
 #[path = "engine/panic_hunt_tests.rs"]
 mod panic_hunt_tests;
 #[path = "engine/poly_factor_tests.rs"]

@@ -6,6 +6,8 @@
 mod analysis_tests;
 #[path = "engine/factoring_speed_tests.rs"]
 mod factoring_speed_tests;
+#[path = "engine/integer_function_tests.rs"]
+mod integer_function_tests;
 #[path = "engine/limits_series_audit_tests.rs"]
 mod limits_series_audit_tests;
 #[path = "engine/m1_wrong_answer_tests.rs"]

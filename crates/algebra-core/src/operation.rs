@@ -224,6 +224,9 @@ pub enum NumberTheoryOpKind {
     LcmExpr { a_str: String, b_str: String },
     /// Legendre symbol $(a/p)$
     Legendre { a: i64, p: u64 },
+    /// An integer function of one to three integer arguments: `totient`, `next_prime`, `prev_prime`, `divisors`,
+    /// `sigma`, `tau`, `mobius`, `mod_inverse`, `pow_mod`, `primitive_root`.
+    Arithmetic { function: String, args: Vec<i64> },
     /// Prime decomposition with algebraic prime classification across number systems
     PrimeDecomposition {
         expr_str: String,

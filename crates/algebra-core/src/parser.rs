@@ -1610,8 +1610,32 @@ pub fn parse_domain_declaration(line: &str) -> Option<DomainBound> {
 /// Rewrite the call spellings people reach for first (`series(f, x, 0, 5)`, `isprime(97)`, `factorint(360)`,
 /// `inverse(M)`, `limit(f, x, 0)`, `17 mod 5`) into the command forms the parser knows. Without this they were
 /// parsed as an expression and echoed back unevaluated, which looks like an answer but is not one.
+/// The canonical name of an integer function, if `name` is one of its spellings.
+fn arithmetic_function_name(name: &str) -> Option<&'static str> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "totient" | "euler_phi" | "eulerphi" | "phi" => "totient",
+        "nextprime" | "next_prime" => "next_prime",
+        "prevprime" | "prev_prime" | "previousprime" => "prev_prime",
+        "divisors" => "divisors",
+        "sigma" | "divisor_sum" => "sigma",
+        "tau" | "num_divisors" | "divisor_count" => "tau",
+        "mobius" | "moebius" => "mobius",
+        "modinv" | "mod_inverse" | "invmod" => "mod_inverse",
+        "powmod" | "pow_mod" | "modpow" => "pow_mod",
+        "primitive_root" | "primitiveroot" => "primitive_root",
+        _ => return None,
+    })
+}
+
 fn normalize_call_syntax(input: &str) -> Option<String> {
     let input = input.trim();
+    // `totient 36`, `nextprime 100`: the command spelling of an integer function.
+    if let Some((name, args)) = input.split_once(' ')
+        && let Some(canonical) = arithmetic_function_name(name)
+        && !args.trim_start().starts_with('(')
+    {
+        return Some(format!("numfn {canonical} {}", args.trim()));
+    }
     // `[[1,2],[3,4]] * [[0,1],[1,0]]`: a product of two matrix literals is a matrix product.
     if input.starts_with('[') && input.ends_with(']') {
         let mut depth = 0usize;
@@ -1676,6 +1700,10 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
         "transpose" => "transpose",
         "rank" => "rank",
         "dsolve" => "dsolve",
+        other if arithmetic_function_name(other).is_some() => {
+            let canonical = arithmetic_function_name(other)?;
+            return Some(format!("numfn {canonical} {args}"));
+        }
         "limit" | "lim" => {
             // limit(f, x, a) -> `limit f as x -> a`
             let parts = split_top_level_commas(args);
@@ -2633,6 +2661,22 @@ fn parse_operation_canonical(input: &str) -> MathOperation {
             return MathOperation::Matrix(MatrixOpKind::Multiply {
                 a_str: parts[0].to_string(),
                 b_str: parts[1].to_string(),
+            });
+        }
+    }
+
+    // 4.4 Integer functions: `numfn totient 36`, `numfn pow_mod 2, 10, 1000`
+    if let Some(body) = input.strip_prefix("numfn ")
+        && let Some((function, args)) = body.trim().split_once(' ')
+    {
+        let parsed: Option<Vec<i64>> = args
+            .split(',')
+            .map(|a| a.trim().parse::<i64>().ok())
+            .collect();
+        if let Some(args) = parsed {
+            return MathOperation::NumberTheory(NumberTheoryOpKind::Arithmetic {
+                function: function.to_string(),
+                args,
             });
         }
     }

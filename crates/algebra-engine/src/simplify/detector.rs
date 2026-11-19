@@ -72,14 +72,7 @@ impl DomainFeatureDetector {
                     {
                         features.has_stochastic_terms = true;
                     }
-                    if n == "i"
-                        || n == "j"
-                        || n == "k"
-                        || n == "qi"
-                        || n == "qj"
-                        || n == "qk"
-                        || n == "I"
-                    {
+                    if n == "i" || n == "qi" || n == "qj" || n == "qk" || n == "I" {
                         features.is_non_commutative_ring = true;
                     }
                     if n == "Delta" || n == "nabla" || n.starts_with("shift_") {

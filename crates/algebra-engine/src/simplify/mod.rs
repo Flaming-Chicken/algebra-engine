@@ -550,8 +550,8 @@ impl Simplifier {
                 match name.as_str() {
                     "I" => Ok(rec.add(SymbolicLang::IdentityMatrix)),
                     "i" | "qi" => Ok(rec.add(SymbolicLang::QuaternionI)),
-                    "j" | "qj" => Ok(rec.add(SymbolicLang::QuaternionJ)),
-                    "k" | "qk" => Ok(rec.add(SymbolicLang::QuaternionK)),
+                    "qj" => Ok(rec.add(SymbolicLang::QuaternionJ)),
+                    "qk" => Ok(rec.add(SymbolicLang::QuaternionK)),
                     "dW" | "dW_t" => Ok(rec.add(SymbolicLang::SymbolDW)),
                     "dt" => Ok(rec.add(SymbolicLang::SymbolDT)),
                     _ => Ok(rec.add(SymbolicLang::Symbol(name))),
@@ -647,8 +647,8 @@ impl Simplifier {
             },
             SymbolicLang::IdentityMatrix => Ok(graph.symbol("I")),
             SymbolicLang::QuaternionI => Ok(graph.symbol("i")),
-            SymbolicLang::QuaternionJ => Ok(graph.symbol("j")),
-            SymbolicLang::QuaternionK => Ok(graph.symbol("k")),
+            SymbolicLang::QuaternionJ => Ok(graph.symbol("qj")),
+            SymbolicLang::QuaternionK => Ok(graph.symbol("qk")),
             SymbolicLang::SymbolDW => Ok(graph.symbol("dW")),
             SymbolicLang::SymbolDT => Ok(graph.symbol("dt")),
             SymbolicLang::Add([a, b]) => {

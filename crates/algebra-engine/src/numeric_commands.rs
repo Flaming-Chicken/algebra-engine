@@ -9,6 +9,7 @@
 use crate::calculus::SymbolicCalculus;
 use crate::numeric::{EvalContext, NumericalEval};
 use crate::poly::{UniPoly, collect_expr_symbols, expr_from_rational};
+use crate::simplify::SymbolicSimplifier;
 use algebra_core::parser::ExprParser;
 use algebra_core::{ExprGraph, ExprId, ExprKind, SymbolId};
 use num_rational::BigRational;
@@ -715,9 +716,182 @@ fn fit(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
     ))
 }
 
+/// `product(f, k, a, b)`: the exact finite product, or a closed form for a symbolic upper limit.
+fn product(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    let args = split_args(args);
+    let [f_text, var, lower, upper] = args.as_slice() else {
+        return Err("product(f, k, a, b), for example product(k, k, 1, 5)".into());
+    };
+    let f = parse(graph, f_text)?;
+    let k = graph.symbols.get_or_intern(var);
+    let k_expr = graph.symbol(var);
+    let a = exact(graph, lower)
+        .ok()
+        .filter(|q| q.is_integer())
+        .ok_or("the lower limit must be an integer")?;
+    let a_int = a
+        .to_integer()
+        .to_i64()
+        .ok_or("the lower limit is too large")?;
+    if let Ok(b) = exact(graph, upper)
+        && b.is_integer()
+    {
+        let b_int = b
+            .to_integer()
+            .to_i64()
+            .ok_or("the upper limit is too large")?;
+        if b_int < a_int {
+            return Ok(NumericOutput::Expression(
+                graph.integer(1),
+                "empty product".into(),
+            ));
+        }
+        if b_int - a_int > 5000 {
+            return Err("too many factors for an exact product (limit 5000)".into());
+        }
+        let factors: Vec<ExprId> = (a_int..=b_int)
+            .map(|v| graph.substitute(f, k, graph.integer(v)))
+            .collect();
+        let result = graph.simplify(graph.mul(factors));
+        return Ok(NumericOutput::Expression(
+            result,
+            "exact finite product".into(),
+        ));
+    }
+    // Symbolic upper limit n.
+    let n = parse(graph, upper)?;
+    let count = graph.add([n, graph.integer(1 - a_int)]);
+    let closed = if !graph.has_symbol(f, k) {
+        Some(graph.pow(f, count))
+    } else if f == k_expr {
+        let top = graph.function("factorial", [n]);
+        Some(if a_int <= 1 {
+            top
+        } else {
+            let below = (1..a_int).fold(1i64, |p, v| p.saturating_mul(v));
+            graph.div(top, graph.integer(below))
+        })
+    } else if let ExprKind::Pow(base, exponent) = graph.get(f).kind.clone()
+        && exponent == k_expr
+        && !graph.has_symbol(base, k)
+    {
+        // base^(a + ... + n) = base^((n (n + 1) - a (a - 1)) / 2)
+        let triangular = graph.div(
+            graph.add([
+                graph.mul([n, graph.add([n, graph.integer(1)])]),
+                graph.integer(-(a_int * (a_int - 1))),
+            ]),
+            graph.integer(2),
+        );
+        Some(graph.pow(base, triangular))
+    } else {
+        None
+    };
+    match closed {
+        Some(id) => Ok(NumericOutput::Expression(
+            graph.simplify(id),
+            "closed form".into(),
+        )),
+        None => Err("no closed form for this product with a symbolic upper limit".into()),
+    }
+}
+
+/// Z-transform of a sequence that is a sum of terms `c n^m a^n` (also `exp(b n)`, `cos` and `sin` of a multiple of
+/// `n` through their exponential forms are not covered): `Z{a^n} = z/(z - a)` and `Z{n x[n]} = -z d/dz Z{x[n]}`.
+fn ztransform(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    let args = split_args(args);
+    let f = parse(graph, args.first().ok_or("ztransform(x[n], n, z)")?)?;
+    let n_name = args.get(1).map(String::as_str).unwrap_or("n");
+    let z_name = args.get(2).map(String::as_str).unwrap_or("z");
+    let (n, z) = (
+        graph.symbols.get_or_intern(n_name),
+        graph.symbols.get_or_intern(z_name),
+    );
+    let (n_expr, z_expr) = (graph.symbol(n_name), graph.symbol(z_name));
+    let expanded = crate::simplify::AlgebraicTransformations::expand(graph, f);
+    let terms: Vec<ExprId> = match graph.get(expanded).kind.clone() {
+        ExprKind::Add(ts) => ts.to_vec(),
+        _ => vec![expanded],
+    };
+    let mut total = Vec::new();
+    for term in terms {
+        let factors: Vec<ExprId> = match graph.get(term).kind.clone() {
+            ExprKind::Mul(fs) => fs.to_vec(),
+            ExprKind::Neg(inner) => vec![graph.integer(-1), inner],
+            _ => vec![term],
+        };
+        let (mut coefficient, mut base, mut power) = (Vec::new(), Vec::new(), 0i64);
+        for factor in factors {
+            if !graph.has_symbol(factor, n) {
+                coefficient.push(factor);
+                continue;
+            }
+            match graph.get(factor).kind.clone() {
+                ExprKind::Symbol(_) if factor == n_expr => power += 1,
+                ExprKind::Pow(b, e) if b == n_expr && !graph.has_symbol(e, n) => {
+                    let k = crate::numeric::try_eval_exact(graph, e, &HashMap::new())
+                        .ok()
+                        .flatten()
+                        .filter(|q| q.is_integer() && *q >= Q::zero())
+                        .and_then(|q| q.to_integer().to_i64())
+                        .ok_or("only non-negative integer powers of n are supported")?;
+                    power += k;
+                }
+                ExprKind::Pow(b, e) if !graph.has_symbol(b, n) => {
+                    // b^(c n)
+                    let c = graph.simplify(graph.diff(e, n));
+                    if graph.has_symbol(c, n)
+                        || graph.simplify(graph.sub(e, graph.mul([c, n_expr]))) != graph.integer(0)
+                    {
+                        return Err("the exponent must be a multiple of n".into());
+                    }
+                    base.push(graph.pow(b, c));
+                }
+                ExprKind::Function { name, args }
+                    if graph.symbols.resolve(name).as_deref() == Some("exp") && args.len() == 1 =>
+                {
+                    let c = graph.simplify(graph.diff(args[0], n));
+                    if graph.has_symbol(c, n)
+                        || graph.simplify(graph.sub(args[0], graph.mul([c, n_expr])))
+                            != graph.integer(0)
+                    {
+                        return Err("the exponent must be a multiple of n".into());
+                    }
+                    base.push(graph.function("exp", [c]));
+                }
+                _ => {
+                    return Err(
+                        "ztransform handles sums of terms c n^m a^n (and exp(b n)); this sequence has another form"
+                            .into(),
+                    );
+                }
+            }
+        }
+        // Z{a^n} = z / (z - a); apply -z d/dz `power` times.
+        let a = if base.is_empty() {
+            graph.integer(1)
+        } else {
+            graph.mul(base)
+        };
+        let mut image = graph.div(z_expr, graph.sub(z_expr, a));
+        for _ in 0..power {
+            image = graph.simplify(graph.mul([graph.integer(-1), z_expr, graph.diff(image, z)]));
+        }
+        coefficient.push(image);
+        total.push(graph.mul(coefficient));
+    }
+    let result = graph.simplify(graph.add(total));
+    Ok(NumericOutput::Expression(
+        result,
+        "unilateral Z-transform".into(),
+    ))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
+        "product" => product(graph, args),
+        "ztransform" => ztransform(graph, args),
         "nsolve" | "findroot" => nsolve(graph, args),
         "nintegrate" | "nint" => nintegrate(graph, args),
         "minimize" => minimize(graph, args, false),
@@ -769,6 +943,8 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "pvariance" => "pvariance",
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
+        "product" | "prod" => "product",
+        "ztransform" | "z_transform" | "ztrans" => "ztransform",
         "divmod" => "divmod",
         "floordiv" => "floordiv",
         "digits" => "digits",

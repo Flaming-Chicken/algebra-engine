@@ -1642,6 +1642,8 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "pvariance" => "pvariance",
         "stddev" => "stddev",
         "pstddev" => "pstddev",
+        "product" | "prod" => "product",
+        "ztransform" | "z_transform" | "ztrans" => "ztransform",
         "divmod" => "divmod",
         "floordiv" => "floordiv",
         "digits" => "digits",
@@ -1755,6 +1757,18 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
         "transpose" => "transpose",
         "rank" => "rank",
         "dsolve" => "dsolve",
+        // Commands that take their arguments after a space; the call spelling `expand((x+1)^5)` means the same.
+        "expand" | "cancel" | "collect" | "together" | "horner" | "discriminant" | "resultant"
+        | "roots" | "poly_gcd" | "laplace" | "fourier" | "ilt" | "inv_laplace" | "poly_roots" => {
+            return Some(format!("{} {args}", name.to_ascii_lowercase()));
+        }
+        // `factor(x^4 - 1)`: a polynomial (an integer was handled above); `gcd(x^2 - 1, x^3 - 1)`, `lcm(...)`.
+        "factor" if args.chars().any(|c| c.is_ascii_alphabetic()) => {
+            return Some(format!("factor {args}"));
+        }
+        "gcd" if args.chars().any(|c| c.is_ascii_alphabetic()) => {
+            return Some(format!("poly_gcd {args}"));
+        }
         other if numeric_command_name(other).is_some() => {
             let canonical = numeric_command_name(other)?;
             return Some(format!("numcmd {canonical} {args}"));

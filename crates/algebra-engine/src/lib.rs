@@ -25,6 +25,7 @@ pub mod control;
 pub mod curvature;
 pub mod diffalg;
 pub mod diffeq;
+pub mod discrete;
 pub mod distributions;
 pub mod exceptional_lie;
 pub mod executor;

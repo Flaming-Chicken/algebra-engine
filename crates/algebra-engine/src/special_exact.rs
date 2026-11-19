@@ -145,6 +145,15 @@ pub fn evaluate(graph: &ExprGraph, expr: ExprId) -> ExprId {
             {
                 return value;
             }
+            // Discrete functions of exact rational arguments (`fibonacci(20)`, `partitions(100)`, `bell(10)`).
+            if let Some(values) = new_args
+                .iter()
+                .map(|&a| rational_argument(graph, a))
+                .collect::<Option<Vec<Q>>>()
+                && let Some(result) = crate::discrete::evaluate(&fname, &values)
+            {
+                return expr_from_rational(graph, &result);
+            }
             if new_args == args.to_vec() {
                 expr
             } else {

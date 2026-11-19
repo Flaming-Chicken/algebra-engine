@@ -52,6 +52,7 @@ pub mod neural_ode;
 pub mod noneuclidean;
 pub mod numbertheory;
 pub mod numeric;
+pub mod numeric_commands;
 pub mod ode;
 pub mod padic_hodge;
 pub mod pde;

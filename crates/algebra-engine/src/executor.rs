@@ -806,6 +806,23 @@ impl OperationExecutor {
                 Err(e) => OperationResult::error(e.to_string()),
             },
 
+            MathOperation::Numeric { function, args } => {
+                match crate::numeric_commands::run(graph, function, args) {
+                    Ok(crate::numeric_commands::NumericOutput::Text(text)) => {
+                        OperationResult::success(text.clone(), text.clone(), text)
+                    }
+                    Ok(crate::numeric_commands::NumericOutput::Expression(id, note)) => {
+                        let unicode = unicode_fmt.format(graph, id).unwrap_or_default();
+                        let latex = latex_fmt.format(graph, id).unwrap_or_default();
+                        let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                        res.root_expr = Some(id);
+                        res.domain_info = Some(note);
+                        res
+                    }
+                    Err(e) => OperationResult::error(e),
+                }
+            }
+
             MathOperation::Substitute {
                 expression,
                 variable,

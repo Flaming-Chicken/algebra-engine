@@ -1447,3 +1447,22 @@ fn latex_and_english_input_mean_what_the_plain_input_means() {
     // `e^{i\pi}` was read through a backslash operator (`mldivide`).
     assert!(!run(r"e^{i\pi}").contains("mldivide"));
 }
+
+#[test]
+fn euler_power_and_the_scope_of_a_sum() {
+    // e^x is exp(x): exp(i pi) = -1 holds for both spellings (e^(i pi) was printed unevaluated).
+    assert_eq!(run("e^(i*pi)"), "-1");
+    assert_eq!(run("exp(i*pi)"), "-1");
+    assert_eq!(run("e^(i*pi/2)"), "i");
+    assert_eq!(run("e^(ln(2))"), "2");
+    assert_eq!(run("e^(-x)*e^x"), "1");
+    assert_eq!(run("diff(e^(x^2), x)"), run("diff(exp(x^2), x)"));
+    // A sum applies to the next term only: sum k + 1 is 10 + 1, sum k^2 - 1 is 30 - 1.
+    assert_eq!(run(r"\sum_{k=1}^{4} k + 1"), "11");
+    assert_eq!(run(r"\sum_{k=1}^{4} k^2 - 1"), "29");
+    assert_eq!(run(r"\sum_{k=1}^{4} 2k"), "20");
+    assert_eq!(run("sum(k, k, 1, 4) + 1"), "11");
+    assert_eq!(run("2*sum(k, k, 1, 4)"), "20");
+    // The whole-input call is not treated as a nested one (this recursed without end).
+    assert_eq!(run("simplify(x - x)"), "0");
+}

@@ -753,7 +753,7 @@ impl UraeSession {
     /// Replace each inner `expand(...)`, `simplify(...)`, `factor(...)`, ... call that sits inside another call by its
     /// result (as parseable text). `None` if there is nothing to replace.
     fn resolve_nested_commands(&mut self, input: &str) -> Option<String> {
-        const INNER: [&str; 10] = [
+        const INNER: [&str; 12] = [
             "expand",
             "simplify",
             "cancel",
@@ -764,6 +764,8 @@ impl UraeSession {
             "trigsimp",
             "expand_trig",
             "collect",
+            "sum",
+            "product",
         ];
         let chars: Vec<char> = input.chars().collect();
         let mut replaced = false;
@@ -777,7 +779,12 @@ impl UraeSession {
             } else if matches!(c, ')' | ']' | '}') {
                 depth -= 1;
             }
-            if depth >= 1
+            // A call inside another call, or one that is only part of an arithmetic expression (`sum(...) + 1`).
+            let in_arithmetic = i > 0
+                || chars
+                    .iter()
+                    .any(|&ch| matches!(ch, '+' | '-' | '*' | '/' | '^'));
+            if (depth >= 1 || in_arithmetic)
                 && (c.is_ascii_alphabetic() || c == '_')
                 && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
             {
@@ -804,7 +811,8 @@ impl UraeSession {
                         }
                         k += 1;
                     }
-                    if k < chars.len() {
+                    // The whole input is one call: it is the command itself, not a nested one.
+                    if k < chars.len() && !(start == 0 && k + 1 == chars.len()) {
                         let inner: String = chars[start..=k].iter().collect();
                         let outcome = self.execute_line(&inner);
                         if !outcome.is_error

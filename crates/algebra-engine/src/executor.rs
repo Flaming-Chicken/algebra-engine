@@ -1505,22 +1505,16 @@ impl OperationExecutor {
                     from_unit,
                     to_unit,
                 } => {
-                    let converted = if (from_unit == "km/h" || from_unit == "kmh")
-                        && (to_unit == "m/s" || to_unit == "ms")
-                    {
-                        val / 3.6
-                    } else if (from_unit == "m/s" || from_unit == "ms")
-                        && (to_unit == "km/h" || to_unit == "kmh")
-                    {
-                        val * 3.6
-                    } else if from_unit == "m" && from_unit == "ft" {
-                        val * 3.28084
-                    } else {
-                        *val
+                    let converted = match crate::units::convert(*val, from_unit, to_unit) {
+                        Ok(v) => v,
+                        Err(e) => return OperationResult::error(e),
                     };
                     let out = format!(
-                        "{:.4} [{}] = {:.4} [{}]",
-                        val, from_unit, converted, to_unit
+                        "{} [{}] = {} [{}]",
+                        crate::units::clean(*val),
+                        from_unit,
+                        crate::units::clean(converted),
+                        to_unit
                     );
                     OperationResult::success(out.clone(), out.clone(), out)
                 }

@@ -579,6 +579,11 @@ impl UraeSession {
         if matches!(parsed_op, MathOperation::Expression { .. }) && !bare_matrix {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
+                // `0/0`, `1/0`, `oo - oo`, `0 * oo`: undefined, whatever the simplifier's rules would say.
+                if crate::indeterminate::is_undefined(&self.graph, expr_id) {
+                    let text = "Undefined (division by zero or an indeterminate form)".to_string();
+                    return OperationResult::success(text.clone(), text.clone(), text);
+                }
                 let syms = self.extract_symbols(expr_id);
                 let all_bound = syms.iter().all(|s| {
                     self.bindings.contains_key(s)

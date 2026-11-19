@@ -1643,6 +1643,8 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "stddev" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "matpow" | "matrix_power" | "mpow" => "matpow",
+        "lu" | "lu_decomposition" => "lu",
         "ztransform" | "z_transform" | "ztrans" => "ztransform",
         "divmod" => "divmod",
         "floordiv" => "floordiv",
@@ -1673,6 +1675,30 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
         return Some(format!("numfn {canonical} {}", args.trim()));
     }
     // `[[1,2],[3,4]] * [[0,1],[1,0]]`: a product of two matrix literals is a matrix product.
+    // `[[1,2],[3,4]]^3`: a matrix literal to an integer power.
+    if input.starts_with("[[") {
+        let mut depth = 0usize;
+        for (i, c) in input.char_indices() {
+            match c {
+                '[' | '(' | '{' => depth += 1,
+                ']' | ')' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let rest = input[i + 1..].trim_start();
+                        if let Some(power) = rest.strip_prefix('^') {
+                            return Some(format!(
+                                "numcmd matpow {}, {}",
+                                &input[..=i],
+                                power.trim()
+                            ));
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
     if input.starts_with('[') && input.ends_with(']') {
         let mut depth = 0usize;
         for (i, c) in input.char_indices() {
@@ -1736,14 +1762,7 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
     let canonical = match name.to_ascii_lowercase().as_str() {
         "series" | "taylor" | "maclaurin" => "series",
         "is_prime" | "isprime" => "is_prime",
-        "factor"
-            if args
-                .trim()
-                .trim_start_matches('-')
-                .chars()
-                .all(|c| c.is_ascii_digit())
-                && !args.trim().is_empty() =>
-        {
+        "factor" if !args.trim().is_empty() && !args.chars().any(|c| c.is_ascii_alphabetic()) => {
             "prime_factors"
         }
         "factorint"

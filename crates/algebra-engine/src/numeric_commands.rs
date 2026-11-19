@@ -887,10 +887,79 @@ fn ztransform(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, Strin
     ))
 }
 
+/// `matpow(M, n)`: an integer power of a square matrix (negative powers through the inverse).
+fn matrix_power(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    use crate::matrix::SymbolicMatrix;
+    let args = split_args(args);
+    let [matrix, power] = args.as_slice() else {
+        return Err("matpow(M, n), for example matpow([[1, 1], [1, 0]], 10)".into());
+    };
+    let base = SymbolicMatrix::from_expr_str(graph, matrix).map_err(|e| e.to_string())?;
+    if base.rows != base.cols {
+        return Err("only a square matrix has a power".into());
+    }
+    let n = exact(graph, power)
+        .ok()
+        .filter(|q| q.is_integer())
+        .and_then(|q| q.to_integer().to_i64())
+        .ok_or("the exponent must be an integer")?;
+    if n.abs() > 100_000 {
+        return Err("the exponent is too large".into());
+    }
+    let simplify_all = |m: &SymbolicMatrix| -> Result<SymbolicMatrix, String> {
+        let elems: Vec<ExprId> = m.elements.iter().map(|&e| graph.simplify(e)).collect();
+        SymbolicMatrix::new(m.rows, m.cols, elems).map_err(|e| e.to_string())
+    };
+    let mut factor = if n < 0 {
+        simplify_all(&base.inverse(graph).map_err(|e| e.to_string())?)?
+    } else {
+        base
+    };
+    let mut result = SymbolicMatrix::identity(graph, factor.rows);
+    let mut e = n.unsigned_abs();
+    while e > 0 {
+        if e & 1 == 1 {
+            result = simplify_all(&result.multiply(graph, &factor).map_err(|e| e.to_string())?)?;
+        }
+        e >>= 1;
+        if e > 0 {
+            factor = simplify_all(&factor.multiply(graph, &factor).map_err(|e| e.to_string())?)?;
+        }
+    }
+    Ok(NumericOutput::Expression(
+        result.to_expr_id(graph),
+        format!("matrix power {n}"),
+    ))
+}
+
+/// `lu(M)`: the LU decomposition `M = L U` as two matrices.
+fn lu(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    use crate::matrix::SymbolicMatrix;
+    use algebra_core::format::{Formatter, UnicodeFormatter};
+    let args = split_args(args);
+    let matrix = args.first().ok_or("lu(M)")?;
+    let m = SymbolicMatrix::from_expr_str(graph, matrix).map_err(|e| e.to_string())?;
+    let (l, u) = m.lu_decomposition(graph).map_err(|e| e.to_string())?;
+    let show = |m: &SymbolicMatrix| -> Result<String, String> {
+        let elems: Vec<ExprId> = m.elements.iter().map(|&e| graph.simplify(e)).collect();
+        let simplified = SymbolicMatrix::new(m.rows, m.cols, elems).map_err(|e| e.to_string())?;
+        UnicodeFormatter
+            .format(graph, simplified.to_expr_id(graph))
+            .map_err(|e| e.to_string())
+    };
+    Ok(NumericOutput::Text(format!(
+        "L = {}, U = {}",
+        show(&l)?,
+        show(&u)?
+    )))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "product" => product(graph, args),
+        "matpow" => matrix_power(graph, args),
+        "lu" => lu(graph, args),
         "ztransform" => ztransform(graph, args),
         "nsolve" | "findroot" => nsolve(graph, args),
         "nintegrate" | "nint" => nintegrate(graph, args),
@@ -944,6 +1013,8 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "matpow" | "matrix_power" | "mpow" => "matpow",
+        "lu" | "lu_decomposition" => "lu",
         "ztransform" | "z_transform" | "ztrans" => "ztransform",
         "divmod" => "divmod",
         "floordiv" => "floordiv",

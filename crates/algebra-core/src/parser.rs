@@ -1627,8 +1627,35 @@ fn arithmetic_function_name(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The canonical name of a numerical or statistical command, if `name` is one of its spellings.
+fn numeric_command_name(name: &str) -> Option<&'static str> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "nsolve" | "findroot" | "find_root" => "nsolve",
+        "nintegrate" | "nint" | "numeric_integrate" => "nintegrate",
+        "minimize" | "argmin" => "minimize",
+        "maximize" | "argmax" => "maximize",
+        "interpolate" | "lagrange" | "interp" => "interpolate",
+        "fit" | "polyfit" | "linfit" => "fit",
+        "mean" | "average" => "mean",
+        "median" => "median",
+        "variance" => "variance",
+        "pvariance" => "pvariance",
+        "stddev" => "stddev",
+        "pstddev" => "pstddev",
+        _ => return None,
+    })
+}
+
 fn normalize_call_syntax(input: &str) -> Option<String> {
     let input = input.trim();
+    // `mean [1, 2, 3]`, `nsolve cos(x) - x, 1`: the command spelling (not an assignment such as `mean = 5`).
+    if let Some((name, args)) = input.split_once(' ')
+        && let Some(canonical) = numeric_command_name(name)
+        && !args.trim_start().starts_with('=')
+        && !args.trim_start().starts_with('(')
+    {
+        return Some(format!("numcmd {canonical} {}", args.trim()));
+    }
     // `totient 36`, `nextprime 100`: the command spelling of an integer function.
     if let Some((name, args)) = input.split_once(' ')
         && let Some(canonical) = arithmetic_function_name(name)
@@ -1700,6 +1727,10 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
         "transpose" => "transpose",
         "rank" => "rank",
         "dsolve" => "dsolve",
+        other if numeric_command_name(other).is_some() => {
+            let canonical = numeric_command_name(other)?;
+            return Some(format!("numcmd {canonical} {args}"));
+        }
         other if arithmetic_function_name(other).is_some() => {
             let canonical = arithmetic_function_name(other)?;
             return Some(format!("numfn {canonical} {args}"));
@@ -2696,6 +2727,19 @@ fn parse_operation_canonical(input: &str) -> MathOperation {
                 args,
             });
         }
+    }
+
+    // 14b. Numerical and statistical commands: `numcmd nsolve cos(x) - x, 1`
+    if let Some(body) = input.strip_prefix("numcmd ")
+        && let Some((function, args)) = body.trim().split_once(' ')
+    {
+        return MathOperation::Numeric {
+            function: function.to_string(),
+            args: split_top_level_commas(args)
+                .into_iter()
+                .map(|a| a.trim().to_string())
+                .collect(),
+        };
     }
 
     // 15. Discrete Combinatorics Commands

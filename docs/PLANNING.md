@@ -31,7 +31,7 @@ with the rules for keeping it true.
   cylindrical decomposition to three variables, constraint-based CAD, closed solid meshes for gears, screws, springs
   and wings, a finite-element suite with sparse solvers, special functions to about 12 digits, ODE and PDE solvers, the
   egui notebook and the other frontends.
-- **What is not right yet.** The ledger lists 53 catalogued items (38 fixed, 12 partly fixed, 0 open, 2 stale, 1
+- **What is not right yet.** The ledger lists 53 catalogued items (39 fixed, 12 partly fixed, 0 open, 2 stale, 0
   partly different, 0 not verified) plus the audit extension's tracks, which are mostly unverified. No catalogued
   wrong answer is reproduced and open any more; no read-confirmed item is open either.
 - **What is thin.** Several advanced-domain modules exist with tests but little depth (ledger `A13`–`A16`, `B16`–`B19`),
@@ -78,7 +78,7 @@ In order. Each item starts with a failing test and ends with a ledger update.
 3. ~~`A13` equivalence tiers, `B17` Colombeau products, `B18` tangent functor rules, `B19` dimensions of `^` and calls, `C17` domain categories~~ (done, 19 Nov 2026).
 4. ~~Exact values in both surreal engines~~ (done, 19 Nov 2026); a shared Conway normal form for true transfinite numbers remains design work (M3).
 5. The rest of `F5` and `F10`, then the verification pass below.
-6. The verification pass: Galois groups of degree 5 and above (`A15`), the rest of `B20`, Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.
+6. The verification pass: Galois groups of degree 5 and above (`A15`), Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.
 7. Then M2.
 
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit

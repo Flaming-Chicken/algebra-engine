@@ -13,9 +13,9 @@
 | Category | Items | Fixed | Partly fixed | Open | Stale | Partly different | Not verified |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | A, silent stubs | 16 | 10 | 5 | 0 | 1 | 0 | 0 |
-| B, formula defects | 20 | 17 | 1 | 0 | 1 | 1 | 0 |
+| B, formula defects | 20 | 18 | 1 | 0 | 1 | 0 | 0 |
 | C, oversimplifications | 17 | 11 | 6 | 0 | 0 | 0 | 0 |
-| **Total** | **53** | **38** | **12** | **0** | **2** | **1** | **0** |
+| **Total** | **53** | **39** | **12** | **0** | **2** | **0** | **0** |
 
 The `R` findings (13) are all fixed except the remainder of `R1` (arbitrary CAD surface meshes still use the 3-D `Tri3` pseudo-stiffness). Tracks `D–J` (section 6) are mostly not verified: Track `F` is partly verified, with `F4`, `F5`, `F7`, `F8` and (in part) `F10` fixed. The counts are derived from the tables below; update both together.
 
@@ -65,7 +65,7 @@ The `R` findings (13) are all fixed except the remainder of `R1` (arbitrary CAD 
 | B17 | Colombeau `GeneralizedDistribution::multiply` | **Fixed (19 Nov 2026)** | products carry their powers of the regularisation parameter: `δ·δ` is of order `ε⁻²`, `Θ·Θ` is `Θ`, `Θ·δ` is associated with `δ/2`; a scalar factor multiplies through. Checked against the mollified limits (`cat_tangent_tests`) |
 | B18 | `TangentFunctor::lift_hypergraph` | **Fixed (19 Nov 2026)** | tangent rules for `Add`, n-ary `Mul` and `CliffordGeometricProduct` (Leibniz, factor order kept), `Neg`, `Inv`, `LieBracket`, identity and constants; any other operation is a `TangentError::UnsupportedOperation` instead of a silently unconnected tangent wire. Evaluated against the derivative for every supported operation (`cat_tangent_tests`) |
 | B19 | `Elaborator::infer_dimension`, `to_legacy_ast` | **Fixed (19 Nov 2026)** | `^` scales the dimension by a rational literal exponent (a non-literal exponent of a quantity with units is an error), `sqrt`/`cbrt` take roots, `abs`/`min`/`max` keep and check the dimension, `sin`/`exp`/`ln` and other functions refuse arguments with units; `Complex { re, im }` lowers to `re + im * i` (`cat_lang_tests`) |
-| B20 | `SmtExpr::from_graph` constants | **Partly different (checked for `pi`)** | `Constant::Pi` becomes a free variable `Var("pi")`, not `0.0` as the audit says: sound as an over-approximation but useless as a constant. `BigInteger`, `BigRational` and the lossy `f64` rational conversion were not re-checked |
+| B20 | `SmtExpr::from_graph` constants | **Fixed (19 Nov 2026)** | re-read in full. The conversion mapped every number other than an `i64`, a small rational and a float to `0.0` (big integers, big rationals, scientific notation and mathematical constants all became zero), converted rationals through `f64`, accepted `NaN` and infinity, and printed negative numbers as `-5`, which SMT-LIB does not have (it is `(- 5)`). Now big integers and rationals keep every digit (`IntLiteral`, `RealLiteral`), scientific notation is an exact quotient, negatives print as applications, and a constant or a non-finite float is an error instead of a zero (`phase24_smt_formal_verification_tests`) |
 
 ## 5. C. Oversimplifications
 

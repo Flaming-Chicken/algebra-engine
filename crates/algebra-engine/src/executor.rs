@@ -820,6 +820,7 @@ impl OperationExecutor {
             } => match (parser.parse(expression), parser.parse(point)) {
                 (Ok(expr_id), Ok(pt_id)) => {
                     let wrt_sym = graph.symbols.get_or_intern(variable);
+                    crate::limits::NUMERIC_LIMIT_ESTIMATE.with(|f| f.set(false));
                     let lim_res = match direction
                         .as_deref()
                         .map(|s| s.trim().to_ascii_lowercase())
@@ -856,6 +857,13 @@ impl OperationExecutor {
                             );
                             let mut res = OperationResult::success(out, latex, unicode);
                             res.root_expr = Some(lim_id);
+                            if crate::limits::NUMERIC_LIMIT_ESTIMATE.with(|f| f.replace(false)) {
+                                res.metadata.insert("method".into(), "numerical".into());
+                                res.domain_info = Some(
+                                    "numerical estimate from values at 10^2 .. 10^5, not a proof"
+                                        .into(),
+                                );
+                            }
                             res
                         }
                         Err(e) => OperationResult::error(e.to_string()),

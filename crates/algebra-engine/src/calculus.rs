@@ -1499,6 +1499,15 @@ pub(crate) fn taylor_coeffs_vec(
         {
             eval_deriv = crate::simplify::Simplifier::simplify(graph, lim).unwrap_or(lim);
         }
+        // A singular value (`0^0`, `ln(0)`, a division by zero) means the function is not analytic at the point:
+        // there is no Taylor series, and carrying on would print nonsense.
+        if has_singular_value(graph, eval_deriv) {
+            SERIES_NOT_ANALYTIC.with(|f| f.set(true));
+            while coeffs.len() <= order {
+                coeffs.push(zero);
+            }
+            return coeffs;
+        }
         if eval_deriv == zero {
             coeffs.push(zero);
         } else if n <= 1 {
@@ -1535,9 +1544,48 @@ pub(crate) fn taylor_coeffs_vec(
 const SERIES_NODE_BUDGET: usize = 30_000;
 
 thread_local! {
+    /// Set by [`taylor_coeffs_vec`] when a coefficient was singular (`0^0`, `ln(0)`, `1/0`).
+    pub(crate) static SERIES_NOT_ANALYTIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
     /// Set by [`taylor_coeffs_vec`] when it gave up because of expression swell, so a caller that can report an
     /// error (the series command) does so instead of returning a truncated series.
     pub(crate) static SERIES_BUDGET_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the value contains `0^0` (or another power of zero with a non-positive exponent), `ln(0)` or a division by
+/// the literal zero.
+fn has_singular_value(graph: &ExprGraph, root: ExprId) -> bool {
+    let zero = graph.integer(0);
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Div(_, d) if *d == zero => return true,
+            ExprKind::Pow(base, exp) if *base == zero => {
+                let non_positive = match &graph.get(*exp).kind {
+                    ExprKind::Number(n) => n.as_f64().is_some_and(|v| v <= 0.0),
+                    _ => false,
+                };
+                if non_positive {
+                    return true;
+                }
+            }
+            ExprKind::Function { name, args }
+                if args.len() == 1
+                    && args[0] == zero
+                    && matches!(graph.symbols.resolve(*name).as_deref(), Some("ln" | "log")) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        stack.extend(node.children());
+    }
+    false
 }
 
 /// Whether the expression has more than `limit` distinct nodes (counting stops at the limit).

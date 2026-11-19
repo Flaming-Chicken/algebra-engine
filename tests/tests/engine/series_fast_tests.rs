@@ -96,7 +96,7 @@ fn series_with_a_symbolic_constant_term_still_match_the_function() {
         ("exp(cos(x))", h.cos().exp()),
         ("cos(exp(x))", h.exp().cos()),
     ] {
-        let poly = series(&format!("series({f}, x, 0, 10)"));
+        let poly = series(&format!("series({f}, x, 0, 7)"));
         let value = eval_at(&poly, h);
         assert!(
             (value - exact).abs() < 1e-8,

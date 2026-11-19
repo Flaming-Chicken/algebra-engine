@@ -564,6 +564,11 @@ impl UraeSession {
             }
         }
 
+        // `dsolve(y' = 2*y, y(0) = 1)`: a general solution with initial conditions.
+        if let Some(result) = self.try_dsolve_with_conditions(trimmed) {
+            return result;
+        }
+
         // Expand user functions, symbolic aliases, and `ans` before parsing/evaluation
         let expanded_input = self.expand_definitions(trimmed);
         let parsed_op = parse_operation(&expanded_input);
@@ -661,6 +666,64 @@ impl UraeSession {
         }
 
         self.execute_op(&parsed_op)
+    }
+
+    /// `dsolve <equation>, y(x0) = v, y'(x0) = w, ...`: solve, then fix the constants from the conditions.
+    fn try_dsolve_with_conditions(&mut self, input: &str) -> Option<OperationResult> {
+        let body = input
+            .strip_prefix("dsolve(")
+            .and_then(|b| b.strip_suffix(')'))
+            .or_else(|| input.strip_prefix("dsolve "))?;
+        let mut parts = Vec::new();
+        let (mut depth, mut current) = (0i32, String::new());
+        for c in body.chars() {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+            if c == ',' && depth == 0 {
+                parts.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        parts.push(current);
+        let conditions: Vec<crate::ode_ic::Condition> = parts
+            .iter()
+            .filter_map(|p| crate::ode_ic::parse_condition(p))
+            .collect();
+        if conditions.is_empty() {
+            return None;
+        }
+        let equation = parts
+            .iter()
+            .find(|p| crate::ode_ic::parse_condition(p).is_none())?
+            .trim()
+            .to_string();
+        let general = self.execute_line(&format!("dsolve {equation}"));
+        if general.is_error {
+            return Some(general);
+        }
+        let Some(rhs) = general.root_expr else {
+            return Some(general);
+        };
+        Some(match crate::ode_ic::apply(&self.graph, rhs, &conditions) {
+            Ok(solution) => {
+                use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
+                let unicode = UnicodeFormatter
+                    .format(&self.graph, solution)
+                    .unwrap_or_default();
+                let latex = LatexFormatter
+                    .format(&self.graph, solution)
+                    .unwrap_or_default();
+                let out = format!("{}(x) = {unicode}", conditions[0].name);
+                let mut res = OperationResult::success(out.clone(), latex, out);
+                res.root_expr = Some(solution);
+                res
+            }
+            Err(e) => OperationResult::error(e),
+        })
     }
 
     /// Execute a parsed `MathOperation` against this session.

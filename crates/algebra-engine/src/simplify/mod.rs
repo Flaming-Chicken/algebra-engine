@@ -62,6 +62,7 @@ pub mod detector;
 pub mod dynamic;
 pub mod probabilistic;
 pub mod transformations;
+pub mod trig_expand;
 
 pub use bridges::{
     AskeySchemeGroup, BridgeRouter, EulerBridgeGroup, HyperbolicIdentityGroup, IdentityGroup,

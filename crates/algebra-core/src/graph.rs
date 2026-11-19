@@ -352,6 +352,25 @@ impl ExprGraph {
                 _ => {}
             }
         }
+        // -(c f g) with a negative integer coefficient c is (-c) f g.
+        if let ExprKind::Mul(factors) = &i_node.kind
+            && let Some(position) = factors.iter().position(|&f| {
+                matches!(self.get(f).kind, ExprKind::Number(Number::Integer(n)) if n < 0 && n != i64::MIN)
+            })
+            && let ExprKind::Number(Number::Integer(n)) = self.get(factors[position]).kind
+        {
+            let mut flipped: Vec<ExprId> = factors.iter().copied().collect();
+            if n == -1 {
+                flipped.remove(position);
+            } else {
+                flipped[position] = self.integer(-n);
+            }
+            return match flipped.len() {
+                0 => self.integer(1),
+                1 => flipped[0],
+                _ => self.mul(flipped),
+            };
+        }
         self.intern(ExprNode::new(i_node.domain, ExprKind::Neg(inner)))
     }
 

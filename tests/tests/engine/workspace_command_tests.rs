@@ -561,3 +561,61 @@ fn gaussian_integrals_and_one_sided_limits() {
         assert!(out.ends_with(expected), "{query}: {out}");
     }
 }
+
+#[test]
+fn radicals_and_logarithms_of_rationals_are_exact_and_correct() {
+    // The oracle is f64 arithmetic: the exact form must agree with the direct evaluation.
+    let cases: [(&str, f64); 22] = [
+        ("2^(3/2)", 2f64.powf(1.5)),
+        ("8^(1/3)", 2.0),
+        ("27^(2/3)", 9.0),
+        ("sqrt(50) + sqrt(18)", 50f64.sqrt() + 18f64.sqrt()),
+        ("(sqrt(2) + 1)^2", (2f64.sqrt() + 1.0).powi(2)),
+        ("1/sqrt(2)", 1.0 / 2f64.sqrt()),
+        ("1/(1 + sqrt(2))", 1.0 / (1.0 + 2f64.sqrt())),
+        ("sqrt(3/4)", 0.75f64.sqrt()),
+        ("sqrt(2)^3", 2f64.sqrt().powi(3)),
+        ("sqrt(2)*sqrt(3)*sqrt(5)", 30f64.sqrt()),
+        ("cbrt(16)", 16f64.cbrt()),
+        ("root(32, 5)", 2.0),
+        ("2^(-1/2)", 2f64.powf(-0.5)),
+        ("(3 + 2*sqrt(2))*(3 - 2*sqrt(2))", 1.0),
+        ("exp(2*ln(3))", 9.0),
+        ("e^(ln(2) + ln(3))", 6.0),
+        ("exp(ln(2)/2)", 2f64.sqrt()),
+        ("ln(8)/ln(2)", 3.0),
+        ("log2(1/8)", -3.0),
+        ("log10(1000)", 3.0),
+        ("log(81, 3)", 4.0),
+        ("ln(27)/ln(9)", 1.5),
+    ];
+    for (input, expected) in cases {
+        let out = run(input);
+        let text = out.replace('√', "sqrt").replace('·', "*");
+        let got = value(&text, &[]);
+        assert!(
+            (got - expected).abs() < 1e-12 * expected.abs().max(1.0),
+            "{input} = {out}: {got} vs {expected}"
+        );
+    }
+    // The exact forms, not just the values.
+    assert_eq!(run("2^(3/2)"), "2 · √(2)");
+    assert_eq!(run("(sqrt(2) + 1)^2"), "3 + 2 · √(2)");
+    assert_eq!(run("1/(1 + sqrt(2))"), "-1 + √(2)");
+    assert_eq!(run("sqrt(18)/sqrt(2)"), "3");
+    // Definite integrals of roots come out in radical form.
+    assert_eq!(
+        run("integrate(sqrt(x), x, 1, 2)"),
+        "4/3 · √(2) - 2/3 (w.r.t x along [1, 2])"
+    );
+    assert_eq!(
+        run("integrate(sqrt(x), x, 0, 2)"),
+        "4/3 · √(2) (w.r.t x along [0, 2])"
+    );
+    // A symbolic expression is shown simplified when that is shorter.
+    assert_eq!(run("x^2*x^3"), "x^5");
+    assert_eq!(run("x^5/x^2"), "x^3");
+    assert_eq!(run("(x^3)^2"), "x^6");
+    // ...and an irrational logarithm stays symbolic.
+    assert_eq!(run("ln(2)/ln(3)"), "ln(2) / ln(3)");
+}

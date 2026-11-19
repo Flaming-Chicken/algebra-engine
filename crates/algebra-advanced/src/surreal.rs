@@ -73,7 +73,7 @@ fn simplest_between(lo: Option<&BigRational>, hi: Option<&BigRational>) -> BigRa
                     if &value < h {
                         return value;
                     }
-                    denominator = denominator * BigRational::from_integer(2.into());
+                    denominator *= BigRational::from_integer(2.into());
                 }
             }
             // l < h <= 0: mirror image.

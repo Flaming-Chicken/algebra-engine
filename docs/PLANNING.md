@@ -31,10 +31,9 @@ with the rules for keeping it true.
   cylindrical decomposition to three variables, constraint-based CAD, closed solid meshes for gears, screws, springs
   and wings, a finite-element suite with sparse solvers, special functions to about 12 digits, ODE and PDE solvers, the
   egui notebook and the other frontends.
-- **What is not right yet.** The ledger lists 53 catalogued items (30 fixed, 10 partly fixed, 8 open, 2 stale, 1
-  partly different, 2 not verified) plus the audit extension's tracks, which are mostly unverified. Reproduced wrong
-  answers still on `dev`: surreal ordering (`B16`), polynomial systems outside Shape-Lemma position (`C16`), Betti numbers of a
-  circle (`A14`).
+- **What is not right yet.** The ledger lists 53 catalogued items (32 fixed, 11 partly fixed, 5 open, 2 stale, 1
+  partly different, 2 not verified) plus the audit extension's tracks, which are mostly unverified. No catalogued
+  wrong answer is reproduced and open any more; five items are read-confirmed and open (`A13`, `B17`, `B18`, `B19`, `C17`).
 - **What is thin.** Several advanced-domain modules exist with tests but little depth (ledger `A13`–`A16`, `B16`–`B19`),
   and `ROADMAP.md` section 2.1 lists scope named in the plans that has no code.
 
@@ -59,7 +58,7 @@ Versions are targets, not promises. A milestone ends when its exit gate is met a
 
 | Milestone | Target | Scope | Exit gate |
 | :--- | :--- | :--- | :--- |
-| **M1 Correct** | 0.7.0 | Fix the reproduced wrong answers (work queue 2 to 5). Verify the rest of the audit extension. Recount production panic sites. | No reproduced wrong answer in the ledger; every catalogued item has a verdict; the panic count is measured |
+| **M1 Correct** | 0.7.0 | Fix the reproduced wrong answers (done) and the read-confirmed open items (work queue 3 to 5). Verify the rest of the audit extension. Recount production panic sites. | No reproduced wrong answer in the ledger; every catalogued item has a verdict; the panic count is measured |
 | **M2 Honest** | 0.8.0 | Remaining stubs implemented or turned into explicit errors; `ROADMAP.md` section 2.1 and the README example list matched to the code; the solver's real-versus-complex convention a typed outcome; identity results that name excluded points; `missing_docs` as a lint | Every public feature works or errors; `ROADMAP.md`, README and ledger agree; the GUI web basics (viewport, `100dvh`, local KaTeX) shipped |
 | **M3 Foundations** | 0.9.0 | Architecture wave 1: carrier and operator traits, numerical sparse types with Krylov and multigrid solvers, compensated arithmetic and outward rounding, `const` and WGSL lowering | Wave 1 exit gate in the specification, with the baseline tests unchanged |
 | **M4 Geometry** | 1.0.0 | Wave 2: multi-representation CAD (B-Rep, NURBS, SDF), exact offsets, a file-format hub, differentiable CAD; extends the exact CAD and solid meshes already shipped | Wave 2 exit gate |
@@ -75,9 +74,9 @@ engineering-standards sweep (`missing_docs`, property tests, runnable examples) 
 In order. Each item starts with a failing test and ends with a ledger update.
 
 1. ~~`F7` Poisson Dirichlet lifting, `F8` B-spline end point, `F10` rank and exponential, `F5` float hashing, `B13` Smith normal form, `B15` Shirshov factorisation~~ (done, 19 Nov 2026).
-2. **`B16`** surreal ordering without the `f64` shortcut; fold the two surreal engines into one (design debt).
-3. **`C16`** polynomial systems: branch over the roots of each elimination level; later a rational univariate representation.
-4. **`A14`** Betti numbers by boundary-matrix ranks over the rationals (a circle must give `[1, 1]`), then `A13` equivalence classification.
+2. ~~`B16` exact surreal values, `C16` polynomial systems by branching, `A14` exact Betti numbers~~ (done, 19 Nov 2026; a Conway normal form for true transfinite numbers and a rational univariate representation remain as design work).
+3. **`A13`** equivalence classification that actually separates syntactic identity, algebraic equality and the other tiers.
+4. Unify the two surreal engines (`algebra-advanced`, `cat-numbers`) behind one exact representation.
 5. The read-confirmed small items: `B17` (Colombeau products), `B18` (tangent functor rules for every operation), `B19` (dimension of `^` and calls), `C17` (domain categories).
 6. The rest of `F5` and `F10`, then the verification pass below.
 7. The verification pass: `A15`, `A16`, the rest of `B20`, Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.

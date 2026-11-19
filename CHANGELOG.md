@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: `SimplicialComplex::betti_numbers` is exact (a circle is `[1, 1]`; it was `[1, 0]`) and `add_simplex` treats its input as a set; `SurrealNo` carries exact dyadic values and orders by them (the `f64` midpoint shortcut mis-ordered numbers such as `{0 | 3} = 1`); `PolynomialSystemSolver` branches over the roots at every level (`x^2 - y = 0, y^2 - 1 = 0` had no solutions, now four).
 - Fixed: `solve_poisson_fem_1d` ignored non-zero Dirichlet values; the clamped B-spline basis was zero at its end point; `matrix_rank` of `[[0, 1], [0, 0]]` was 0 and `matrix_exponential` was unscaled (garbage for `e^{-50 I}`); `0.0` and `-0.0` (and NaNs with different payloads) were different numbers; the Smith normal form of `diag(2, 3)` was `[2, 3]` instead of `[1, 6]` (now `i128` with checked arithmetic); the Shirshov factorisation took the shortest suffix.
 - Documentation reorganised into a master plan (`docs/PLANNING.md`), a design (`docs/DESIGN.md`) and a defect ledger (`docs/LEDGER.md`), with `docs/specs/` and `docs/audits/` for specifications and historical evidence; a documentation map (`docs/README.md`); the ledger's colliding ids renamed (`R1`–`R13`); relative links throughout; the test counts refreshed.
 - Integration: `P(x) * (a x + b)^e` for a polynomial `P` and a non-integer rational `e` (`x * sqrt(x + 1)`, `x / sqrt(x + 1)`, `x^2 * (x + 1)^(3/2)`, ...) by exact substitution; it used to be an error.

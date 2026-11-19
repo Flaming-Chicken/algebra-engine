@@ -711,6 +711,18 @@ impl OperationExecutor {
                     for (k, v) in bindings {
                         eval_bindings.insert(k.clone(), *v);
                     }
+                    // An explicit number of digits other than the default 15 (`N(pi, 50)`) is evaluated at that
+                    // precision: arbitrary-precision arithmetic for constant expressions.
+                    if let Some(d) = precision_digits
+                        && *d != 15
+                        && eval_bindings.is_empty()
+                        && bindings.is_empty()
+                        && let Ok(text) = crate::bigfloat::evaluate(graph, expr_id, *d)
+                    {
+                        let mut res = OperationResult::success(text.clone(), text.clone(), text);
+                        res.metadata.insert("digits".to_string(), d.to_string());
+                        return res;
+                    }
                     let p = precision_digits.unwrap_or(ctx.precision_digits);
                     let eval_ctx = EvalContext::with_bindings(p, eval_bindings.clone())
                         .with_uncertainties(ctx.uncertainties.clone())

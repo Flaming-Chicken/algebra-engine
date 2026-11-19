@@ -1497,3 +1497,83 @@ fn series_at_infinity_agree_with_the_function_for_large_x() {
         "x^(-1) - x^(-2) + x^(-3) - x^(-4)"
     );
 }
+
+#[test]
+fn linear_recurrences_have_closed_forms_that_reproduce_the_sequence() {
+    // Each case: the recurrence text with its initial values, and the same recurrence iterated here in f64.
+    type Step = fn(&[f64], usize) -> f64;
+    type Case<'a> = (&'a str, &'a [(i64, f64)], Step);
+    let cases: [Case; 10] = [
+        ("a(n+2) = a(n+1) + a(n)", &[(0, 0.0), (1, 1.0)], |a, _| {
+            a[a.len() - 1] + a[a.len() - 2]
+        }),
+        ("a(n+1) = 2*a(n) + 1", &[(0, 0.0)], |a, _| {
+            2.0 * a[a.len() - 1] + 1.0
+        }),
+        (
+            "a(n+2) = 5*a(n+1) - 6*a(n)",
+            &[(0, 1.0), (1, 0.0)],
+            |a, _| 5.0 * a[a.len() - 1] - 6.0 * a[a.len() - 2],
+        ),
+        (
+            "a(n+2) = 4*a(n+1) - 4*a(n)",
+            &[(0, 1.0), (1, 3.0)],
+            |a, _| 4.0 * a[a.len() - 1] - 4.0 * a[a.len() - 2],
+        ),
+        ("a(n+1) = a(n) + n", &[(0, 0.0)], |a, i| {
+            a[a.len() - 1] + (i as f64 - 1.0)
+        }),
+        ("a(n+1) = 2*a(n) + 3^n", &[(0, 1.0)], |a, i| {
+            2.0 * a[a.len() - 1] + 3f64.powi(i as i32 - 1)
+        }),
+        ("a(n+1) = 2*a(n) + 2^n", &[(0, 1.0)], |a, i| {
+            2.0 * a[a.len() - 1] + 2f64.powi(i as i32 - 1)
+        }),
+        ("a(n+2) = 2*a(n+1) - a(n)", &[(0, 1.0), (1, 3.0)], |a, _| {
+            2.0 * a[a.len() - 1] - a[a.len() - 2]
+        }),
+        ("a(n+2) = -a(n)", &[(0, 1.0), (1, 0.0)], |a, _| {
+            -a[a.len() - 2]
+        }),
+        (
+            "a(n+3) = 6*a(n+2) - 11*a(n+1) + 6*a(n)",
+            &[(0, 0.0), (1, 1.0), (2, 2.0)],
+            |a, _| 6.0 * a[a.len() - 1] - 11.0 * a[a.len() - 2] + 6.0 * a[a.len() - 3],
+        ),
+    ];
+    for (recurrence, initial, step) in cases {
+        let conditions: Vec<String> = initial.iter().map(|(i, v)| format!("a({i})={v}")).collect();
+        let out = run(&format!("rsolve {recurrence}, {}", conditions.join(", ")));
+        let closed = out
+            .strip_prefix("a(n) = ")
+            .unwrap()
+            .replace('·', "*")
+            .replace('√', "sqrt");
+        let mut terms: Vec<f64> = initial.iter().map(|(_, v)| *v).collect();
+        while terms.len() < 16 {
+            let next = step(&terms, terms.len());
+            terms.push(next);
+        }
+        for (n, expected) in terms.iter().enumerate() {
+            let got = value(&closed, &[("n", &n.to_string())]);
+            assert!(
+                (got - expected).abs() < 1e-6 * expected.abs().max(1.0),
+                "{recurrence}: a({n}) = {got}, iterated {expected} ({out})"
+            );
+        }
+    }
+    // Exact forms.
+    assert_eq!(run("rsolve a(n+1) = 3*a(n), a(0)=2"), "a(n) = 2 · 3^n");
+    assert_eq!(run("rsolve(a(n) = 2*a(n-1) + 1, a(0)=0)"), "a(n) = 2^n - 1");
+    assert_eq!(run("rsolve a(n+1) = a(n) + 2*n + 1, a(0)=0"), "a(n) = n^2");
+    assert_eq!(
+        run("rsolve a(n+2) = 2*a(n+1) - a(n), a(0)=1, a(1)=3"),
+        "a(n) = 2 · n + 1"
+    );
+    // Too few initial values is an error.
+    assert!(
+        UraeSession::new()
+            .execute_line("rsolve a(n+2) = a(n+1) + a(n), a(0)=0")
+            .is_error
+    );
+}

@@ -1244,3 +1244,84 @@ fn elementary_identities_are_applied_to_plain_expressions() {
         }
     }
 }
+
+#[test]
+fn kron_diagonalize_and_singular_values() {
+    let (a, b, c, d) = (
+        vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+        vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+        vec![vec![2.0, 0.0], vec![1.0, 1.0]],
+        vec![vec![1.0, -1.0], vec![0.0, 3.0]],
+    );
+    // kron against its definition, and the mixed-product property (A x B)(C x D) = AC x BD.
+    let kron = |x: &[Vec<f64>], y: &[Vec<f64>]| -> Vec<Vec<f64>> {
+        (0..x.len() * y.len())
+            .map(|i| {
+                (0..x[0].len() * y[0].len())
+                    .map(|j| x[i / y.len()][j / y[0].len()] * y[i % y.len()][j % y[0].len()])
+                    .collect()
+            })
+            .collect()
+    };
+    let shown = |m: &[Vec<f64>]| literal(m);
+    assert_eq!(
+        grid(&run(&format!("kron({}, {})", shown(&a), shown(&b)))),
+        kron(&a, &b)
+    );
+    let left = mat_mul(&kron(&a, &b), &kron(&c, &d));
+    let right = kron(&mat_mul(&a, &c), &mat_mul(&b, &d));
+    assert_eq!(left, right);
+    // diagonalize: A = P D P^-1 for matrices with rational eigenvalues.
+    for m in [
+        vec![vec![2.0, 1.0], vec![1.0, 2.0]],
+        vec![vec![4.0, 1.0], vec![2.0, 3.0]],
+        vec![vec![2.0, 0.0], vec![0.0, 3.0]],
+    ] {
+        let out = run(&format!("diagonalize({})", literal(&m)));
+        let body = out.split("   [").next().unwrap();
+        let (p_text, d_text) = body
+            .trim_start_matches("P = ")
+            .split_once(", D = ")
+            .unwrap();
+        let (p, dd) = (grid(p_text), grid(d_text));
+        let inverse = grid(&run(&format!("{}^-1", literal(&p))));
+        let rebuilt = mat_mul(&mat_mul(&p, &dd), &inverse);
+        for i in 0..2 {
+            for j in 0..2 {
+                assert!((rebuilt[i][j] - m[i][j]).abs() < 1e-12, "{out}");
+            }
+        }
+    }
+    // A defective matrix is an error, not a wrong factorisation.
+    assert!(
+        UraeSession::new()
+            .execute_line("diagonalize([[1,1],[0,1]])")
+            .is_error
+    );
+    // Singular values: their product is |det A| and the sum of squares is the squared Frobenius norm.
+    for m in [
+        vec![vec![3.0, 0.0], vec![0.0, 4.0]],
+        vec![vec![1.0, 2.0], vec![3.0, 4.0]],
+        vec![vec![2.0, -1.0], vec![5.0, 7.0]],
+    ] {
+        let out = run(&format!("svd({})", literal(&m)));
+        let list = out
+            .trim_start_matches("singular values = ")
+            .trim_matches(|ch| ch == '[' || ch == ']');
+        let values: Vec<f64> = list
+            .split(", ")
+            .map(|s| value(&s.replace('√', "sqrt").replace('·', "*"), &[]))
+            .collect();
+        let det = m[0][0] * m[1][1] - m[0][1] * m[1][0];
+        assert!(
+            (values.iter().product::<f64>() - det.abs()).abs() < 1e-9,
+            "{out}"
+        );
+        let frobenius: f64 = m.iter().flatten().map(|v| v * v).sum();
+        assert!(
+            (values.iter().map(|v| v * v).sum::<f64>() - frobenius).abs() < 1e-9,
+            "{out}"
+        );
+        assert!(values[0] >= values[1]);
+    }
+}

@@ -5,6 +5,7 @@
 //! Entries may be symbolic.
 
 use crate::matrix::SymbolicMatrix;
+use crate::numeric::NumericalEval as _;
 use crate::simplify::SymbolicSimplifier;
 use algebra_core::format::{Formatter, UnicodeFormatter};
 use algebra_core::parser::ExprParser;
@@ -20,6 +21,10 @@ enum Value {
 
 const FUNCTIONS: &[&str] = &[
     "transpose",
+    "kron",
+    "diagonalize",
+    "svd",
+    "singular_values",
     "inverse",
     "inv",
     "det",
@@ -547,6 +552,117 @@ impl<'g> Evaluator<'g> {
                     .collect();
                 Ok(Value::Text(format!("[{}]", texts.join(", "))))
             }
+            "kron" => {
+                let a = self.matrix_arg(first)?;
+                let b = self.matrix_arg(args.get(1).ok_or("kron(A, B) needs two matrices")?)?;
+                let (rows, cols) = (a.rows * b.rows, a.cols * b.cols);
+                let mut elements = Vec::with_capacity(rows * cols);
+                for i in 0..rows {
+                    for j in 0..cols {
+                        let (ai, bi) = (i / b.rows, i % b.rows);
+                        let (aj, bj) = (j / b.cols, j % b.cols);
+                        elements.push(
+                            self.graph
+                                .mul([a.elements[ai * a.cols + aj], b.elements[bi * b.cols + bj]]),
+                        );
+                    }
+                }
+                Ok(Value::Matrix(
+                    SymbolicMatrix::new(rows, cols, elements).map_err(err)?,
+                    false,
+                ))
+            }
+            "diagonalize" => {
+                let m = self.matrix_arg(first)?;
+                let n = m.rows;
+                let pairs = m.eigenvectors(self.graph).map_err(err)?;
+                // One eigenvector per column, in the order of the eigenvalues, with every eigenspace basis vector used.
+                let mut columns: Vec<Vec<ExprId>> = Vec::new();
+                let mut values: Vec<ExprId> = Vec::new();
+                for (value, vector) in &pairs {
+                    columns.push(vector.clone());
+                    values.push(*value);
+                }
+                if columns.len() != n || columns.iter().any(|c| c.len() != n) {
+                    return Err("the matrix is not diagonalizable over the available eigenvalues (not enough independent eigenvectors)".into());
+                }
+                let mut p_elements = vec![self.graph.integer(0); n * n];
+                for (j, column) in columns.iter().enumerate() {
+                    for (i, &e) in column.iter().enumerate() {
+                        p_elements[i * n + j] = e;
+                    }
+                }
+                let p = SymbolicMatrix::new(n, n, p_elements).map_err(err)?;
+                let mut d_elements = vec![self.graph.integer(0); n * n];
+                for (j, &v) in values.iter().enumerate() {
+                    d_elements[j * n + j] = v;
+                }
+                let d = SymbolicMatrix::new(n, n, d_elements).map_err(err)?;
+                // Check A P = P D exactly before reporting.
+                let left = m.multiply(self.graph, &p).map_err(err)?;
+                let right = p.multiply(self.graph, &d).map_err(err)?;
+                for (x, y) in left.elements.iter().zip(&right.elements) {
+                    let difference = self.simplify(self.graph.sub(*x, *y));
+                    if difference != self.graph.integer(0) {
+                        return Err("the eigenvectors found do not satisfy A P = P D".into());
+                    }
+                }
+                let show = |matrix: &SymbolicMatrix| -> String {
+                    let elements = matrix.elements.iter().map(|&e| self.simplify(e)).collect();
+                    SymbolicMatrix::new(matrix.rows, matrix.cols, elements)
+                        .ok()
+                        .and_then(|m| {
+                            UnicodeFormatter
+                                .format(self.graph, m.to_expr_id(self.graph))
+                                .ok()
+                        })
+                        .unwrap_or_default()
+                };
+                Ok(Value::Text(format!(
+                    "P = {}, D = {}   [A = P D P^-1]",
+                    show(&p),
+                    show(&d)
+                )))
+            }
+            "svd" | "singular_values" => {
+                // Singular values: the square roots of the eigenvalues of A^T A, largest first.
+                let a = self.matrix_arg(first)?;
+                let at = a.transpose(self.graph).map_err(err)?;
+                let gram = if a.rows >= a.cols {
+                    at.multiply(self.graph, &a).map_err(err)?
+                } else {
+                    a.multiply(self.graph, &at).map_err(err)?
+                };
+                let eigenvalues = gram.eigenvalues(self.graph).map_err(err)?;
+                let mut roots: Vec<(f64, ExprId)> = Vec::new();
+                for e in eigenvalues {
+                    let simplified = self.simplify(e);
+                    let numeric = self
+                        .graph
+                        .evalf(simplified, &crate::numeric::EvalContext::default())
+                        .map(|v| v.to_f64())
+                        .map_err(err)?;
+                    let root = self.simplify(self.graph.function("sqrt", [simplified]));
+                    roots.push((numeric.max(0.0).sqrt(), root));
+                }
+                roots.sort_by(|x, y| y.0.total_cmp(&x.0));
+                let texts: Vec<String> = roots
+                    .iter()
+                    .map(|(_, r)| {
+                        crate::complex_exact::simplify_text(self.graph, *r).unwrap_or_else(|| {
+                            crate::radical::evaluate(self.graph, *r)
+                                .map(|rad| rad.format())
+                                .unwrap_or_else(|| {
+                                    UnicodeFormatter.format(self.graph, *r).unwrap_or_default()
+                                })
+                        })
+                    })
+                    .collect();
+                Ok(Value::Text(format!(
+                    "singular values = [{}]",
+                    texts.join(", ")
+                )))
+            }
             "eigenvectors" => {
                 let pairs = self
                     .matrix_arg(first)?
@@ -670,7 +786,14 @@ pub fn evaluate(graph: &ExprGraph, input: &str) -> Option<Result<String, String>
         Err(e) => {
             // An input that merely contains brackets (a list in a command, say) is not ours; real arithmetic
             // mistakes (a size mismatch) are reported.
-            return if e.contains("dimension") || e.contains("Dimension") || e.contains("cannot") {
+            let is_call = FUNCTIONS
+                .iter()
+                .any(|f| input.trim().starts_with(&format!("{f}(")));
+            return if is_call
+                || e.contains("dimension")
+                || e.contains("Dimension")
+                || e.contains("cannot")
+            {
                 Some(Err(e))
             } else {
                 None

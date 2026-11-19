@@ -40,6 +40,7 @@ pub mod html_export;
 pub mod hyperop;
 pub mod iga;
 pub mod interconnect;
+pub mod intlist;
 pub mod lagrange;
 pub mod lemma_miner;
 pub mod lifting;

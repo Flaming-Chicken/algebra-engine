@@ -726,6 +726,30 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
         "fit" | "polyfit" => fit(graph, args),
         "mean" | "average" | "median" | "variance" | "var" | "pvariance" | "stddev" | "std"
         | "sd" | "pstddev" | "min" | "max" => statistics(graph, name, args),
+        "divmod" | "floordiv" | "digits" | "egcd" | "crt" | "continued_fraction"
+        | "convergents" => {
+            let mut parsed: Vec<Vec<Q>> = Vec::new();
+            for arg in args {
+                let text = arg.trim();
+                if text.starts_with('[') {
+                    parsed.push(
+                        list_items(text)
+                            .iter()
+                            .map(|i| exact(graph, i))
+                            .collect::<Result<_, _>>()?,
+                    );
+                } else {
+                    parsed.push(vec![exact(graph, text)?]);
+                }
+            }
+            let scalar = |i: usize| -> Result<Q, String> {
+                parsed
+                    .get(i)
+                    .and_then(|v| v.first().cloned())
+                    .ok_or_else(|| format!("{name} needs more arguments"))
+            };
+            crate::intlist::run(name, &parsed, scalar).map(NumericOutput::Text)
+        }
         other => Err(format!("unknown numerical command {other}")),
     }
 }
@@ -745,6 +769,13 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "pvariance" => "pvariance",
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
+        "divmod" => "divmod",
+        "floordiv" => "floordiv",
+        "digits" => "digits",
+        "egcd" | "xgcd" => "egcd",
+        "crt" | "chinese_remainder" => "crt",
+        "continued_fraction" | "cfrac" | "contfrac" => "continued_fraction",
+        "convergents" => "convergents",
         _ => return None,
     })
 }

@@ -190,3 +190,138 @@ fn huge_arguments_are_refused_not_hung() {
         assert!(started.elapsed().as_secs_f64() < 60.0, "{q} took too long");
     }
 }
+
+fn ints(text: &str) -> Vec<i128> {
+    let inner = text
+        .rsplit_once('[')
+        .map(|(_, r)| r)
+        .or_else(|| text.rsplit_once('(').map(|(_, r)| r))
+        .unwrap_or(text);
+    inner
+        .split(|c: char| !(c.is_ascii_digit() || c == '-'))
+        .filter(|s| !s.is_empty() && *s != "-")
+        .map(|s| s.parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn list_valued_functions_satisfy_their_defining_identities() {
+    // divmod: a = q b + r with r in [0, b) for b > 0 and in (b, 0] for b < 0.
+    for (a, b) in [
+        (17i128, 5i128),
+        (-17, 5),
+        (17, -5),
+        (-17, -5),
+        (0, 3),
+        (5, 17),
+    ] {
+        let v = ints(
+            &run(&format!("divmod({a}, {b})"))
+                .split_once('=')
+                .unwrap()
+                .1
+                .replace(' ', ""),
+        );
+        let (q, r) = (v[0], v[1]);
+        assert_eq!(q * b + r, a, "divmod({a}, {b})");
+        assert!(if b > 0 {
+            (0..b).contains(&r)
+        } else {
+            (b + 1..=0).contains(&r)
+        });
+    }
+    assert_eq!(run("17 // 5"), "17 // 5 = 3");
+    assert_eq!(run("-17 // 5"), "-17 // 5 = -4");
+    assert_eq!(run("7/2 // 1/2"), "7/2 // 1/2 = 7");
+    // digits reassemble the number in every base.
+    for (n, base) in [
+        (1234i128, 10i128),
+        (255, 2),
+        (255, 16),
+        (0, 10),
+        (987_654_321_012, 7),
+    ] {
+        let text = run(&format!("digits({n}, {base})"));
+        let d = ints(text.split_once('=').unwrap().1.trim());
+        assert!(d.iter().all(|&x| (0..base).contains(&x)));
+        assert_eq!(d.iter().fold(0i128, |acc, &x| acc * base + x), n, "{text}");
+    }
+    // egcd: Bezout's identity and gcd by an independent loop.
+    for (a, b) in [(240i128, 46i128), (17, 5), (-12, 18), (0, 7), (35, 49)] {
+        let text = run(&format!("egcd({a}, {b})"));
+        let v = ints(
+            &text
+                .split_once('=')
+                .unwrap()
+                .1
+                .split('[')
+                .next()
+                .unwrap()
+                .replace(' ', ""),
+        );
+        assert_eq!(a * v[1] + b * v[2], v[0], "{text}");
+        assert_eq!(v[0], gcd(a, b));
+    }
+    // crt against a brute-force search, including non-coprime moduli and an inconsistent system.
+    for (r, m) in [
+        (vec![2i128, 3, 2], vec![3i128, 5, 7]),
+        (vec![1, 3], vec![4, 6]),
+        (vec![0, 0], vec![6, 10]),
+    ] {
+        let lcm = m.iter().fold(1i128, |l, &x| l / gcd(l, x) * x);
+        let expected = (0..lcm).find(|x| {
+            r.iter()
+                .zip(&m)
+                .all(|(r, m)| x.rem_euclid(*m) == r.rem_euclid(*m))
+        });
+        let text = run(&format!("crt({:?}, {:?})", r, m));
+        let v = ints(
+            &text
+                .replace(' ', "")
+                .replace("crt=", "")
+                .replace("(mod", ",")
+                .replace(')', ""),
+        );
+        assert_eq!(Some(v[0]), expected, "{text}");
+        assert_eq!(v[1], lcm);
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("crt([1, 2], [4, 6])")
+            .is_error
+    );
+    // continued fractions: the terms rebuild the rational; consecutive convergents have determinant +-1.
+    for (p, q) in [(415i128, 93i128), (355, 113), (-7, 3), (5, 1), (1, 7)] {
+        let text = run(&format!("continued_fraction({p}/{q})"));
+        let terms = ints(&text.replace(';', ","));
+        let (mut n, mut d) = (terms[terms.len() - 1], 1i128);
+        for &a in terms[..terms.len() - 1].iter().rev() {
+            (n, d) = (a * n + d, n);
+        }
+        assert_eq!(n * q, p * d, "{text}");
+        let convergents = run(&format!("convergents({p}/{q})"));
+        let parts: Vec<(i128, i128)> = convergents
+            .split_once('[')
+            .unwrap()
+            .1
+            .trim_end_matches(']')
+            .split(", ")
+            .map(|s| match s.split_once('/') {
+                Some((a, b)) => (a.parse().unwrap(), b.parse().unwrap()),
+                None => (s.parse().unwrap(), 1),
+            })
+            .collect();
+        for w in parts.windows(2) {
+            assert_eq!(
+                (w[1].0 * w[0].1 - w[0].0 * w[1].1).abs(),
+                1,
+                "{convergents}"
+            );
+        }
+        let last = parts[parts.len() - 1];
+        assert_eq!(last.0 * q, p * last.1);
+    }
+    // Integer factorisation by the plain name, and the spelling without an underscore.
+    assert!(run("factor(360)").starts_with("360 = 2^3 * 3^2 * 5"));
+    assert!(run("primefactors(360)").starts_with("360 = 2^3 * 3^2 * 5"));
+}

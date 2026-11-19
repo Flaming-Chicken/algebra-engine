@@ -1642,6 +1642,13 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "pvariance" => "pvariance",
         "stddev" => "stddev",
         "pstddev" => "pstddev",
+        "divmod" => "divmod",
+        "floordiv" => "floordiv",
+        "digits" => "digits",
+        "egcd" | "xgcd" => "egcd",
+        "crt" | "chinese_remainder" => "crt",
+        "continued_fraction" | "cfrac" | "contfrac" => "continued_fraction",
+        "convergents" => "convergents",
         _ => return None,
     })
 }
@@ -1685,6 +1692,13 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
             }
         }
     }
+    // `a // b`: floor division.
+    if let Some((a, b)) = input.split_once(" // ")
+        && !a.trim().is_empty()
+        && !b.trim().is_empty()
+    {
+        return Some(format!("numcmd floordiv {}, {}", a.trim(), b.trim()));
+    }
     // `a mod b`
     if let Some((a, b)) = input.split_once(" mod ")
         && !a.contains(char::is_whitespace)
@@ -1720,7 +1734,21 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
     let canonical = match name.to_ascii_lowercase().as_str() {
         "series" | "taylor" | "maclaurin" => "series",
         "is_prime" | "isprime" => "is_prime",
-        "factorint" | "factor_integer" | "prime_factors" | "prime_factorization" => "prime_factors",
+        "factor"
+            if args
+                .trim()
+                .trim_start_matches('-')
+                .chars()
+                .all(|c| c.is_ascii_digit())
+                && !args.trim().is_empty() =>
+        {
+            "prime_factors"
+        }
+        "factorint"
+        | "factor_integer"
+        | "primefactors"
+        | "prime_factors"
+        | "prime_factorization" => "prime_factors",
         "partial_fractions" | "apart" | "partfrac" => "partial_fractions",
         "inv" | "inverse" | "matrix_inverse" => "inv",
         "det" | "determinant" => "det",

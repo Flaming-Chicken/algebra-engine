@@ -18,7 +18,7 @@ enum Value {
     Text(String),
 }
 
-const FUNCTIONS: [&str; 19] = [
+const FUNCTIONS: &[&str] = &[
     "transpose",
     "inverse",
     "inv",
@@ -38,6 +38,11 @@ const FUNCTIONS: [&str; 19] = [
     "qr",
     "solve_linear",
     "norm",
+    "distance",
+    "midpoint",
+    "angle",
+    "triangle_area",
+    "slope",
 ];
 
 fn depth_zero_positions(s: &str, targets: &[char]) -> Vec<usize> {
@@ -398,6 +403,114 @@ impl<'g> Evaluator<'g> {
             "trace" => Ok(Value::Scalar(
                 self.matrix_arg(first)?.trace(self.graph).map_err(err)?,
             )),
+            "distance" => {
+                let (a, b) = (
+                    self.matrix_arg(first)?,
+                    self.matrix_arg(args.get(1).ok_or("two points are needed")?)?,
+                );
+                if a.elements.len() != b.elements.len() {
+                    return Err("the points need the same dimension".into());
+                }
+                let squares: Vec<ExprId> = a
+                    .elements
+                    .iter()
+                    .zip(&b.elements)
+                    .map(|(&x, &y)| self.graph.pow(self.graph.sub(x, y), self.graph.integer(2)))
+                    .collect();
+                Ok(Value::Scalar(
+                    self.graph.function("sqrt", [self.graph.add(squares)]),
+                ))
+            }
+            "midpoint" => {
+                let (a, b) = (
+                    self.matrix_arg(first)?,
+                    self.matrix_arg(args.get(1).ok_or("two points are needed")?)?,
+                );
+                if a.elements.len() != b.elements.len() {
+                    return Err("the points need the same dimension".into());
+                }
+                let elements: Vec<ExprId> = a
+                    .elements
+                    .iter()
+                    .zip(&b.elements)
+                    .map(|(&x, &y)| {
+                        self.graph
+                            .div(self.graph.add([x, y]), self.graph.integer(2))
+                    })
+                    .collect();
+                let n = elements.len();
+                Ok(Value::Matrix(
+                    SymbolicMatrix::new(1, n, elements).map_err(err)?,
+                    false,
+                ))
+            }
+            "slope" => {
+                let (a, b) = (
+                    self.matrix_arg(first)?,
+                    self.matrix_arg(args.get(1).ok_or("two points are needed")?)?,
+                );
+                if a.elements.len() != 2 || b.elements.len() != 2 {
+                    return Err("slope needs two points in the plane".into());
+                }
+                Ok(Value::Scalar(self.graph.div(
+                    self.graph.sub(b.elements[1], a.elements[1]),
+                    self.graph.sub(b.elements[0], a.elements[0]),
+                )))
+            }
+            "angle" => {
+                let (a, b) = (
+                    self.matrix_arg(first)?,
+                    self.matrix_arg(args.get(1).ok_or("two vectors are needed")?)?,
+                );
+                if a.elements.len() != b.elements.len() {
+                    return Err("the vectors need the same dimension".into());
+                }
+                let two = self.graph.integer(2);
+                let dot = self.graph.add(
+                    a.elements
+                        .iter()
+                        .zip(&b.elements)
+                        .map(|(&x, &y)| self.graph.mul([x, y]))
+                        .collect::<Vec<_>>(),
+                );
+                let norm = |m: &SymbolicMatrix| {
+                    self.graph.function(
+                        "sqrt",
+                        [self.graph.add(
+                            m.elements
+                                .iter()
+                                .map(|&e| self.graph.pow(e, two))
+                                .collect::<Vec<_>>(),
+                        )],
+                    )
+                };
+                let cosine = self.graph.div(dot, self.graph.mul([norm(&a), norm(&b)]));
+                Ok(Value::Scalar(self.graph.function("acos", [cosine])))
+            }
+            "triangle_area" => {
+                let points: Vec<SymbolicMatrix> = args
+                    .iter()
+                    .map(|a| self.matrix_arg(a))
+                    .collect::<Result<_, _>>()?;
+                if points.len() != 3 || points.iter().any(|p| p.elements.len() != 2) {
+                    return Err("triangle_area needs three points in the plane".into());
+                }
+                let (a, b, c) = (
+                    &points[0].elements,
+                    &points[1].elements,
+                    &points[2].elements,
+                );
+                let cross = self.graph.sub(
+                    self.graph
+                        .mul([self.graph.sub(b[0], a[0]), self.graph.sub(c[1], a[1])]),
+                    self.graph
+                        .mul([self.graph.sub(b[1], a[1]), self.graph.sub(c[0], a[0])]),
+                );
+                Ok(Value::Scalar(self.graph.div(
+                    self.graph.function("abs", [cross]),
+                    self.graph.integer(2),
+                )))
+            }
             "norm" => {
                 let m = self.matrix_arg(first)?;
                 let squares: Vec<ExprId> = m
@@ -543,6 +656,8 @@ fn looks_like_matrix_arithmetic(input: &str) -> bool {
 
 /// Evaluate matrix arithmetic; `None` if `input` is not matrix arithmetic (or uses something outside it).
 pub fn evaluate(graph: &ExprGraph, input: &str) -> Option<Result<String, String>> {
+    let converted = tuples_to_lists(input);
+    let input = converted.as_str();
     if !looks_like_matrix_arithmetic(input) {
         return None;
     }
@@ -575,4 +690,57 @@ pub fn evaluate(graph: &ExprGraph, input: &str) -> Option<Result<String, String>
                 .unwrap_or_default()
         }
     }))
+}
+
+/// `distance((0,0),(3,4))`: a parenthesised group with a top-level comma that is not a call is a point.
+fn tuples_to_lists(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let call = i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_');
+        if c == '(' && !call {
+            // The matching bracket and whether a comma sits at its own depth.
+            let (mut depth, mut j, mut comma) = (0i32, i, false);
+            while j < chars.len() {
+                match chars[j] {
+                    '(' | '[' | '{' => depth += 1,
+                    ')' | ']' | '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    ',' if depth == 1 => comma = true,
+                    _ => {}
+                }
+                j += 1;
+            }
+            if comma && j < chars.len() {
+                let inner: String = chars[i + 1..j].iter().collect();
+                out.push('[');
+                out.push_str(&tuples_to_lists(&inner));
+                out.push(']');
+                i = j + 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// Whether `input` is a call of one of the geometry functions (which accept points written `(x, y)`).
+pub fn is_geometry_call(input: &str) -> bool {
+    [
+        "distance(",
+        "midpoint(",
+        "slope(",
+        "angle(",
+        "triangle_area(",
+    ]
+    .iter()
+    .any(|f| input.trim().starts_with(f))
 }

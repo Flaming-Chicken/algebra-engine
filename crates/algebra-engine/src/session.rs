@@ -387,6 +387,7 @@ impl UraeSession {
 
         // Matrix arithmetic typed as plain input (`A + B`, `2*A`, `A * v`, `det(inverse(A))`, `identity(3)`).
         if (trimmed.contains('[')
+            || crate::matexpr::is_geometry_call(trimmed)
             || ["identity(", "eye(", "zeros(", "ones("]
                 .iter()
                 .any(|f| trimmed.starts_with(f)))

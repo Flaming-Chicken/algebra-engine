@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: closed-form integration of a polynomial times `exp`, `sin` or `cos` of a linear argument (tabular integration by parts: `x*exp(-x)`, `x^2*exp(3*x)`, `x*sin(2*x)`), of `exp(u)*sin(v)` and `exp(u)*cos(v)`, of products of two sines and cosines of linear arguments (`sin(x)*cos(2*x)`) and of `abs(a*x + b)`. These were errors ("Multi-factor product integration not matched"). Every result is checked by differentiating it.
 - Fixed: a bare matrix or vector literal (`[[1,2],[3,4]]`, `[1,2,3]`) was echoed as `matrix(row(matrix(row(1, 2)), ...))`; it now prints as a grid.
 - Added: integer functions `totient`, `next_prime`, `prev_prime`, `divisors`, `sigma`, `tau`, `mobius`, `mod_inverse`, `pow_mod` and `primitive_root`, as calls (`totient(36)`) or commands (`totient 36`); previously `nextprime(100)` and `totient(36)` were echoed back unevaluated.
 - Fixed: the same product printed differently depending on what had been typed earlier in the session (`C1 · cos(x)` or `cos(x) · C1`), because the stored factor order follows the order symbols were first seen; products of commutative scalar factors now print in a fixed order (numbers, symbols and powers by name, functions by name). A product of two matrix literals (`[[1,2],[3,4]]*[[0,1],[1,0]]`) is evaluated as a matrix product instead of echoed.

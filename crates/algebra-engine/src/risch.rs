@@ -306,6 +306,10 @@ impl RischIntegrator {
             return Ok(result);
         }
 
+        if let Some(result) = crate::risch_exptrig::integrate_abs(graph, expr, wrt) {
+            return result;
+        }
+
         // 1. Basic Polynomial & Power Check
         let node = graph.get(expr);
         match &node.kind {
@@ -359,7 +363,17 @@ impl RischIntegrator {
                 }
 
                 // Check standard integration-by-parts / u-sub forms
-                let dep_int = Self::integrate_products(graph, &dep_factors, wrt)?;
+                let dep_int = match Self::integrate_products(graph, &dep_factors, wrt) {
+                    Ok(v) => v,
+                    // The hand-written cases did not match: try the general exp/trig families.
+                    Err(e) => crate::risch_exptrig::integrate_exp_trig_product(
+                        graph,
+                        &dep_factors,
+                        wrt,
+                        x,
+                    )
+                    .ok_or(e)?,
+                };
                 if const_factors.is_empty() {
                     Ok(dep_int)
                 } else {

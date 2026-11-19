@@ -28,6 +28,8 @@ mod solver_domain_tests;
 mod special_functions_tests;
 #[path = "engine/topology_betti_tests.rs"]
 mod topology_betti_tests;
+#[path = "engine/usability_probe_tests.rs"]
+mod usability_probe_tests;
 #[path = "engine/zeilberger_proof_tests.rs"]
 mod zeilberger_proof_tests;
 

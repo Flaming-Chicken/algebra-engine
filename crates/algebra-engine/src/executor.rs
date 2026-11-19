@@ -240,6 +240,34 @@ fn describe_solution_domain(
     }
 }
 
+/// `factor 360` is `2^3 * 3^2 * 5`: an integer literal above 1 factors into primes (an integer was returned
+/// unchanged before). `None` for anything that is not such a literal.
+fn integer_prime_factorisation(graph: &ExprGraph, id: ExprId) -> Option<ExprId> {
+    let ExprKind::Number(algebra_core::Number::Integer(n)) = graph.get(id).kind.clone() else {
+        return None;
+    };
+    if n < 2 {
+        return None;
+    }
+    let factors = crate::numbertheory::integer_prime_factors(n as u64);
+    let terms: Vec<ExprId> = factors
+        .into_iter()
+        .map(|(p, e)| {
+            let base = graph.integer(p as i64);
+            if e == 1 {
+                base
+            } else {
+                graph.pow(base, graph.integer(e as i64))
+            }
+        })
+        .collect();
+    Some(match terms.len() {
+        0 => return None,
+        1 => terms[0],
+        _ => graph.mul(terms),
+    })
+}
+
 /// Central mathematical operation execution engine.
 pub struct OperationExecutor;
 
@@ -414,7 +442,27 @@ impl OperationExecutor {
                                 .into_iter()
                                 .next()
                                 .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
-                            match graph.integrate(subbed_id, wrt_sym) {
+                            // Bounds must not be dropped: `integrate f from a to b` is a number, not the
+                            // antiderivative.
+                            let integral = match (lower, upper) {
+                                (Some(l_str), Some(u_str)) => {
+                                    match (parser.parse(l_str), parser.parse(u_str)) {
+                                        (Ok(l_id), Ok(u_id)) => {
+                                            graph.integrate_definite(subbed_id, wrt_sym, l_id, u_id)
+                                        }
+                                        (Err(e), _) | (_, Err(e)) => {
+                                            return OperationResult::error(e.to_string());
+                                        }
+                                    }
+                                }
+                                (None, None) => graph.integrate(subbed_id, wrt_sym),
+                                _ => {
+                                    return OperationResult::error(
+                                        "a definite integral needs both a lower and an upper bound",
+                                    );
+                                }
+                            };
+                            match integral {
                                 Ok(int_id) => {
                                     let simp_id = Simplifier::simplify(graph, int_id)
                                         .unwrap_or_else(|_| graph.simplify(int_id));
@@ -424,13 +472,24 @@ impl OperationExecutor {
                                         latex_fmt.format(graph, simp_id).unwrap_or_default();
                                     let wrt_name =
                                         graph.symbols.resolve(wrt_sym).unwrap_or_default();
-                                    let out = format!("{} (w.r.t {})", unicode, wrt_name);
+                                    let bounds_suffix = match (lower, upper) {
+                                        (Some(l), Some(u)) => format!(" along [{}, {}]", l, u),
+                                        _ => String::new(),
+                                    };
+                                    let out = format!(
+                                        "{} (w.r.t {}{})",
+                                        unicode, wrt_name, bounds_suffix
+                                    );
                                     let mut res = OperationResult::success(out.clone(), latex, out);
                                     res.root_expr = Some(simp_id);
                                     res
                                 }
                                 Err(e) => OperationResult::error(e.to_string()),
                             }
+                        } else if lower.is_some() || upper.is_some() {
+                            OperationResult::error(
+                                "the integrand has several variables: say which one to integrate over, for example `integrate(f, x, a, b)` or `integrate f dx from a to b`",
+                            )
                         } else {
                             let mut lines = Vec::new();
                             for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
@@ -535,9 +594,8 @@ impl OperationExecutor {
                         SimplifyStrategy::Expand => {
                             AlgebraicTransformations::expand(graph, expr_id)
                         }
-                        SimplifyStrategy::Factor => {
-                            AlgebraicTransformations::factor(graph, expr_id)
-                        }
+                        SimplifyStrategy::Factor => integer_prime_factorisation(graph, expr_id)
+                            .unwrap_or_else(|| AlgebraicTransformations::factor(graph, expr_id)),
                         SimplifyStrategy::Together => {
                             AlgebraicTransformations::together(graph, expr_id)
                         }

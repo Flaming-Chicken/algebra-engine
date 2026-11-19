@@ -72,7 +72,13 @@ pub struct RationalEllipticCurve {
 
 impl RationalEllipticCurve {
     pub fn new(a: i64, b: i64) -> AlgebraResult<Self> {
-        let disc = Self::compute_discriminant(a, b);
+        let Some(disc) = Self::checked_discriminant(a, b) else {
+            return Err(AlgebraError::DomainViolation {
+                domain: "RationalEllipticCurve".to_string(),
+                reason: "the coefficients are too large: the discriminant does not fit in 128 bits"
+                    .to_string(),
+            });
+        };
         if disc == 0 {
             return Err(AlgebraError::DomainViolation {
                 domain: "RationalEllipticCurve".to_string(),
@@ -89,9 +95,15 @@ impl RationalEllipticCurve {
     }
 
     fn compute_discriminant(a: i64, b: i64) -> i128 {
-        let a = a as i128;
-        let b = b as i128;
-        -16 * (4 * a * a * a + 27 * b * b)
+        // `new` has checked that this does not overflow.
+        Self::checked_discriminant(a, b).unwrap_or(i128::MAX)
+    }
+
+    fn checked_discriminant(a: i64, b: i64) -> Option<i128> {
+        let (a, b) = (a as i128, b as i128);
+        let a3 = a.checked_mul(a)?.checked_mul(a)?.checked_mul(4)?;
+        let b2 = b.checked_mul(b)?.checked_mul(27)?;
+        a3.checked_add(b2)?.checked_mul(-16)
     }
 
     /// Compute invariants $c_4 = -48a$.
@@ -99,14 +111,17 @@ impl RationalEllipticCurve {
         -48 * (self.a as i128)
     }
 
-    /// Identify the bad reduction places (primes dividing $\Delta$) using prime factorization.
-    pub fn bad_reduction_places(&self) -> Vec<u64> {
+    /// Identify the bad reduction places (primes dividing $\Delta$) using prime factorization of the full
+    /// discriminant (which can exceed 64 bits, so the primes are returned as big integers).
+    pub fn bad_reduction_places(&self) -> Vec<num_bigint::BigUint> {
         let disc_abs = self.discriminant().unsigned_abs();
         if disc_abs <= 1 {
             return Vec::new();
         }
-        let factors = algebra_engine::numbertheory::integer_prime_factors(disc_abs as u64);
-        factors.into_iter().map(|(p, _)| p).collect()
+        algebra_engine::numbertheory::big_prime_factors(&num_bigint::BigUint::from(disc_abs))
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect()
     }
 
     /// Determine the reduction type at a given prime place $p$.
@@ -118,11 +133,13 @@ impl RationalEllipticCurve {
         } else {
             let c4 = self.c4();
             if c4 % p_i128 != 0 {
-                // Multiplicative reduction: check if split (tangents in F_p)
-                // For y^2 = x^3 + ax + b, at nodal singularity (x0, 0),
-                // root of 3x0^2 + a in F_p is quadratic residue
-                let split =
-                    p > 2 && algebra_engine::numbertheory::legendre_symbol(-2 * self.a, p) == 1;
+                // Multiplicative reduction is split when the tangents at the node are defined over F_p, which
+                // happens exactly when -c6 is a square mod p, with c6 = -864 b. Since 864 = 6 * 12^2 that is
+                // when 6b is a non-zero square mod p (for odd p; p = 3 has no such short model).
+                let split = p > 3 && {
+                    let six_b = (6 * (self.b as i128)).rem_euclid(p_i128) as i64;
+                    algebra_engine::numbertheory::legendre_symbol(six_b, p) == 1
+                };
                 ReductionType::Multiplicative { split }
             } else {
                 ReductionType::Additive
@@ -133,16 +150,21 @@ impl RationalEllipticCurve {
     /// Compute the Frobenius trace $a_p = p + 1 - \#E(\mathbb{F}_p) = -\sum_{x=0}^{p-1} \left(\frac{x^3+ax+b}{p}\right)$
     /// for an odd prime $p$.
     pub fn frobenius_trace(&self, p: u64) -> Option<i64> {
+        if p < 2 {
+            return None;
+        }
         if p == 2 {
-            // Manual count for F_2:
-            let mut count = 1i64; // point at infinity
-            for x in 0..2 {
-                let rhs = (x * x * x + (self.a % 2 + 2) % 2 * x + (self.b % 2 + 2) % 2) % 2;
-                if rhs == 0 {
-                    count += 1; // (x, 0)
+            // Count the solutions of y^2 = x^3 + ax + b over F_2 directly (the Legendre sum needs odd p).
+            let (a, b) = (self.a.rem_euclid(2), self.b.rem_euclid(2));
+            let mut count = 1i64; // the point at infinity
+            for x in 0..2i64 {
+                for y in 0..2i64 {
+                    if (y * y - (x * x * x + a * x + b)).rem_euclid(2) == 0 {
+                        count += 1;
+                    }
                 }
             }
-            return Some((p as i64) + 1 - count);
+            return Some(3 - count);
         }
 
         let mut sum_legendre = 0i64;
@@ -168,7 +190,77 @@ impl RationalEllipticCurve {
     }
 }
 
-/// Reed-Solomon Code generator structure over finite field.
+/// Arithmetic in $GF(2^8)$ with the primitive polynomial $x^8 + x^4 + x^3 + x^2 + 1$ (0x11d) and primitive element $\alpha = 2$.
+struct Gf256 {
+    exp: [u8; 512],
+    log: [u8; 256],
+}
+
+impl Gf256 {
+    fn new() -> Self {
+        let mut exp = [0u8; 512];
+        let mut log = [0u8; 256];
+        let mut x: u16 = 1;
+        for i in 0..255 {
+            exp[i] = x as u8;
+            log[x as usize] = i as u8;
+            x <<= 1;
+            if x & 0x100 != 0 {
+                x ^= 0x11d;
+            }
+        }
+        for i in 255..512 {
+            exp[i] = exp[i - 255];
+        }
+        Self { exp, log }
+    }
+
+    fn mul(&self, a: u8, b: u8) -> u8 {
+        if a == 0 || b == 0 {
+            0
+        } else {
+            self.exp[self.log[a as usize] as usize + self.log[b as usize] as usize]
+        }
+    }
+
+    fn div(&self, a: u8, b: u8) -> u8 {
+        if a == 0 {
+            0
+        } else {
+            self.exp[self.log[a as usize] as usize + 255 - self.log[b as usize] as usize]
+        }
+    }
+
+    /// $\alpha^e$ for any integer exponent.
+    fn alpha_pow(&self, e: i64) -> u8 {
+        self.exp[e.rem_euclid(255) as usize]
+    }
+
+    /// Evaluate a polynomial given highest-degree coefficient first (Horner).
+    fn eval_high_first(&self, poly: &[u8], x: u8) -> u8 {
+        poly.iter().fold(0, |acc, &c| self.mul(acc, x) ^ c)
+    }
+
+    /// Evaluate a polynomial given lowest-degree coefficient first.
+    fn eval_low_first(&self, poly: &[u8], x: u8) -> u8 {
+        poly.iter().rev().fold(0, |acc, &c| self.mul(acc, x) ^ c)
+    }
+}
+
+/// Why a Reed-Solomon word could not be encoded or decoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReedSolomonError {
+    /// The word or message has the wrong length.
+    WrongLength { expected: usize, found: usize },
+    /// More than `(n - k) / 2` symbols are wrong, so the word cannot be corrected.
+    TooManyErrors,
+}
+
+/// Reed-Solomon code $RS(n, k)$ over $GF(2^8)$ ($n \le 255$) with generator $g(x) = \prod_{i=0}^{n-k-1} (x - \alpha^i)$.
+///
+/// A word is stored as `[message (k symbols), parity (n - k symbols)]`, the first symbol being the coefficient of
+/// $x^{n-1}$. The code is maximum distance separable: its minimum distance is $n - k + 1$, so it corrects
+/// $\lfloor (n - k) / 2 \rfloor$ wrong symbols.
 #[derive(Debug, Clone)]
 pub struct ReedSolomonCode {
     pub n: usize,
@@ -186,11 +278,166 @@ impl ReedSolomonCode {
                 ),
             });
         }
+        if n > 255 || k == 0 {
+            return Err(AlgebraError::DomainViolation {
+                domain: "ReedSolomonCode".to_string(),
+                reason: format!(
+                    "Reed-Solomon over GF(256) needs 1 <= k < n <= 255, got n = {n}, k = {k}"
+                ),
+            });
+        }
         Ok(Self { n, k })
     }
 
     pub fn parity_symbols(&self) -> usize {
         self.n - self.k
+    }
+
+    /// The minimum distance $n - k + 1$ (the Singleton bound is attained).
+    pub fn minimum_distance(&self) -> usize {
+        self.n - self.k + 1
+    }
+
+    /// The number of wrong symbols the decoder is guaranteed to correct.
+    pub fn correctable_errors(&self) -> usize {
+        (self.n - self.k) / 2
+    }
+
+    /// The generator polynomial, lowest degree first (monic, degree `n - k`).
+    fn generator(&self, gf: &Gf256) -> Vec<u8> {
+        let mut g = vec![1u8];
+        for i in 0..self.parity_symbols() {
+            let root = gf.alpha_pow(i as i64);
+            let mut next = vec![0u8; g.len() + 1];
+            for (j, &c) in g.iter().enumerate() {
+                next[j + 1] ^= c; // x * g
+                next[j] ^= gf.mul(c, root); // root * g (minus is plus in characteristic 2)
+            }
+            g = next;
+        }
+        g
+    }
+
+    /// Systematic encoding: the message followed by its `n - k` parity symbols.
+    pub fn encode(&self, message: &[u8]) -> Result<Vec<u8>, ReedSolomonError> {
+        if message.len() != self.k {
+            return Err(ReedSolomonError::WrongLength {
+                expected: self.k,
+                found: message.len(),
+            });
+        }
+        let gf = Gf256::new();
+        let g = self.generator(&gf); // low first, monic
+        let parity = self.parity_symbols();
+        // Remainder of m(x) x^(n-k) modulo g(x), by long division with the message highest degree first.
+        let mut rem = vec![0u8; parity];
+        for &m in message {
+            let feedback = m ^ rem[0];
+            rem.rotate_left(1);
+            rem[parity - 1] = 0;
+            if feedback != 0 {
+                for (i, r) in rem.iter_mut().enumerate() {
+                    // coefficient of x^(parity - 1 - i) in g
+                    *r ^= gf.mul(feedback, g[parity - 1 - i]);
+                }
+            }
+        }
+        let mut word = message.to_vec();
+        word.extend(rem);
+        Ok(word)
+    }
+
+    /// The syndromes $S_j = c(\alpha^j)$, $j = 0, \dots, n - k - 1$; all zero exactly for codewords.
+    pub fn syndromes(&self, word: &[u8]) -> Result<Vec<u8>, ReedSolomonError> {
+        if word.len() != self.n {
+            return Err(ReedSolomonError::WrongLength {
+                expected: self.n,
+                found: word.len(),
+            });
+        }
+        let gf = Gf256::new();
+        Ok((0..self.parity_symbols())
+            .map(|j| gf.eval_high_first(word, gf.alpha_pow(j as i64)))
+            .collect())
+    }
+
+    /// Decode a received word, correcting up to [`Self::correctable_errors`] wrong symbols (Berlekamp–Massey, Chien
+    /// search, Forney's formula), and return the corrected message.
+    pub fn decode(&self, received: &[u8]) -> Result<Vec<u8>, ReedSolomonError> {
+        let syndromes = self.syndromes(received)?;
+        let mut word = received.to_vec();
+        if syndromes.iter().any(|&s| s != 0) {
+            let gf = Gf256::new();
+            let nsym = self.parity_symbols();
+            // Berlekamp–Massey: the error locator polynomial lambda (lowest degree first).
+            let mut lambda = vec![1u8];
+            let mut prev = vec![1u8];
+            let (mut l, mut m, mut b) = (0usize, 1usize, 1u8);
+            for n in 0..nsym {
+                let mut d = syndromes[n];
+                for i in 1..=l.min(lambda.len() - 1) {
+                    d ^= gf.mul(lambda[i], syndromes[n - i]);
+                }
+                if d == 0 {
+                    m += 1;
+                    continue;
+                }
+                let scale = gf.div(d, b);
+                let old = lambda.clone();
+                lambda.resize(lambda.len().max(prev.len() + m), 0);
+                for (i, &c) in prev.iter().enumerate() {
+                    lambda[i + m] ^= gf.mul(scale, c);
+                }
+                if 2 * l <= n {
+                    l = n + 1 - l;
+                    prev = old;
+                    b = d;
+                    m = 1;
+                } else {
+                    m += 1;
+                }
+            }
+            while lambda.len() > 1 && lambda[lambda.len() - 1] == 0 {
+                lambda.pop();
+            }
+            if l > self.correctable_errors() || lambda.len() - 1 != l {
+                return Err(ReedSolomonError::TooManyErrors);
+            }
+            // Chien search: an error at the coefficient of x^p has locator X = alpha^p and lambda(X^-1) = 0.
+            let positions: Vec<usize> = (0..self.n)
+                .filter(|&p| gf.eval_low_first(&lambda, gf.alpha_pow(-(p as i64))) == 0)
+                .collect();
+            if positions.len() != l {
+                return Err(ReedSolomonError::TooManyErrors);
+            }
+            // Forney: omega = S(x) lambda(x) mod x^nsym, error value e = X * omega(X^-1) / lambda'(X^-1).
+            let mut omega = vec![0u8; nsym];
+            for (i, &li) in lambda.iter().enumerate() {
+                for (j, &sj) in syndromes.iter().enumerate() {
+                    if i + j < nsym {
+                        omega[i + j] ^= gf.mul(li, sj);
+                    }
+                }
+            }
+            // Formal derivative in characteristic 2: only the odd-degree terms survive.
+            let derivative: Vec<u8> = (1..lambda.len())
+                .map(|i| if i % 2 == 1 { lambda[i] } else { 0 })
+                .collect();
+            for &p in &positions {
+                let x = gf.alpha_pow(p as i64);
+                let x_inv = gf.alpha_pow(-(p as i64));
+                let denominator = gf.eval_low_first(&derivative, x_inv);
+                if denominator == 0 {
+                    return Err(ReedSolomonError::TooManyErrors);
+                }
+                let value = gf.mul(x, gf.div(gf.eval_low_first(&omega, x_inv), denominator));
+                word[self.n - 1 - p] ^= value;
+            }
+            if self.syndromes(&word)?.iter().any(|&s| s != 0) {
+                return Err(ReedSolomonError::TooManyErrors);
+            }
+        }
+        Ok(word[..self.k].to_vec())
     }
 }
 

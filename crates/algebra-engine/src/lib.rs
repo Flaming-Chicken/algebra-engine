@@ -63,6 +63,7 @@ pub mod quantum_circuit;
 pub mod query;
 pub mod risch;
 mod risch_exptrig;
+mod risch_more;
 pub mod series;
 pub mod session;
 pub mod sets;

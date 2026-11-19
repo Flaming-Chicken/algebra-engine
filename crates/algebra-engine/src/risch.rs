@@ -296,6 +296,19 @@ impl RischIntegrator {
 
     /// Perform full Risch transcendental integration on `expr` with respect to variable `wrt`.
     pub fn integrate(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
+        match Self::integrate_main(graph, expr, wrt) {
+            Ok(v) => Ok(v),
+            // The main rules gave up: try the further families (quadratic radicals, by parts, trigonometric
+            // powers); if none applies, report the original error.
+            Err(e) => {
+                let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
+                let x = graph.symbol(&wrt_name);
+                crate::risch_more::fallback_integral(graph, expr, wrt, x).unwrap_or(Err(e))
+            }
+        }
+    }
+
+    fn integrate_main(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
         let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
         let x = graph.symbol(&wrt_name);
 

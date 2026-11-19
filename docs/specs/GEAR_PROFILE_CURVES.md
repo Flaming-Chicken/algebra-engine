@@ -211,12 +211,12 @@ R(θ) = [[cos(θ), -sin(θ)], [sin(θ), cos(θ)]]
 ```
 
 ### 7.3 Exact CAD Spline, Intrinsic & Spectral Tooth Expansions
-Rather than truncating discrete tooth flanks to polylines (which introduce curvature discontinuities and contact-stress spikes during gear meshing simulation; see Section 9.3), URAE represents gear flanks and fillets in the unified `ExpansionRepresentation` framework ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md) Section 5.9 & Section 7.2):
+Rather than truncating discrete tooth flanks to polylines (which introduce curvature discontinuities and contact-stress spikes during gear meshing simulation; see Section 9.3), URAE represents gear flanks and fillets in the unified `ExpansionRepresentation` framework ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](ARCHITECTURE_SPEC.md) Section 5.9 & Section 7.2):
 
 1. **Exact Rational Bézier & `NURBS` Representation (`CoxDeBoor` / `iga.rs`)**:
    - **Circular Arcs & Pitch Circles**: Represented *exactly* via rational quadratic Bézier segments with middle weight $w_1 = \cos(\Delta\theta / 2)$.
-   - **Involute & Trochoid Segments**: Involutes $\mathbf{r}(\phi) = r_b(\cos\phi + \phi\sin\phi,\, \sin\phi - \phi\cos\phi)$ are not exact low-degree polynomials, so URAE converts them to $C^2$-continuous cubic/quartic `NURBS` patches ([iga.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/iga.rs)) with exact endpoint Hermite tangents and controllable Hausdorff/curvature tolerance ($\varepsilon < 10^{-9} m$), using **exponential tension splines** at the involute–trochoid blend to suppress Gibbs ringing in curvature $\kappa(s)$.
-   - **Implicitization via Sylvester / Dixon Resultants**: Tooth flank intersections with addendum/dedendum circles and mating flanks are computed via algebraic resultants ([geometry.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/geometry.rs)) and Gröbner bases ([poly/grobner.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/poly/grobner.rs)) rather than fragile polyline intersection.
+   - **Involute & Trochoid Segments**: Involutes $\mathbf{r}(\phi) = r_b(\cos\phi + \phi\sin\phi,\, \sin\phi - \phi\cos\phi)$ are not exact low-degree polynomials, so URAE converts them to $C^2$-continuous cubic/quartic `NURBS` patches ([iga.rs](../../crates/algebra-engine/src/iga.rs)) with exact endpoint Hermite tangents and controllable Hausdorff/curvature tolerance ($\varepsilon < 10^{-9} m$), using **exponential tension splines** at the involute–trochoid blend to suppress Gibbs ringing in curvature $\kappa(s)$.
+   - **Implicitization via Sylvester / Dixon Resultants**: Tooth flank intersections with addendum/dedendum circles and mating flanks are computed via algebraic resultants ([geometry.rs](../../crates/algebra-engine/src/geometry.rs)) and Gröbner bases ([poly/grobner.rs](../../crates/algebra-engine/src/poly/grobner.rs)) rather than fragile polyline intersection.
 
 2. **Pythagorean-Hodograph (`PH`) Exact-Offset Flanks & CNC Toolpaths**:
    - Encoding tooth flank segments or hob cutter paths as quintic planar `PH` curves ($\mathbf{r}'(t) = w(t)^2 \in \mathbb{C}[t]$) yields polynomial arc length $s(t)$ and **exact rational `NURBS` offsets** $\mathbf{r}_d(t) = \mathbf{r}(t) \pm d\,\mathbf{n}(t)$ for **backlash allowance, profile shift ($x \cdot m$), and tip/root relief crowning** with zero geometric offset error.
@@ -227,24 +227,24 @@ Rather than truncating discrete tooth flanks to polylines (which introduce curva
    - **Elliptic Fourier Descriptors (`EFD`)**: Closed single-tooth and full-ring loops expand into scale/rotation-invariant harmonic coefficients $(a_n, b_n, c_n, d_n)$ for fast optical inspection comparison and ML geometry surrogate inputs.
 
 ### 7.4 Litvin Conjugate Envelope Synthesis & Generalized Gear Families
-Elevating [cad/engineering.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/cad/engineering.rs) beyond standard symmetric involutes (`Audit C4`), generalized conjugate tooth generation follows Litvin's **Equation of Meshing**:
+Elevating [cad/engineering.rs](../../crates/algebra-engine/src/cad/engineering.rs) beyond standard symmetric involutes (`Audit C4`), generalized conjugate tooth generation follows Litvin's **Equation of Meshing**:
 $$
 \mathbf{n}_1(\mathbf{u}) \cdot \mathbf{v}_1^{(12)}(\mathbf{u}, \phi) = 0
 $$
 where $\mathbf{n}_1$ is the rack-cutter or pinion surface normal and $\mathbf{v}_1^{(12)}$ is the relative sliding velocity at roll parameter $\phi$:
 
-- **Exact Undercutting & Cusp Singularity Analysis**: Solving where both the Equation of Meshing and the mating Jacobian vanish ($\|\mathbf{v}_r^{(1)}\| = 0$) yields exact **undercut limits** ($z_{\min}$ as a function of $\alpha, x, h_a^*$) and local **Newton–Polygon `Puiseux` branch expansions** ([series.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/series.rs)) at trochoidal cusps.
+- **Exact Undercutting & Cusp Singularity Analysis**: Solving where both the Equation of Meshing and the mating Jacobian vanish ($\|\mathbf{v}_r^{(1)}\| = 0$) yields exact **undercut limits** ($z_{\min}$ as a function of $\alpha, x, h_a^*$) and local **Newton–Polygon `Puiseux` branch expansions** ([series.rs](../../crates/algebra-engine/src/series.rs)) at trochoidal cusps.
 - **Generalized Conjugate Families**:
   - **Asymmetric Involutes**: Distinct drive ($\alpha_d$) vs. coast ($\alpha_c$) pressure angles maximizing bending fatigue strength while retaining conjugate involute action.
   - **Convex–Concave Wildhaber–Novikov Helical Profiles**: Circular-arc point/line-contact conjugate teeth lowering Hertzian contact stress $\sigma_H$.
   - **Non-Circular Gears**: Numerically/symbolically integrates conjugate pitch centrodes $r_1(\phi_1) + r_2(\phi_2) = C$ ($r_1\,\mathrm{d}\phi_1 = r_2\,\mathrm{d}\phi_2$) for variable transmission ratios $\omega_2/\omega_1(\phi_1)$ (elliptical, multi-lobe, Geneva-continuous).
-  - **3D Spatial Surfaces**: Spherical involute bevel, spiral bevel, hypoid, and enveloping worm-wheel tooth surfaces parameterized directly as exact trimmed `NURBS` patches (`CadCell` semi-algebraic bounds via [cad/mod.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/cad/mod.rs)).
+  - **3D Spatial Surfaces**: Spherical involute bevel, spiral bevel, hypoid, and enveloping worm-wheel tooth surfaces parameterized directly as exact trimmed `NURBS` patches (`CadCell` semi-algebraic bounds via [cad/mod.rs](../../crates/algebra-engine/src/cad/mod.rs)).
   - **Geometric Quality Inspection**: Evaluates continuous signed curvature $\kappa(s)$, specific sliding ratio $\vartheta_s$, and contact ratio along the line of action prior to meshing.
 
 ### 7.5 Direct Integration with URAE Multiphysics (`IGA`, `EHL`, `BEM` & `DiffCad`)
-Instead of exporting lossy STL triangles, URAE passes the exact tooth `NURBS`/`PH` representation downstream into [pipeline.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/pipeline.rs) and the orchestrator ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md) Sections 6–9):
+Instead of exporting lossy STL triangles, URAE passes the exact tooth `NURBS`/`PH` representation downstream into [pipeline.rs](../../crates/algebra-engine/src/pipeline.rs) and the orchestrator ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](ARCHITECTURE_SPEC.md) Sections 6–9):
 
-- **Isogeometric Contact & Root Bending (`IGA`)**: Solves Hertzian rolling-sliding contact and root fillet stress concentration directly on `NURBS` / `AS-T-Spline` gear patches ([iga.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/iga.rs)) via Mortar/Nitsche contact constraints—yielding $C^1$-smooth traction fields without polygonal facet noise.
+- **Isogeometric Contact & Root Bending (`IGA`)**: Solves Hertzian rolling-sliding contact and root fillet stress concentration directly on `NURBS` / `AS-T-Spline` gear patches ([iga.rs](../../crates/algebra-engine/src/iga.rs)) via Mortar/Nitsche contact constraints—yielding $C^1$-smooth traction fields without polygonal facet noise.
 - **Elastohydrodynamic Lubrication (`EHL`) & Transmission Error**: Couples Reynolds thin-film lubrication equations (with piezoviscous Roelands/Barus viscosity) to elastic tooth deflection along the conjugate contact line, predicting minimum film thickness $h_{\min}$ and loaded transmission error (`LTE`).
 - **Acoustic Radiation (`BEM`) & Gear Whine**: Feeds gearbox housing vibrations driven by mesh-frequency excitation directly into `KIFMM`-accelerated Helmholtz `BEM` to predict far-field tonal noise.
 - **Differentiable Shape Optimization (`DiffCad`)**: Backpropagates analytical sensitivities $\frac{\partial \sigma_H}{\partial (x, \alpha, \mathbf{P}_k)}, \frac{\partial \text{LTE}}{\partial \mathbf{P}_k}$ through NURBS control points $\mathbf{P}_k$ and Litvin parameters to synthesize minimum-noise, minimum-mass tooth micro-geometries.
@@ -293,7 +293,7 @@ Secondary Adjustments:
 
 ### 9.1 Type-Safe Parameter System (`DimVector` & Unified Curve Carriers)
 
-Leveraging Rust's type system, exact SI dimensional typing ([dimensions.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/cat-core/src/dimensions.rs), remediating `Audit D13`), and the shared `ExpansionRepresentation` framework ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md) Section 5.9, Section 7.2 & Section 27):
+Leveraging Rust's type system, exact SI dimensional typing ([dimensions.rs](../../crates/cat-core/src/dimensions.rs), remediating `Audit D13`), and the shared `ExpansionRepresentation` framework ([NUMERICAL_CAD_MULTIPHYSICS_AND_AI_ARCHITECTURE_PLAN.md](ARCHITECTURE_SPEC.md) Section 5.9, Section 7.2 & Section 27):
 
 ```rust
 pub struct GearParameters {
@@ -326,7 +326,7 @@ For accurate geometric calculations:
 ### 9.3 Implementation Alignment & Current Limitations
 
 > [!NOTE]
-> Audited against [crates/algebra-engine/src/cad/engineering.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/cad/engineering.rs) (see [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md)).
+> Audited against [crates/algebra-engine/src/cad/engineering.rs](../../crates/algebra-engine/src/cad/engineering.rs) (see [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](../audits/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md)).
 
 The mathematical specification above covers both cycloidal (`Epicycloidal`/`Hypocycloidal`) and involute tooth geometry, internal gears, undercut avoidance ($z_{\min} = 2 / \sin^2(\alpha)$), and profile-shift compensation. The current implementation in `crates/algebra-engine/src/cad/engineering.rs` covers only a strict subset of this specification:
 
@@ -335,7 +335,7 @@ The mathematical specification above covers both cycloidal (`Epicycloidal`/`Hypo
 2. **Oversimplified / Missing Relative to This Specification**:
    - **No Cycloidal or Internal Gears**: Only `InvoluteGear` is implemented; epicycloid/hypocycloid tooth profiles and internal ring gears are absent.
    - **No Profile Shift ($x$) or Undercut Trochoidal Relief**: `generate_2d_profile` does not apply profile-shift thickness modification or exact trochoidal root fillets when $z < z_{\min}$.
-   - **Oversimplified Profile, Edge Traps & Endcap Triangulation**: `InvoluteGear::generate_3d_mesh` leaves `bore_radius` unmeshed, triangulates front/back endcaps by fanning directly from perimeter vertex `0` across non-convex tooth valleys, omits the $2\,\operatorname{inv}(\alpha)$ pitch-to-base thickness offset, assumes $r_f < r_b$ (which fails for $z \ge 42$ where $r_b < r_f$), and panics on `0usize - 1` underflow (`1..n_prof - 1` at [engineering.rs:180](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/cad/engineering.rs#L180)) when `teeth == 0` (sibling utilities also lack bounds guards: `ThreadedScrew` `pitch <= 0.0` OOMs `usize::MAX`, `NacaAirfoil` `n_samples == 0` yields `NaN`).
+   - **Oversimplified Profile, Edge Traps & Endcap Triangulation**: `InvoluteGear::generate_3d_mesh` leaves `bore_radius` unmeshed, triangulates front/back endcaps by fanning directly from perimeter vertex `0` across non-convex tooth valleys, omits the $2\,\operatorname{inv}(\alpha)$ pitch-to-base thickness offset, assumes $r_f < r_b$ (which fails for $z \ge 42$ where $r_b < r_f$), and panics on `0usize - 1` underflow (`1..n_prof - 1` at [engineering.rs:180](../../crates/algebra-engine/src/cad/engineering.rs#L180)) when `teeth == 0` (sibling utilities also lack bounds guards: `ThreadedScrew` `pitch <= 0.0` OOMs `usize::MAX`, `NacaAirfoil` `n_samples == 0` yields `NaN`).
 
 ---
 
@@ -363,7 +363,7 @@ The system should support multiple output formats:
 
 ## 11. Downstream Multiphysics, Manufacturing & Remediation Roadmap (`Audit C4`)
 
-1. **Immediate Remediation (`Audit C4`, `E4`, `F3` in [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md))**: Mesh `bore_radius` inner cylinder walls, replace fan-from-vertex-0 endcap triangulation with ear-clipping / Constrained Delaunay (`Sec 33`) across concave tooth valleys, fix $2\,\operatorname{inv}(\alpha)$ pitch-to-base tooth thickness + $r_{\text{start}} = \max(r_b, r_f)$ clipping for $z \ge 42$, add input validation guards (`teeth >= 3`, `pitch > 0`, `n_samples >= 8` -> explicit `AlgebraError`), and add cycloidal (`Epicycloid`/`Hypocycloid`), internal ring, and profile-shifted trochoidal fillet profiles inside [cad/engineering.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/cad/engineering.rs).
+1. **Immediate Remediation (`Audit C4`, `E4`, `F3` in [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](../audits/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md))**: Mesh `bore_radius` inner cylinder walls, replace fan-from-vertex-0 endcap triangulation with ear-clipping / Constrained Delaunay (`Sec 33`) across concave tooth valleys, fix $2\,\operatorname{inv}(\alpha)$ pitch-to-base tooth thickness + $r_{\text{start}} = \max(r_b, r_f)$ clipping for $z \ge 42$, add input validation guards (`teeth >= 3`, `pitch > 0`, `n_samples >= 8` -> explicit `AlgebraError`), and add cycloidal (`Epicycloid`/`Hypocycloid`), internal ring, and profile-shifted trochoidal fillet profiles inside [cad/engineering.rs](../../crates/algebra-engine/src/cad/engineering.rs).
 2. **Closed-Loop `IGA` + `EHL` + `BEM` + `DiffCad` Integration (`Sec 7.4–7.5`)**: Feed exact `NURBS`/`PH` flanks seamlessly into `IGA` Mortar/Nitsche rolling-sliding contact, piezoviscous `EHL` lubrication film tracking, `KIFMM`-BEM gearbox noise radiation, and analytical `DiffCad` + `MAP-Elites` micro-geometry optimization.
 3. **Multi-Body Planetary Dynamics & 5-Axis Toolpaths**: Lower conjugate involute/bevel/hypoid trains directly to articulated `Featherstone` / `FMI 3.0` (`Sec 7.3`) drivetrains while exporting exact `PH` arc-length feedrate schedules for CNC hobbing/grinding (`Rung 0` `60 Hz` mesh preview $\to$ `Rung 2` certified contact stress).
 

@@ -1,5 +1,7 @@
 # Comprehensive Panic and Unwrap Audit Report
 
+> **Archived evidence.** A snapshot of the production panic and unwrap sites; the 17 Nov update below supersedes its count. It is not maintained in place; the status of its findings is in [`../LEDGER.md`](../LEDGER.md) and the plan is [`../PLANNING.md`](../PLANNING.md).
+
 > **Update, 17 Nov 2026.** A recount of production code (everything outside tests, benches and examples) found 29
 > sites, not 63. All reachable ones were removed: guarded `unwrap`s became `map_or`/`let ... else`, poisoned-lock
 > handling recovers the guard, and the notebook launcher reports a failed start. The remaining intentional panics

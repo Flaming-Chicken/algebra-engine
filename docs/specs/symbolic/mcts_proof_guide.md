@@ -7,7 +7,7 @@ Traditional automated theorem proving and algebraic expression simplification re
 The **Universal Rust Algebra Engine (URAE)** overcomes these limitations through a hybrid **Neural-Symbolic Monte Carlo Tree Search (MCTS)** architecture operating directly over the hash-consed Expression DAG arena (`ExprGraph`). Guided by dual neural-symbolic heads trained via `spodeian-ml`, the MCTS engine explores the non-Euclidean state space of algebraic transformations:
 
 > [!NOTE]
-> **Implementation Status & Known Limitations**: The current runtime `MctsPolicyHead` in [crates/algebra-engine/src/mcts.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/mcts.rs) scores candidate actions via deterministic rule logit heuristics rather than loading trained `spodeian-ml` neural policy weights. See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).
+> **Implementation Status & Known Limitations**: The current runtime `MctsPolicyHead` in [crates/algebra-engine/src/mcts.rs](../../../crates/algebra-engine/src/mcts.rs) scores candidate actions via deterministic rule logit heuristics rather than loading trained `spodeian-ml` neural policy weights. See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](../../audits/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).
 
 $$a^* = \arg\max_{a \in \mathcal{A}(s)} \left( Q(s, a) + c_{\text{puct}} \cdot P(s, a) \cdot \frac{\sqrt{\sum_b N(s, b)}}{1 + N(s, a)} \right)$$
 

@@ -200,7 +200,7 @@ fn match_linear(graph: &ExprGraph, expr: ExprId, v: SymbolId) -> Option<(ExprId,
 }
 
 /// Match `expr` wrt `v` as `c2 * v^2 + c1 * v + c0` when possible.
-fn match_quadratic(
+pub(crate) fn match_quadratic(
     graph: &ExprGraph,
     expr: ExprId,
     v: SymbolId,

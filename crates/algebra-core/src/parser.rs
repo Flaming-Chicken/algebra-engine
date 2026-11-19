@@ -1811,11 +1811,21 @@ fn normalize_call_syntax(input: &str) -> Option<String> {
             // limit(f, x, a) -> `limit f as x -> a`
             let parts = split_top_level_commas(args);
             if parts.len() >= 3 {
+                // An optional fourth argument names a one-sided limit: `limit(f, x, 0, +)`, `limit(f, x, 0, "left")`.
+                let side = match parts
+                    .get(3)
+                    .map(|s| s.trim().trim_matches('"').to_ascii_lowercase())
+                {
+                    Some(s) if matches!(s.as_str(), "+" | "right" | "plus" | "from_right") => "+",
+                    Some(s) if matches!(s.as_str(), "-" | "left" | "minus" | "from_left") => "-",
+                    _ => "",
+                };
                 return Some(format!(
-                    "limit {} as {} -> {}",
+                    "limit {} as {} -> {}{}",
                     parts[0].trim(),
                     parts[1].trim(),
-                    parts[2].trim()
+                    parts[2].trim(),
+                    side
                 ));
             }
             return None;

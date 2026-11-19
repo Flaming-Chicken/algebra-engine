@@ -722,6 +722,21 @@ impl SymbolicCalculus for ExprGraph {
         };
         let is_inf_bound = |id: ExprId| -> bool { is_pos_inf_bound(id) || is_neg_inf_bound(id) };
 
+        // Gaussian integrals have no elementary antiderivative: c exp(a x^2 + b x + d) over the line or the
+        // half line is sqrt(pi / -a) exp(d - b^2 / (4 a)) (halved for [0, oo) and b = 0).
+        if is_pos_inf_bound(upper)
+            && let Some(value) = gaussian_integral(
+                self,
+                expr,
+                wrt,
+                is_neg_inf_bound(lower),
+                crate::simplify::Simplifier::simplify(self, lower).unwrap_or(lower)
+                    == self.integer(0),
+            )
+        {
+            return Ok(value);
+        }
+
         let mut singular_lower = false;
         let mut singular_upper = false;
 
@@ -818,6 +833,12 @@ impl SymbolicCalculus for ExprGraph {
         let f_a = eval_bound(lower, lower_dir, singular_lower)?;
         let diff = self.sub(f_b, f_a);
         let res = crate::simplify::Simplifier::simplify(self, diff).unwrap_or(diff);
+        // A constant result that is an exact rational (`2/3 4^(3/2) - 2/3 0^(3/2)` is `16/3`).
+        if let Ok(Some(q)) =
+            crate::numeric::try_eval_exact(self, res, &std::collections::HashMap::new())
+        {
+            return Ok(crate::poly::expr_from_rational(self, &q));
+        }
 
         // Guard against finite non-convergent values (e.g. NaN / inf after subtraction)
         if let Ok(val) = self.evalf(res, &ctx)
@@ -1676,6 +1697,69 @@ fn build_taylor_poly(graph: &ExprGraph, coeffs: &[ExprId], x_minus_a: ExprId) ->
     } else {
         graph.add(terms)
     }
+}
+
+/// `integral of c exp(a x^2 + b x + d)` over `(-oo, oo)` (`whole_line`) or `[0, oo)` (`from_zero`, needs `b = 0`).
+fn gaussian_integral(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    whole_line: bool,
+    from_zero: bool,
+) -> Option<ExprId> {
+    use crate::simplify::SymbolicSimplifier as _;
+    use algebra_core::Constant;
+    use num_traits::Signed;
+    if !whole_line && !from_zero {
+        return None;
+    }
+    let factors: Vec<ExprId> = match graph.get(expr).kind.clone() {
+        ExprKind::Mul(fs) => fs.to_vec(),
+        _ => vec![expr],
+    };
+    let (mut constant, mut exponential) = (Vec::new(), None);
+    for f in factors {
+        if !graph.has_symbol(f, wrt) {
+            constant.push(f);
+        } else if exponential.is_none() {
+            exponential = Some(f);
+        } else {
+            return None;
+        }
+    }
+    let exponential = exponential?;
+    let argument = match graph.get(exponential).kind.clone() {
+        ExprKind::Function { name, args }
+            if graph.symbols.resolve(name).as_deref() == Some("exp") && args.len() == 1 =>
+        {
+            args[0]
+        }
+        _ => return None,
+    };
+    let (a, b, d) = crate::transforms::match_quadratic(graph, argument, wrt)?;
+    let a_value = constant_rational(graph, graph.simplify(a))?;
+    if !a_value.is_negative() {
+        return None;
+    }
+    let b_is_zero = graph.simplify(b) == graph.integer(0);
+    if from_zero && !whole_line && !b_is_zero {
+        return None;
+    }
+    let pi = graph.constant(Constant::Pi);
+    let root = graph.function("sqrt", [graph.div(pi, graph.neg(a))]);
+    let shift = graph.sub(
+        d,
+        graph.div(
+            graph.pow(b, graph.integer(2)),
+            graph.mul([graph.integer(4), a]),
+        ),
+    );
+    let mut value = graph.mul([root, graph.function("exp", [shift])]);
+    if !whole_line {
+        value = graph.div(value, graph.integer(2));
+    }
+    constant.push(value);
+    Some(graph.simplify(graph.mul(constant)))
 }
 
 #[cfg(test)]

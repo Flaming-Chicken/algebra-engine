@@ -556,6 +556,26 @@ impl OperationExecutor {
                 let var_name = variable.as_deref().unwrap_or("x");
                 let wrt_sym = graph.symbols.get_or_intern(var_name);
                 match parser.parse(equation) {
+                    Ok(expr_id)
+                        if matches!(
+                            graph.get(expr_id).kind,
+                            ExprKind::Relational {
+                                op: algebra_core::RelOp::LessThan
+                                    | algebra_core::RelOp::LessEqual
+                                    | algebra_core::RelOp::GreaterThan
+                                    | algebra_core::RelOp::GreaterEqual,
+                                ..
+                            }
+                        ) =>
+                    {
+                        match crate::inequality::solve(graph, expr_id, var_name) {
+                            Ok(set) => {
+                                let out = format!("Solutions for {var_name}: {set}");
+                                OperationResult::success(out.clone(), out.clone(), out)
+                            }
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
                     Ok(expr_id) => match graph.solveset(expr_id, wrt_sym) {
                         Ok(solutions) => {
                             let eval_ctx = crate::numeric::EvalContext::default();
@@ -883,6 +903,41 @@ impl OperationExecutor {
                     };
                     match lim_res {
                         Ok(lim_id) => {
+                            // A numerical sanity check at a finite point: replace an answer that the samples contradict.
+                            let mut lim_id = lim_id;
+                            let mut checked_numerically = false;
+                            if let Ok(crate::numeric::BigValue::Real(a)) =
+                                graph.evalf(pt_id, &crate::numeric::EvalContext::default())
+                                && a.is_finite()
+                            {
+                                let sides: Vec<f64> = match direction
+                                    .as_deref()
+                                    .map(|s| s.trim().to_ascii_lowercase())
+                                    .as_deref()
+                                {
+                                    Some("+" | "right" | "r" | "+1") => vec![1.0],
+                                    Some("-" | "left" | "l" | "-1") => vec![-1.0],
+                                    _ => vec![1.0, -1.0],
+                                };
+                                if let Some(behaviour) = crate::limit_check::combined(
+                                    graph, expr_id, variable, a, &sides,
+                                ) && !crate::limit_check::agrees(graph, lim_id, behaviour)
+                                {
+                                    lim_id = crate::limit_check::as_expression(graph, behaviour);
+                                    checked_numerically = true;
+                                } else if !matches!(
+                                    graph.evalf(lim_id, &crate::numeric::EvalContext::default()),
+                                    Ok(crate::numeric::BigValue::Real(v)) if !v.is_nan()
+                                ) && !matches!(
+                                    graph.get(lim_id).kind,
+                                    ExprKind::Number(algebra_core::Number::Constant(_))
+                                ) {
+                                    // The samples are inconclusive (an oscillation, as for sin(1/x)) and the symbolic
+                                    // answer still contains a division by zero: it is not a value.
+                                    lim_id = graph.constant(algebra_core::Constant::Undefined);
+                                    checked_numerically = true;
+                                }
+                            }
                             let latex = latex_fmt.format(graph, lim_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, lim_id).unwrap_or_default();
                             let dir_s = direction.as_deref().unwrap_or("");
@@ -892,6 +947,13 @@ impl OperationExecutor {
                             );
                             let mut res = OperationResult::success(out, latex, unicode);
                             res.root_expr = Some(lim_id);
+                            if checked_numerically {
+                                res.metadata.insert("method".into(), "numerical".into());
+                                res.domain_info = Some(
+                                    "numerical estimate from samples near the point, not a proof"
+                                        .into(),
+                                );
+                            }
                             if crate::limits::NUMERIC_LIMIT_ESTIMATE.with(|f| f.replace(false)) {
                                 res.metadata.insert("method".into(), "numerical".into());
                                 res.domain_info = Some(

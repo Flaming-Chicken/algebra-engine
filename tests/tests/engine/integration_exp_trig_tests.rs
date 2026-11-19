@@ -102,3 +102,80 @@ fn absolute_value_of_a_linear_form() {
         check(f, &[0.3, 0.7, 1.9, -0.6, 2.4]);
     }
 }
+
+// ---- quadratic radicals, by parts, trigonometric powers (risch_more) ----
+
+const ANY: &[f64] = &[0.3, 0.7, 1.1, 1.9, -0.6];
+const POSITIVE: &[f64] = &[0.4, 0.9, 1.6, 2.5, 3.7];
+const OUTSIDE_UNIT: &[f64] = &[1.4, 2.2, 3.1, 4.5];
+const INSIDE_UNIT: &[f64] = &[0.15, 0.4, -0.3, 0.7, -0.8];
+
+#[test]
+fn integrals_involving_the_square_root_of_a_quadratic() {
+    for f in [
+        "sqrt(x^2+1)",
+        "sqrt(x^2+4*x+5)",
+        "1/sqrt(x^2+2*x+5)",
+        "x^2/sqrt(x^2+1)",
+        "x^3*sqrt(x^2+3)",
+        "(x+1)*sqrt(2*x^2+x+4)",
+        "x^2/sqrt(x^2+x+1)",
+        "1/sqrt(3*x^2+1)",
+    ] {
+        check(f, ANY);
+    }
+    for f in ["sqrt(x^2-1)", "x^2/sqrt(x^2-4)", "x*sqrt(x^2-1)"] {
+        check(f, OUTSIDE_UNIT);
+    }
+    for f in [
+        "sqrt(1-x^2)",
+        "sqrt(4-x^2)",
+        "x^2/sqrt(1-x^2)",
+        "x^2*sqrt(1-x^2)",
+        "1/sqrt(2-x^2-x)",
+    ] {
+        check(f, INSIDE_UNIT);
+    }
+}
+
+#[test]
+fn polynomials_times_inverse_trigonometric_functions_and_powers_of_ln() {
+    for f in [
+        "x*atan(x)",
+        "x^2*atan(x)",
+        "(x^2+1)*atan(x)",
+        "3*x^3*atan(x)",
+    ] {
+        check(f, ANY);
+    }
+    for f in ["x*asin(x)", "x^2*asin(x)", "x*acos(x)", "x^3*acos(x)"] {
+        check(f, INSIDE_UNIT);
+    }
+    for f in [
+        "x*ln(x)^2",
+        "x^2*ln(x)^3",
+        "ln(x)^4",
+        "(x+1)*ln(x)^2",
+        "x^3*ln(x)^2",
+    ] {
+        check(f, POSITIVE);
+    }
+}
+
+#[test]
+fn powers_of_sine_and_cosine_and_their_reciprocals() {
+    for f in [
+        "sin(x)^2",
+        "sin(x)^4",
+        "cos(x)^3",
+        "cos(x)^6",
+        "sin(2*x)^3",
+        "cos(3*x+1)^5",
+        "sin(x)^7",
+    ] {
+        check(f, ANY);
+    }
+    for f in ["1/cos(x)", "1/sin(x)", "1/cos(2*x)", "1/sin(3*x+1)"] {
+        check(f, &[0.3, 0.7, 1.0]);
+    }
+}

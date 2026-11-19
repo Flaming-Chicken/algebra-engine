@@ -2791,8 +2791,31 @@ impl OperationExecutor {
                         )
                         .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, zero, one), base));
 
-                        let eval_ctx = EvalContext::default();
-                        let solved_opt = if c2 == zero && c1 != zero {
+                        // The coefficients above were read by substituting 0 and 1; they describe the equation only if it is
+                        // linear in y'', y' and y (`y' = y^2` read as `y' = y` gave a wrong answer).
+                        let linear = crate::ode::classical::is_linear_model(
+                            graph,
+                            ode_res,
+                            [d2_sym, d1_sym, d0_sym, x_sym],
+                            [c2, c1, c0, base],
+                        );
+                        let mut implicit_solution: Option<(ExprId, ExprId)> = None;
+                        let solved_list: Option<Vec<ExprId>> = if !linear {
+                            if c2 == zero {
+                                match crate::ode::classical::solve_separable(
+                                    graph, ode_res, d1_sym, d0_sym, x_sym,
+                                ) {
+                                    Some(crate::ode::classical::Separable::Explicit(v)) => Some(v),
+                                    Some(crate::ode::classical::Separable::Implicit { g, f }) => {
+                                        implicit_solution = Some((g, f));
+                                        None
+                                    }
+                                    None => None,
+                                }
+                            } else {
+                                None
+                            }
+                        } else if c2 == zero && c1 != zero {
                             let p = Simplifier::simplify(graph, graph.div(c0, c1))
                                 .unwrap_or_else(|_| graph.div(c0, c1));
                             let q = Simplifier::simplify(graph, graph.div(graph.neg(base), c1))
@@ -2801,19 +2824,66 @@ impl OperationExecutor {
                                 graph, p, q, x_sym,
                             )
                             .ok()
-                        } else if c2 != zero && base == zero {
-                            if let (Ok(a_v), Ok(b_v), Ok(c_v)) = (
-                                graph.evalf(c2, &eval_ctx).map(|v| v.to_f64()),
-                                graph.evalf(c1, &eval_ctx).map(|v| v.to_f64()),
-                                graph.evalf(c0, &eval_ctx).map(|v| v.to_f64()),
-                            ) && a_v.is_finite()
+                            .map(|s| vec![s])
+                        } else if c2 != zero {
+                            // The coefficients are constants, but an unsimplified `exp(x) - exp(x)` can leave `x` inside
+                            // one: evaluate at two values of x and require them to agree.
+                            let constant_value = |c: ExprId| -> Option<f64> {
+                                let at = |xv: f64| {
+                                    let ctx = EvalContext::with_bindings(
+                                        50,
+                                        std::collections::HashMap::from([(
+                                            indep_name.to_string(),
+                                            xv,
+                                        )]),
+                                    );
+                                    graph.evalf(c, &ctx).ok().map(|v| v.to_f64())
+                                };
+                                let (first, second) = (at(0.5)?, at(1.7)?);
+                                ((first - second).abs() <= 1e-9 * (1.0 + first.abs()))
+                                    .then_some(first)
+                            };
+                            if let (Some(a_v), Some(b_v), Some(c_v)) =
+                                (constant_value(c2), constant_value(c1), constant_value(c0))
+                                && a_v.is_finite()
                                 && b_v.is_finite()
                                 && c_v.is_finite()
                             {
-                                crate::ode::SymbolicOdeSolver::solve_second_order_const_coeff_homogeneous(
+                                let homogeneous = crate::ode::SymbolicOdeSolver::solve_second_order_const_coeff_homogeneous(
                                     graph, a_v, b_v, c_v, x_sym,
                                 )
-                                .ok()
+                                .ok();
+                                if base == zero {
+                                    homogeneous.map(|s| vec![s])
+                                } else if let Some(h) = homogeneous {
+                                    // a y'' + b y' + c y = -base: variation of parameters from the basis.
+                                    let c1_sym = graph.symbols.get_or_intern("C1");
+                                    let c2_sym = graph.symbols.get_or_intern("C2");
+                                    let (zero_n, one_n) = (graph.integer(0), graph.integer(1));
+                                    let basis = |keep1: bool| {
+                                        let e = graph.substitute(
+                                            graph.substitute(
+                                                h,
+                                                c1_sym,
+                                                if keep1 { one_n } else { zero_n },
+                                            ),
+                                            c2_sym,
+                                            if keep1 { zero_n } else { one_n },
+                                        );
+                                        Simplifier::simplify(graph, e).unwrap_or(e)
+                                    };
+                                    crate::ode::classical::variation_of_parameters(
+                                        graph,
+                                        c2,
+                                        graph.neg(base),
+                                        basis(true),
+                                        basis(false),
+                                        x_sym,
+                                    )
+                                    .map(|s| vec![s])
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -2821,14 +2891,42 @@ impl OperationExecutor {
                             None
                         };
 
-                        if let Some(sol_id) = solved_opt {
-                            let simp_sol = Simplifier::simplify(graph, sol_id).unwrap_or(sol_id);
-                            let u_sol = unicode_fmt.format(graph, simp_sol).unwrap_or_default();
-                            let l_sol = latex_fmt.format(graph, simp_sol).unwrap_or_default();
-                            let out = format!("{}({}) = {}", dep_name, indep_name, u_sol);
-                            let latex = format!("{}({}) = {}", dep_name, indep_name, l_sol);
+                        if let Some((g, f)) = implicit_solution {
+                            // No closed form for y: report the implicit solution, honestly labelled.
+                            let g_text = unicode_fmt.format(graph, g).unwrap_or_default();
+                            let f_text = unicode_fmt.format(graph, f).unwrap_or_default();
+                            let out = format!(
+                                "{g_text} = {f_text} + C1  (implicit solution: {dep_name} cannot be isolated in closed form)"
+                            );
+                            let mut res = OperationResult::success(out.clone(), out.clone(), out);
+                            res.metadata.insert("form".into(), "implicit".into());
+                            return res;
+                        }
+                        if let Some(solutions) = solved_list {
+                            let simp: Vec<ExprId> = solutions
+                                .iter()
+                                .map(|&sol| Simplifier::simplify(graph, sol).unwrap_or(sol))
+                                .collect();
+                            let texts: Vec<String> = simp
+                                .iter()
+                                .map(|&sol| unicode_fmt.format(graph, sol).unwrap_or_default())
+                                .collect();
+                            let latexes: Vec<String> = simp
+                                .iter()
+                                .map(|&sol| latex_fmt.format(graph, sol).unwrap_or_default())
+                                .collect();
+                            let out = texts
+                                .iter()
+                                .map(|u| format!("{}({}) = {}", dep_name, indep_name, u))
+                                .collect::<Vec<_>>()
+                                .join("  or  ");
+                            let latex = latexes
+                                .iter()
+                                .map(|l| format!("{}({}) = {}", dep_name, indep_name, l))
+                                .collect::<Vec<_>>()
+                                .join(" \\text{ or } ");
                             let mut res = OperationResult::success(out.clone(), latex, out);
-                            res.root_expr = Some(simp_sol);
+                            res.root_expr = simp.first().copied();
                             return res;
                         }
                     }

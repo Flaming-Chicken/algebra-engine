@@ -269,7 +269,13 @@ pub(crate) fn integrate_exp_trig_product(
                 graph.add([term_sum, term_diff]),
             ]))
         }
-        _ => None,
+        // exp(u) exp(v) = exp(u + v)
+        (Kind::Exp, Kind::Exp) => {
+            let combined = graph.function("exp", [graph.add([u0, u1])]);
+            let combined =
+                crate::simplify::Simplifier::simplify(graph, combined).unwrap_or(combined);
+            crate::risch::RischIntegrator::integrate(graph, combined, wrt).ok()
+        }
     }
 }
 

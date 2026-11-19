@@ -10,6 +10,8 @@ pub enum DomainCategory {
     Group,
     AbelianGroup,
     Ring,
+    /// Addition and multiplication with no negatives (the natural numbers).
+    CommutativeSemiring,
     CommutativeRing,
     Field,
     AlgebraicClosedField,
@@ -108,20 +110,51 @@ impl DomainCategory {
     }
 }
 
+/// Trial-division primality test, usable in `const fn` (moduli are small in practice).
+const fn is_prime_u64(n: u64) -> bool {
+    if n < 2 {
+        return false;
+    }
+    if n < 4 {
+        return true;
+    }
+    if n.is_multiple_of(2) {
+        return false;
+    }
+    let mut d = 3;
+    while d <= n / d {
+        if n.is_multiple_of(d) {
+            return false;
+        }
+        d += 2;
+    }
+    true
+}
+
 impl Domain {
     /// Returns the core algebraic category of this domain.
     #[inline]
     pub const fn category(&self) -> DomainCategory {
         match self {
             Self::Boolean => DomainCategory::BooleanAlgebra,
-            Self::Naturals => DomainCategory::Set,
-            Self::Integers | Self::Modulo { .. } => DomainCategory::CommutativeRing,
+            // N has no additive inverses: a commutative semiring, not a ring.
+            Self::Naturals => DomainCategory::CommutativeSemiring,
+            // Z/nZ is a field exactly when n is prime; otherwise it has zero divisors.
+            Self::Modulo { modulus } => {
+                if is_prime_u64(*modulus) {
+                    DomainCategory::Field
+                } else {
+                    DomainCategory::CommutativeRing
+                }
+            }
+            Self::Integers => DomainCategory::CommutativeRing,
+            // The adele ring is a product of completions with zero divisors, not a field.
+            Self::Adeles => DomainCategory::CommutativeRing,
+            Self::Complex => DomainCategory::AlgebraicClosedField,
             Self::Rationals
             | Self::Reals
-            | Self::Complex
             | Self::Surreals
             | Self::PAdics { .. }
-            | Self::Adeles
             | Self::GaloisField { .. } => DomainCategory::Field,
             Self::Matrix { .. } => DomainCategory::Ring,
             Self::Tensor { .. } => DomainCategory::TensorAlgebra,

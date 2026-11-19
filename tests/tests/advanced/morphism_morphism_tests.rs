@@ -48,7 +48,7 @@ fn test_equivalence_classifier() {
 
     assert_eq!(
         classifier.classify(&graph, x1, x2),
-        EquivalenceKind::SyntacticIdentity
+        Some(EquivalenceKind::SyntacticIdentity)
     );
     assert!(classifier.check_isomorphism("Quaternion", "M_2(C)"));
     assert!(classifier.check_isomorphism("Complex", "Matrix2x2Real"));
@@ -68,4 +68,31 @@ fn test_simplification_functor() {
 
     let simplified = functor.map_object(&x_plus_0);
     assert_eq!(simplified, x);
+}
+
+#[test]
+fn the_classifier_separates_equal_from_unequal_expressions() {
+    use algebra_advanced::morphism::{EquivalenceClassifier, EquivalenceKind};
+    use algebra_core::parser::ExprParser;
+
+    let graph = ExprGraph::new();
+    let parser = ExprParser::new(&graph);
+    let classifier = EquivalenceClassifier::new();
+    let classify = |a: &str, b: &str| {
+        classifier.classify(&graph, parser.parse(a).unwrap(), parser.parse(b).unwrap())
+    };
+    let algebraic = Some(EquivalenceKind::AlgebraicEquality);
+    // Equal as polynomials or identities, but not the same node.
+    assert_eq!(classify("x + x", "2*x"), algebraic);
+    assert_eq!(classify("(x + 1)^2", "x^2 + 2*x + 1"), algebraic);
+    assert_eq!(classify("(x - y)*(x + y)", "x^2 - y^2"), algebraic);
+    assert_eq!(classify("sin(x)^2 + cos(x)^2", "1"), algebraic);
+    assert_eq!(classify("x*y", "y*x"), algebraic);
+    // Not equal: every one of these used to be reported as algebraically equal.
+    assert_eq!(classify("x", "x + 1"), None);
+    assert_eq!(classify("(x + 1)^2", "x^2 + 2*x + 2"), None);
+    assert_eq!(classify("x^2", "x"), None);
+    assert_eq!(classify("2", "3"), None);
+    assert_eq!(classify("sin(x)", "cos(x)"), None);
+    assert_eq!(classify("x*y", "x + y"), None);
 }

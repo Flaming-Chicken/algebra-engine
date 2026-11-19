@@ -161,3 +161,72 @@ fn constants_and_complex_numbers_are_evaluated_exactly() {
     // A symbol keeps the expression symbolic.
     assert_eq!(run("x + i"), "x + i");
 }
+
+fn matrix_entries(text: &str) -> Vec<Vec<i128>> {
+    text.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(';')
+        .map(|row| row.split(',').map(|v| v.trim().parse().unwrap()).collect())
+        .collect()
+}
+
+#[test]
+fn matrix_powers_lu_and_integer_factorisation() {
+    // Powers against repeated multiplication done here on integers.
+    let multiply = |a: &Vec<Vec<i128>>, b: &Vec<Vec<i128>>| -> Vec<Vec<i128>> {
+        (0..2)
+            .map(|i| {
+                (0..2)
+                    .map(|j| (0..2).map(|k| a[i][k] * b[k][j]).sum())
+                    .collect()
+            })
+            .collect()
+    };
+    for (m, text) in [
+        ([[1i128, 2], [3, 4]], "[[1,2],[3,4]]"),
+        ([[1, 1], [1, 0]], "[[1,1],[1,0]]"),
+        ([[0, -1], [1, 0]], "[[0,-1],[1,0]]"),
+    ] {
+        let base: Vec<Vec<i128>> = m.iter().map(|r| r.to_vec()).collect();
+        let mut expected = vec![vec![1, 0], vec![0, 1]];
+        for n in 0..=12 {
+            assert_eq!(
+                matrix_entries(&run(&format!("{text}^{n}"))),
+                expected,
+                "{text}^{n}"
+            );
+            expected = multiply(&expected, &base);
+        }
+    }
+    // A negative power is the inverse of the positive power: M^-3 M^3 = I.
+    let inverse = matrix_entries(&run("[[2,1],[1,1]]^-3"));
+    let forward = matrix_entries(&run("[[2,1],[1,1]]^3"));
+    assert_eq!(multiply(&inverse, &forward), vec![vec![1, 0], vec![0, 1]]);
+    assert_eq!(
+        run("lu([[4,3],[6,3]])"),
+        "L = [ 1, 0 ; 3/2, 1 ], U = [ 4, 3 ; 0, -3/2 ]"
+    );
+    // Integer factorisation of constant expressions: the factors multiply back (Fermat numbers 2^32+1, 2^64+1).
+    for (q, n) in [
+        ("factor(2^32+1)", 4_294_967_297u128),
+        ("factor(10!)", 3_628_800),
+        ("factor(2^64+1)", 18_446_744_073_709_551_617),
+    ] {
+        let out = run(q);
+        let head = out.split('[').next().unwrap();
+        let product: u128 = head
+            .split('=')
+            .nth(1)
+            .unwrap()
+            .split('*')
+            .map(|f| {
+                let f = f.trim();
+                match f.split_once('^') {
+                    Some((b, e)) => b.parse::<u128>().unwrap().pow(e.parse().unwrap()),
+                    None => f.parse().unwrap(),
+                }
+            })
+            .product();
+        assert_eq!(product, n, "{out}");
+    }
+}

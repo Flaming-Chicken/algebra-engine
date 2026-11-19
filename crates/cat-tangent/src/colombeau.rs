@@ -20,8 +20,11 @@ pub enum GeneralizedDistribution {
     /// for the Gaussian mollifier: its integral against a test function grows like `1 / epsilon`, so it is not a
     /// multiple of `delta` with a fixed coefficient.
     Scaled {
+        /// The fixed coefficient.
         coefficient: f64,
+        /// The power of the regularisation parameter $\epsilon$ multiplying the base.
         epsilon_power: i32,
+        /// The distribution being scaled.
         base: Box<GeneralizedDistribution>,
     },
 }

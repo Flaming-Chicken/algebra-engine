@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Changed: `missing_docs` is denied in `urae`, `cat-tangent` and `cat-numbers` (the remaining crates are being documented; see `docs/PLANNING.md`).
 - Changed: the `solve` command says which solutions are real and which are complex (`x^3 - 1 = 0`: "1 real, 2 non-real (complex) solutions") and marks equations with periodic or multivalued functions (`exp(x) = -1`, `sin(x) = a`) as giving the principal solution only. New `executor::classify_solution` and `SolutionKind`; the counts are in the result's metadata (`real_solutions`, `nonreal_solutions`, `coverage`).
 - Changed: the `simplify` command now says where the result is valid when it dropped a restriction (`x/x` gives `1` with `valid where x ≠ 0`): in the CLI REPL, in the JSON response (`conditions`) and as the notebook's domain info.
 - Added: `Simplifier::simplify_with_conditions` and `Expr::simplify_with_conditions` report the points a simplification excludes (`x / x` is `1` for `x ≠ 0`; `exp(ln x)` is `x` for `x > 0`; `tan(x) cos(x)` is `sin(x)` for `cos(x) ≠ 0`).

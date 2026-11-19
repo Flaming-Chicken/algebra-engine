@@ -31,6 +31,9 @@
 //! assert_eq!(latex, "{x}^{2}");
 //! ```
 
+#![deny(missing_docs)]
+
+/// The umbrella prelude: one `use urae::prelude::*;` brings the engine, the parser, formatters and number types into scope.
 pub mod prelude;
 
 pub use algebra_core as core;

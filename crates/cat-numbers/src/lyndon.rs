@@ -63,7 +63,9 @@ impl LyndonWord {
 /// Free Lie algebra bracket element in the Lyndon basis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LieBracketTree {
+    /// A single generator.
     Generator(u8),
+    /// The Lie bracket of two sub-trees.
     Bracket(Box<LieBracketTree>, Box<LieBracketTree>),
 }
 

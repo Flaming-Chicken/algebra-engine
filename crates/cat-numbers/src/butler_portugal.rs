@@ -237,7 +237,9 @@ impl ButlerPortugal {
 /// Arbitrary-rank tensor symmetry specification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TensorSymmetryN {
+    /// Number of tensor indices.
     pub rank: usize,
+    /// Generators of the symmetry group: each an index permutation with its sign (+1 symmetric, -1 antisymmetric).
     pub generators: Vec<(Vec<u8>, i8)>,
 }
 
@@ -268,7 +270,9 @@ impl TensorSymmetryN {
 /// Rank-N Butler-Portugal canonicalization result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalTensorResultN {
+    /// The canonical index order.
     pub indices: Vec<u8>,
+    /// The sign picked up by the permutation to canonical order (0 if the tensor vanishes by symmetry).
     pub sign: i8,
 }
 

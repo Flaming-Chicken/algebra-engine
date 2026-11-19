@@ -1,6 +1,8 @@
 //! `cat-tangent`: Unified jet, stochastic (Itô), distributional (Colombeau),
 //! and discrete time-scale (Hilger) calculi over categorical open hypergraphs.
 
+#![deny(missing_docs)]
+
 pub mod colombeau;
 pub mod functor;
 pub mod weil_ideal;

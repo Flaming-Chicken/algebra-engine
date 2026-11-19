@@ -568,7 +568,9 @@ impl UraeSession {
         let parsed_op = parse_operation(&expanded_input);
 
         // Evaluate pure expressions (constants, exact rationals, or all-bound expressions/uncertainties)
-        if matches!(parsed_op, MathOperation::Expression { .. }) {
+        // A bare matrix literal is displayed by the executor as a grid, not simplified as a scalar expression.
+        let bare_matrix = crate::executor::is_single_bracket_group(&expanded_input);
+        if matches!(parsed_op, MathOperation::Expression { .. }) && !bare_matrix {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
                 let syms = self.extract_symbols(expr_id);

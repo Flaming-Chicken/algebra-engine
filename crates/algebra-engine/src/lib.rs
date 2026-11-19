@@ -90,6 +90,7 @@ pub mod topology;
 pub mod transforms;
 pub mod tropical;
 pub mod urscript_pose;
+pub mod vectorcalc;
 pub mod visualizer;
 pub mod weyl_dmodules;
 pub mod workbench;

@@ -56,20 +56,34 @@ fn mul(a: &Series, b: &Series) -> Series {
     out
 }
 
-/// `a / b` for `b[0] != 0`.
+/// `a / b`. A zero constant term in `b` is cancelled against zero leading terms of `a` (`x cos(x) / sin(x)`); the
+/// tail loses one coefficient of precision per cancelled power, which the callers cover with spare coefficients.
 fn div(a: &Series, b: &Series) -> Option<Series> {
-    if b[0].is_zero() {
-        return None;
-    }
     let n = a.len();
-    let mut out = vec![Q::zero(); n];
-    for k in 0..n {
+    let (mut a, mut b) = (a.clone(), b.clone());
+    let mut shifts = 0;
+    while b.first().is_some_and(|c| c.is_zero()) {
+        if a.first().is_none_or(|c| !c.is_zero()) || b.iter().all(|c| c.is_zero()) {
+            return None;
+        }
+        a.remove(0);
+        b.remove(0);
+        shifts += 1;
+        if shifts > 8 {
+            return None;
+        }
+    }
+    let (a, b) = (&a, &b);
+    let m = a.len();
+    let mut out = vec![Q::zero(); m];
+    for k in 0..m {
         let mut acc = a[k].clone();
         for j in 1..=k {
             acc -= &b[j] * &out[k - j];
         }
         out[k] = acc / &b[0];
     }
+    out.resize(n, Q::zero());
     Some(out)
 }
 
@@ -270,6 +284,18 @@ fn series_of(
                     let (s, c) = sin_cos_series(&f, false)?;
                     div(&s, &c)
                 }
+                "cot" => {
+                    let (s, c) = sin_cos_series(&f, false)?;
+                    div(&c, &s)
+                }
+                "csc" => {
+                    let (s, _) = sin_cos_series(&f, false)?;
+                    div(&constant(Q::one(), len), &s)
+                }
+                "sec" => {
+                    let (_, c) = sin_cos_series(&f, false)?;
+                    div(&constant(Q::one(), len), &c)
+                }
                 "sinh" => sin_cos_series(&f, true).map(|(s, _)| s),
                 "cosh" => sin_cos_series(&f, true).map(|(_, c)| c),
                 "tanh" => {
@@ -302,11 +328,138 @@ pub(crate) fn taylor_coeffs_fast(
     if order > 400 {
         return None;
     }
-    let series = series_of(graph, expr, wrt, &point_q, order + 1)?;
+    // Spare coefficients: a division that cancels a power of the variable loses that many at the end.
+    let series = series_of(graph, expr, wrt, &point_q, order + 1 + SPARE)?;
     Some(
         series
             .iter()
+            .take(order + 1)
             .map(|c| expr_from_rational(graph, c))
             .collect(),
     )
+}
+
+const SPARE: usize = 40;
+
+/// `expr * t^p` rewritten so that the factor `t^p` (`t = wrt - point`) is cancelled inside the divisions.
+fn shifted(graph: &ExprGraph, expr: ExprId, shift: ExprId) -> ExprId {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Add(ts) => graph.add(
+            ts.iter()
+                .map(|&t| shifted(graph, t, shift))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Sub(a, b) => graph.sub(shifted(graph, a, shift), shifted(graph, b, shift)),
+        ExprKind::Neg(a) => graph.neg(shifted(graph, a, shift)),
+        ExprKind::Div(n, d) => graph.div(shifted(graph, n, shift), d),
+        ExprKind::Mul(fs) => {
+            if let Some(i) = fs
+                .iter()
+                .position(|&f| matches!(graph.get(f).kind, ExprKind::Div(..)))
+                && let ExprKind::Div(n, d) = graph.get(fs[i]).kind.clone()
+            {
+                // c * (n / d) = (c n) / d: the shift and the other factors meet the denominator together.
+                let mut numerator: Vec<ExprId> = fs
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .map(|(_, &f)| f)
+                    .collect();
+                numerator.push(n);
+                graph.div(shifted(graph, graph.mul(numerator), shift), d)
+            } else {
+                graph.mul([shift, expr])
+            }
+        }
+        ExprKind::Function { name, args } if args.len() == 1 => {
+            let u = args[0];
+            match graph.symbols.resolve(name).as_deref() {
+                Some("cot") => graph.div(
+                    graph.mul([shift, graph.function("cos", [u])]),
+                    graph.function("sin", [u]),
+                ),
+                Some("csc") => graph.div(shift, graph.function("sin", [u])),
+                Some("sec") => graph.div(shift, graph.function("cos", [u])),
+                _ => graph.mul([shift, expr]),
+            }
+        }
+        ExprKind::Pow(base, exponent) => {
+            if let ExprKind::Number(n) = &graph.get(exponent).kind
+                && let Ok(q) = rational_from_number(n)
+                && q.is_integer()
+                && q < Q::zero()
+            {
+                return graph.div(
+                    shift,
+                    graph.pow(base, graph.integer(-q.to_integer().to_i64().unwrap_or(0))),
+                );
+            }
+            graph.mul([shift, expr])
+        }
+        _ => graph.mul([shift, expr]),
+    }
+}
+
+/// The Laurent expansion about a rational `point` of a function with a pole there: `(p, coefficients)` with
+/// `expr = sum_k c_k t^(k - p)`, `t = wrt - point`, `k = 0..=order + p`; `None` if there is no pole (the Taylor path
+/// handles that) or the expression is outside the fast family.
+pub(crate) fn laurent_coeffs_fast(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    point: ExprId,
+    order: usize,
+) -> Option<(usize, Vec<Q>)> {
+    let ExprKind::Number(pn) = &graph.get(point).kind else {
+        return None;
+    };
+    let point_q = rational_from_number(pn).ok()?;
+    if order > 200 {
+        return None;
+    }
+    let x = graph.symbol(&graph.symbols.resolve(wrt)?);
+    let t = if point_q.is_zero() {
+        x
+    } else {
+        graph.sub(x, point)
+    };
+    let expr = reciprocal_form(graph, expr);
+    for p in 0..=8usize {
+        let g = shifted(graph, expr, graph.pow(t, graph.integer(p as i64)));
+        let len = order + p + 1;
+        if let Some(series) = series_of(graph, g, wrt, &point_q, len + SPARE) {
+            return Some((p, series.into_iter().take(len).collect()));
+        }
+    }
+    None
+}
+
+/// `cot(u)` as `cos(u) / sin(u)`, `csc(u)` as `1 / sin(u)`, everywhere in `expr`.
+fn reciprocal_form(graph: &ExprGraph, expr: ExprId) -> ExprId {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Add(ts) => graph.add(
+            ts.iter()
+                .map(|&t| reciprocal_form(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Mul(fs) => graph.mul(
+            fs.iter()
+                .map(|&t| reciprocal_form(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Sub(a, b) => graph.sub(reciprocal_form(graph, a), reciprocal_form(graph, b)),
+        ExprKind::Div(a, b) => graph.div(reciprocal_form(graph, a), reciprocal_form(graph, b)),
+        ExprKind::Neg(a) => graph.neg(reciprocal_form(graph, a)),
+        ExprKind::Pow(a, b) => graph.pow(reciprocal_form(graph, a), b),
+        ExprKind::Function { name, args } if args.len() == 1 => {
+            let u = reciprocal_form(graph, args[0]);
+            match graph.symbols.resolve(name).as_deref() {
+                Some("cot") => graph.div(graph.function("cos", [u]), graph.function("sin", [u])),
+                Some("csc") => graph.div(graph.integer(1), graph.function("sin", [u])),
+                Some(other) => graph.function(other, [u]),
+                None => expr,
+            }
+        }
+        _ => expr,
+    }
 }

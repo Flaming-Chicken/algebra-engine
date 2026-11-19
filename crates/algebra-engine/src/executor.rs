@@ -2739,9 +2739,17 @@ impl OperationExecutor {
                     // Replace prime notation dep'' and dep' cleanly for classification and solving
                     let prime2_pat = format!("{}''", dep_name);
                     let prime1_pat = format!("{}'", dep_name);
-                    let eq_for_solve = equation
-                        .replace(&prime2_pat, "__ode_d2")
-                        .replace(&prime1_pat, "__ode_d1");
+                    // Derivatives of any order up to six, the longest pattern first.
+                    let mut eq_for_solve = equation.to_string();
+                    let mut max_order = 0usize;
+                    for k in (1..=6usize).rev() {
+                        let pattern = format!("{}{}", dep_name, "'".repeat(k));
+                        if eq_for_solve.contains(&pattern) {
+                            max_order = max_order.max(k);
+                            eq_for_solve = eq_for_solve.replace(&pattern, &format!("__ode_d{k}"));
+                        }
+                    }
+                    let _ = (&prime2_pat, &prime1_pat);
                     let eq_for_cls = equation
                         .replace(
                             &prime2_pat,
@@ -2800,7 +2808,9 @@ impl OperationExecutor {
                             [c2, c1, c0, base],
                         );
                         let mut implicit_solution: Option<(ExprId, ExprId)> = None;
-                        let solved_list: Option<Vec<ExprId>> = if !linear {
+                        let solved_list: Option<Vec<ExprId>> = if max_order >= 3 {
+                            None // the second-order coefficient extraction below does not describe it
+                        } else if !linear {
                             if c2 == zero {
                                 match crate::ode::classical::solve_separable(
                                     graph, ode_res, d1_sym, d0_sym, x_sym,
@@ -2891,6 +2901,31 @@ impl OperationExecutor {
                             None
                         };
 
+                        // Bernoulli equations, and homogeneous linear equations of any order (constant
+                        // coefficients, or Euler equations), solved exactly from the characteristic polynomial.
+                        let mut solved_list = solved_list;
+                        if solved_list.is_none() && implicit_solution.is_none() {
+                            if max_order <= 1 && !linear {
+                                solved_list = crate::ode::classical::solve_bernoulli_form(
+                                    graph, ode_res, d1_sym, d0_sym, x_sym,
+                                )
+                                .map(|sol| vec![sol]);
+                            }
+                            if solved_list.is_none() && max_order >= 2 {
+                                let derivative_symbols: Vec<algebra_core::SymbolId> = (1
+                                    ..=max_order)
+                                    .map(|k| graph.symbols.get_or_intern(format!("__ode_d{k}")))
+                                    .collect();
+                                solved_list = crate::ode::classical::solve_linear_homogeneous(
+                                    graph,
+                                    ode_res,
+                                    &derivative_symbols,
+                                    d0_sym,
+                                    x_sym,
+                                )
+                                .map(|sol| vec![sol]);
+                            }
+                        }
                         if let Some((g, f)) = implicit_solution {
                             // No closed form for y: report the implicit solution, honestly labelled.
                             let g_text = unicode_fmt.format(graph, g).unwrap_or_default();

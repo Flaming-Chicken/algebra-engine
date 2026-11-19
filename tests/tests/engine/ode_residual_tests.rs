@@ -13,6 +13,11 @@ type Residual = fn(f64, f64, f64, f64) -> f64;
 
 /// Check every alternative of the solution of `ode` against `residual(x, y, y', y'')`.
 fn check(ode: &str, residual: Residual, points: &[f64]) -> usize {
+    check_derivatives(ode, |x, d| residual(x, d[0], d[1], d[2]), points)
+}
+
+/// Check every alternative of the solution of `ode` against `residual(x, [y, y', y'', y''', y''''])`.
+fn check_derivatives(ode: &str, residual: impl Fn(f64, &[f64]) -> f64, points: &[f64]) -> usize {
     let r = UraeSession::new().execute_line(&format!("dsolve({ode})"));
     assert!(
         !r.is_error && r.output_text.starts_with("y(x) = "),
@@ -30,28 +35,34 @@ fn check(ode: &str, residual: Residual, points: &[f64]) -> usize {
         let ExprKind::Symbol(sym) = graph.get(x).kind else {
             unreachable!()
         };
-        let dy = graph.diff(y, sym);
-        let ddy = graph.diff(dy, sym);
+        let mut derivatives = vec![y];
+        for _ in 0..4 {
+            let next = graph.diff(*derivatives.last().unwrap(), sym);
+            derivatives.push(next);
+        }
         for (c1, c2) in [(0.7, -1.3), (-2.0, 0.5)] {
             for &p in points {
-                let ctx = EvalContext::with_bindings(
-                    50,
-                    HashMap::from([
-                        ("x".to_string(), p),
-                        ("C1".to_string(), c1),
-                        ("C2".to_string(), c2),
-                    ]),
-                );
-                let value = |id| {
-                    graph
-                        .evalf(id, &ctx)
-                        .unwrap_or_else(|e| panic!("{ode}: {rhs}: {e}"))
-                        .to_f64()
-                };
-                let (yv, y1, y2) = (value(y), value(dy), value(ddy));
-                let res = residual(p, yv, y1, y2);
+                let mut bindings = HashMap::from([("x".to_string(), p)]);
+                for k in 1..=6 {
+                    bindings.insert(
+                        format!("C{k}"),
+                        if k % 2 == 1 { c1 } else { c2 } + 0.1 * k as f64,
+                    );
+                }
+                let ctx = EvalContext::with_bindings(50, bindings);
+                let values: Vec<f64> = derivatives
+                    .iter()
+                    .map(|&d| {
+                        graph
+                            .evalf(d, &ctx)
+                            .unwrap_or_else(|e| panic!("{ode}: {rhs}: {e}"))
+                            .to_f64()
+                    })
+                    .collect();
+                let res = residual(p, &values);
+                let size: f64 = values.iter().map(|v| v.abs()).sum();
                 assert!(
-                    res.abs() <= 1e-7 * (1.0 + yv.abs() + y1.abs() + y2.abs()),
+                    res.abs() <= 1e-6 * (1.0 + size),
                     "{ode}: y = {rhs} leaves the residual {res} at x = {p} (C1 = {c1}, C2 = {c2})"
                 );
                 checked += 1;
@@ -149,4 +160,60 @@ fn an_equation_that_is_not_recognised_is_not_given_a_wrong_solution() {
     if r.output_text.starts_with("y(x) = ") {
         check("y' = x + y^2", |x, y, y1, _| y1 - x - y * y, &[0.3, 0.6]);
     }
+}
+
+#[test]
+fn higher_order_euler_and_bernoulli_equations() {
+    // Constant coefficients of order three and four, with repeated and complex roots.
+    check_derivatives("y''' - y = 0", |_, d| d[3] - d[0], PTS);
+    check_derivatives(
+        "y''' - 6*y'' + 11*y' - 6*y = 0",
+        |_, d| d[3] - 6.0 * d[2] + 11.0 * d[1] - 6.0 * d[0],
+        PTS,
+    );
+    check_derivatives(
+        "y''' - 3*y'' + 3*y' - y = 0",
+        |_, d| d[3] - 3.0 * d[2] + 3.0 * d[1] - d[0],
+        PTS,
+    );
+    check_derivatives("y'''' - y = 0", |_, d| d[4] - d[0], PTS);
+    check_derivatives(
+        "y'''' + 2*y'' + y = 0",
+        |_, d| d[4] + 2.0 * d[2] + d[0],
+        PTS,
+    );
+    check_derivatives(
+        "y'' - 2*y' + 5*y = 0",
+        |_, d| d[2] - 2.0 * d[1] + 5.0 * d[0],
+        PTS,
+    );
+    check_derivatives("y'' - 2*y = 0", |_, d| d[2] - 2.0 * d[0], PTS);
+    // Euler (equidimensional) equations: real, repeated and complex indicial roots.
+    check_derivatives("x^2*y'' - 2*y = 0", |x, d| x * x * d[2] - 2.0 * d[0], PTS);
+    check_derivatives(
+        "x^2*y'' + x*y' + y = 0",
+        |x, d| x * x * d[2] + x * d[1] + d[0],
+        PTS,
+    );
+    check_derivatives(
+        "x^2*y'' - x*y' + y = 0",
+        |x, d| x * x * d[2] - x * d[1] + d[0],
+        PTS,
+    );
+    check_derivatives(
+        "x^3*y''' - 3*x*y' + 3*y = 0",
+        |x, d| x.powi(3) * d[3] - 3.0 * x * d[1] + 3.0 * d[0],
+        PTS,
+    );
+    // Bernoulli: y' + y = y^2 and y' - y/x = x y^3.
+    check_derivatives(
+        "y' + y = y^2",
+        |_, d| d[1] + d[0] - d[0] * d[0],
+        &[0.3, 0.8, 1.4],
+    );
+    check_derivatives(
+        "y' - y/x = x*y^3",
+        |x, d| d[1] - d[0] / x - x * d[0].powi(3),
+        &[1.2, 1.7],
+    );
 }

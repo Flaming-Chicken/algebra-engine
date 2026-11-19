@@ -160,9 +160,9 @@ impl SymbolicOdeSolver {
         x: SymbolId,
     ) -> AlgebraResult<ExprId> {
         let int_p = graph.integrate(p, x)?;
-        let mu = graph.function("exp", [int_p]);
+        let mu = crate::ode::classical::exp_clean(graph, int_p);
         let neg_int_p = graph.neg(int_p);
-        let inv_mu = graph.function("exp", [neg_int_p]);
+        let inv_mu = crate::ode::classical::exp_clean(graph, neg_int_p);
 
         let mu_q = graph.mul([mu, q]);
         let int_mu_q = graph.integrate(mu_q, x)?;
@@ -196,6 +196,8 @@ impl SymbolicOdeSolver {
         let one_minus_n = graph.integer(1 - n);
         let p_v = graph.mul([one_minus_n, p]);
         let q_v = graph.mul([one_minus_n, q]);
+        let p_v = Simplifier::simplify(graph, p_v).unwrap_or(p_v);
+        let q_v = Simplifier::simplify(graph, q_v).unwrap_or(q_v);
 
         let v_sol = Self::solve_first_order_linear(graph, p_v, q_v, x)?;
 

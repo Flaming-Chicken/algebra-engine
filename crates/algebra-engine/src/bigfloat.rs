@@ -284,6 +284,8 @@ fn eval_node(fx: &Fixed, graph: &ExprGraph, id: ExprId) -> AlgebraResult<BigInt>
                 "abs" => Ok(x.abs()),
                 "gamma" => fx.gamma(&x),
                 "lgamma" | "log_gamma" | "lngamma" => fx.ln_gamma(&x),
+                "digamma" | "psi" => fx.digamma(&x),
+                "zeta" => fx.zeta(&x),
                 "erf" => erf_fixed(fx, &x, false),
                 "erfc" => erf_fixed(fx, &x, true),
                 "sinh" | "cosh" | "tanh" => {
@@ -308,6 +310,33 @@ fn eval_node(fx: &Fixed, graph: &ExprGraph, id: ExprId) -> AlgebraResult<BigInt>
                     } else {
                         Ok((fx.pi()? >> 1) - asin)
                     }
+                }
+                other => Err(err(format!(
+                    "the function {other} is not available at arbitrary precision"
+                ))),
+            }
+        }
+        ExprKind::Function { name, args } if args.len() == 2 => {
+            let fname = graph.symbols.resolve(*name).unwrap_or_default();
+            match fname.as_str() {
+                "beta" => {
+                    let (a, b) = (
+                        eval_node(fx, graph, args[0])?,
+                        eval_node(fx, graph, args[1])?,
+                    );
+                    fx.beta(&a, &b)
+                }
+                "besselj" | "bessel_j" => {
+                    let order = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=10_000).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("besselj needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    bessel_j_fixed(fx, order, &x)
                 }
                 other => Err(err(format!(
                     "the function {other} is not available at arbitrary precision"
@@ -525,6 +554,8 @@ pub fn special_f64(name: &str, x: f64) -> Option<f64> {
             fx.gamma(&fixed_x).ok()?
         }
         "lgamma" => fx.ln_gamma(&fixed_x).ok()?,
+        "digamma" => fx.digamma(&fixed_x).ok()?,
+        "zeta" if x > 1.0 => fx.zeta(&fixed_x).ok()?,
         "erf" => {
             if x.abs() > 27.0 {
                 return Some(x.signum());
@@ -543,4 +574,147 @@ pub fn special_f64(name: &str, x: f64) -> Option<f64> {
         _ => return None,
     };
     to_f64(&value)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Digamma, beta, zeta, Bessel J
+// ---------------------------------------------------------------------------------------------------------------
+
+impl Fixed {
+    /// The digamma function (the logarithmic derivative of the gamma function): shift the argument up with
+    /// `psi(x) = psi(x + 1) - 1/x`, then the asymptotic series `ln y - 1/(2y) - sum B_2k / (2k y^2k)`; the
+    /// reflection formula handles negative arguments.
+    fn digamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if !x.is_positive() {
+            let integer_part = x >> self.p;
+            if (&integer_part << self.p) == *x {
+                return Err(err("digamma has a pole at zero and the negative integers"));
+            }
+            // psi(1 - x) - psi(x) = pi cot(pi x)
+            let pi = self.pi()?;
+            let (s, c) = self.sin_cos(&self.mul(&pi, x))?;
+            let cot = self.div(&c, &s)?;
+            let reflected = self.digamma(&(self.one() - x))?;
+            return Ok(reflected - self.mul(&pi, &cot));
+        }
+        let target = BigInt::from((self.p as u64 * 2 / 5) + 12);
+        let target_fixed = self.scale_rational(&BigRational::from_integer(target));
+        let mut shifted = x.clone();
+        let mut correction = BigInt::zero();
+        let mut steps = 0u64;
+        while shifted < target_fixed {
+            correction += self.div(&self.one(), &shifted)?;
+            shifted += self.one();
+            steps += 1;
+            if steps > 100_000 {
+                return Err(err("digamma: the argument is too small"));
+            }
+        }
+        let inv = self.div(&self.one(), &shifted)?;
+        let inv2 = self.mul(&inv, &inv);
+        let mut sum = self.ln(&shifted)? - (&inv >> 1);
+        let terms = (self.p as usize) / 5 + 10;
+        let bernoulli = bernoulli_numbers(2 * terms);
+        let mut power = inv2.clone(); // y^-2k
+        for k in 1..=terms {
+            let coefficient =
+                &bernoulli[2 * k] / BigRational::from_integer(BigInt::from((2 * k) as u64));
+            let term = self.mul(&self.scale_rational(&coefficient), &power);
+            if term.is_zero() {
+                break;
+            }
+            sum -= term;
+            power = self.mul(&power, &inv2);
+        }
+        Ok(sum - correction)
+    }
+
+    /// The Riemann zeta function for real `s > 1`, by Euler-Maclaurin summation.
+    fn zeta(&self, s: &BigInt) -> AlgebraResult<BigInt> {
+        let one = self.one();
+        if *s <= one {
+            return Err(err(
+                "zeta is available at arbitrary precision for real s > 1",
+            ));
+        }
+        let n_terms = (self.p as usize) / 4 + 20;
+        let m_terms = (self.p as usize) / 5 + 10;
+        let neg_s = -s.clone();
+        let integer =
+            |k: usize| self.scale_rational(&BigRational::from_integer(BigInt::from(k as u64)));
+        let mut sum = BigInt::zero();
+        for k in 1..n_terms {
+            let ln_k = self.ln(&integer(k))?;
+            sum += self.exp(&self.mul(&neg_s, &ln_k))?;
+        }
+        let n_fixed = integer(n_terms);
+        let ln_n = self.ln(&n_fixed)?;
+        let pw = self.exp(&self.mul(&neg_s, &ln_n))?; // N^-s
+        sum += self.div(&self.mul(&pw, &n_fixed), &(s - &one))?;
+        sum += &pw >> 1;
+        let bernoulli = bernoulli_numbers(2 * m_terms);
+        let inv_n = self.div(&one, &n_fixed)?;
+        let inv_n2 = self.mul(&inv_n, &inv_n);
+        let mut inv_power = inv_n.clone(); // N^-(2j-1)
+        let mut rising = s.clone(); // s (s+1) ... (s + 2j - 2)
+        let mut factorial = BigInt::one(); // (2j)!
+        for j in 1..=m_terms {
+            factorial *= BigInt::from((2 * j - 1) as u64) * BigInt::from((2 * j) as u64);
+            let coefficient = &bernoulli[2 * j] / BigRational::from_integer(factorial.clone());
+            let term = self.mul(
+                &self.mul(&self.scale_rational(&coefficient), &rising),
+                &self.mul(&pw, &inv_power),
+            );
+            if term.is_zero() {
+                break;
+            }
+            sum += term;
+            let a = s + integer(2 * j - 1);
+            let b = s + integer(2 * j);
+            rising = self.mul(&self.mul(&rising, &a), &b);
+            inv_power = self.mul(&inv_power, &inv_n2);
+        }
+        Ok(sum)
+    }
+
+    /// `B(a, b) = Gamma(a) Gamma(b) / Gamma(a + b)`.
+    fn beta(&self, a: &BigInt, b: &BigInt) -> AlgebraResult<BigInt> {
+        if a.is_positive() && b.is_positive() {
+            let log = self.ln_gamma(a)? + self.ln_gamma(b)? - self.ln_gamma(&(a + b))?;
+            return self.exp(&log);
+        }
+        let numerator = self.mul(&self.gamma(a)?, &self.gamma(b)?);
+        self.div(&numerator, &self.gamma(&(a + b))?)
+    }
+}
+
+/// Bessel function of the first kind of non-negative integer order, from the power series with enough extra bits to
+/// absorb the cancellation (the terms reach `e^|x|`).
+fn bessel_j_fixed(fx: &Fixed, order: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+    let magnitude = (x.abs() >> fx.p.saturating_sub(8)).to_f64().unwrap_or(0.0) / 256.0;
+    if magnitude > 5000.0 {
+        return Err(err("besselj: the argument is too large for the series"));
+    }
+    let extra = (1.45 * magnitude).ceil() as u32 + 24;
+    let wide = Fixed { p: fx.p + extra };
+    let half = (x << extra) >> 1;
+    let half2 = wide.mul(&half, &half);
+    let mut term = wide.one();
+    for k in 1..=order {
+        term = wide.mul(&term, &half) / k;
+    }
+    let mut sum = term.clone();
+    let mut m = 0u64;
+    loop {
+        m += 1;
+        term = -wide.mul(&term, &half2) / BigInt::from(m * (m + order as u64));
+        if term.is_zero() {
+            break;
+        }
+        sum += &term;
+        if m > 200_000 {
+            return Err(err("besselj: the series did not converge"));
+        }
+    }
+    Ok(sum >> extra)
 }

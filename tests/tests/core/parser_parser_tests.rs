@@ -3,18 +3,49 @@ use algebra_core::parser::ExprParser;
 
 #[test]
 fn test_parse_latex_and_unicode_inputs() {
+    use algebra_core::{ExprKind, RelOp};
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let parser = ExprParser::new(&graph);
 
-    // Parse raw LaTeX fraction and square root
+    // Parse raw LaTeX fraction and square root: evaluate numerically at (a=6, b=3, x=9) => 6/3 + 3 = 5.0
     let frac = parser.parse("\\frac{a}{b} + \\sqrt{x}").unwrap();
-    assert!(!graph.is_empty());
-    assert_ne!(frac, graph.integer(0));
+    let mut vars = HashMap::new();
+    vars.insert("a".to_string(), 6.0);
+    vars.insert("b".to_string(), 3.0);
+    vars.insert("x".to_string(), 9.0);
+    let ctx = EvalContext::with_bindings(53, vars);
+    let frac_val = NumericalEval::evalf(&graph, frac, &ctx).unwrap().to_f64();
+    assert!(
+        (frac_val - 5.0).abs() < 1e-12,
+        "Expected 6/3 + sqrt(9) = 5.0, got {frac_val}"
+    );
 
-    // Parse Unicode math symbols (superscripts, sqrt, dot product)
+    // Parse Unicode math symbols (superscripts, sqrt, dot product) and verify LHS evaluation
     let uni = parser.parse("a · x² + √(y) = 0").unwrap();
-    assert!(!graph.is_empty());
-    assert_ne!(uni, graph.integer(0));
+    match &graph.get(uni).kind {
+        ExprKind::Relational {
+            op: RelOp::Equal,
+            lhs,
+            rhs,
+        } => {
+            let mut uvars = HashMap::new();
+            uvars.insert("a".to_string(), 2.0);
+            uvars.insert("x".to_string(), 3.0);
+            uvars.insert("y".to_string(), 16.0);
+            let uctx = EvalContext::with_bindings(53, uvars);
+            let lhs_val = NumericalEval::evalf(&graph, *lhs, &uctx).unwrap().to_f64();
+            let rhs_val = NumericalEval::evalf(&graph, *rhs, &uctx).unwrap().to_f64();
+            assert!(
+                (lhs_val - 22.0).abs() < 1e-12,
+                "Expected 2*9 + 4 = 22, got {lhs_val}"
+            );
+            assert!(rhs_val.abs() < 1e-12);
+        }
+        other => panic!("Expected Equal relation, got {other:?}"),
+    }
 }
 
 #[test]

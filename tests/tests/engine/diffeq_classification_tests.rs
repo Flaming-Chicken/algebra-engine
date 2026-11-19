@@ -138,24 +138,72 @@ fn test_manual_override_respected() {
 
 #[test]
 fn test_kdv_traveling_wave_reduction() {
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let x_sym = graph.symbols.get_or_intern("x");
     let t_sym = graph.symbols.get_or_intern("t");
 
-    // KdV single-soliton with speed c = 4.0
-    let sol = PdeTravelingWaveReduction::kdv_soliton(&graph, 4.0, x_sym, t_sym);
-    assert!(sol.is_ok());
+    // KdV single-soliton with speed c = 4.0: crest value = c/2 = 2.0 along x = 4*t
+    let sol = PdeTravelingWaveReduction::kdv_soliton(&graph, 4.0, x_sym, t_sym).unwrap();
+    let mut b = HashMap::new();
+    b.insert("x".to_string(), 4.0);
+    b.insert("t".to_string(), 1.0);
+    let peak = graph
+        .evalf(sol, &EvalContext::with_bindings(53, b))
+        .unwrap()
+        .to_f64();
+    assert!(
+        (peak - 2.0).abs() < 1e-10,
+        "expected KdV crest 2.0, got {peak}"
+    );
+
+    let mut b_far = HashMap::new();
+    b_far.insert("x".to_string(), 20.0);
+    b_far.insert("t".to_string(), 0.0);
+    let tail = graph
+        .evalf(sol, &EvalContext::with_bindings(53, b_far))
+        .unwrap()
+        .to_f64();
+    assert!(tail < 1e-4, "expected decaying soliton tail, got {tail}");
 }
 
 #[test]
 fn test_burgers_traveling_wave_reduction() {
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let x_sym = graph.symbols.get_or_intern("x");
     let t_sym = graph.symbols.get_or_intern("t");
 
-    // Burgers shock with u_L = 2.0, u_R = 0.0, nu = 0.1
-    let sol = PdeTravelingWaveReduction::burgers_shock(&graph, 2.0, 0.0, 0.1, x_sym, t_sym);
-    assert!(sol.is_ok());
+    // Burgers shock with u_L = 2.0, u_R = 0.0, nu = 0.1 => shock speed c = 1.0
+    let sol =
+        PdeTravelingWaveReduction::burgers_shock(&graph, 2.0, 0.0, 0.1, x_sym, t_sym).unwrap();
+
+    // At shock center x = c*t = 1.0 (t=1.0), u = (u_L + u_R)/2 = 1.0
+    let mut b_mid = HashMap::new();
+    b_mid.insert("x".to_string(), 1.0);
+    b_mid.insert("t".to_string(), 1.0);
+    let mid = graph
+        .evalf(sol, &EvalContext::with_bindings(53, b_mid))
+        .unwrap()
+        .to_f64();
+    assert!(
+        (mid - 1.0).abs() < 1e-10,
+        "expected shock midpoint 1.0, got {mid}"
+    );
+
+    // Upstream x = -5 -> u_L = 2.0, Downstream x = 5 -> u_R = 0.0
+    let mut b_left = HashMap::new();
+    b_left.insert("x".to_string(), -5.0);
+    b_left.insert("t".to_string(), 0.0);
+    let left_val = graph
+        .evalf(sol, &EvalContext::with_bindings(53, b_left))
+        .unwrap()
+        .to_f64();
+    assert!((left_val - 2.0).abs() < 1e-6);
 }
 
 #[test]

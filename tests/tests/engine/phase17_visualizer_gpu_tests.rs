@@ -31,13 +31,25 @@ fn test_domain_coloring_hsv_mapping() {
 fn test_riemann_surface_sqrt_and_log_mesh_generation() {
     let sqrt_mesh = RiemannSurface::sqrt_surface(2.0, 8, 16);
     assert_eq!(sqrt_mesh.name, "RiemannSurface_Sqrt");
-    assert!(!sqrt_mesh.vertices.is_empty());
-    assert!(!sqrt_mesh.triangles.is_empty());
+    assert_eq!(sqrt_mesh.vertices.len(), (8 + 1) * (16 + 1));
+    assert_eq!(sqrt_mesh.triangles.len(), 8 * 16 * 2);
+    for v in &sqrt_mesh.vertices {
+        assert!(v.iter().all(|c| c.is_finite()));
+        assert!(v[0] * v[0] + v[1] * v[1] <= 4.0 + 1e-9);
+    }
+    for tri in &sqrt_mesh.triangles {
+        assert!(tri.iter().all(|&idx| idx < sqrt_mesh.vertices.len()));
+    }
 
     let log_mesh = RiemannSurface::log_surface(2.0, 2, 8, 16);
     assert_eq!(log_mesh.name, "RiemannSurface_Log");
-    assert!(!log_mesh.vertices.is_empty());
-    assert!(!log_mesh.triangles.is_empty());
+    assert_eq!(log_mesh.vertices.len(), (2 * 16 + 1) * (8 + 1));
+    assert_eq!(log_mesh.triangles.len(), 2 * 16 * 8 * 2);
+    assert!((log_mesh.vertices.first().unwrap()[2] - 0.0).abs() < 1e-12);
+    assert!((log_mesh.vertices.last().unwrap()[2] - 2.0).abs() < 1e-12);
+    for tri in &log_mesh.triangles {
+        assert!(tri.iter().all(|&idx| idx < log_mesh.vertices.len()));
+    }
 }
 
 #[test]

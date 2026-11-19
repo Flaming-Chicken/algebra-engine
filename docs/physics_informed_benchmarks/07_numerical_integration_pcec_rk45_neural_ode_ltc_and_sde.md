@@ -135,3 +135,14 @@ All operators and integrators are verified against the deterministic golden refe
 - Kernels: `kernels/06_smooth_and_physics_informed_ai/07_numerical_integration_pcec_rk45_neural_ode_ltc_and_sde.rs`
 - Weights: `weights/06_smooth_and_physics_informed_ai/07_numerical_integration_pcec_rk45_neural_ode_ltc_and_sde.safetensors`
 - Notebook: `notebooks/06_smooth_and_physics_informed_ai/07_numerical_integration_pcec_rk45_neural_ode_ltc_and_sde.ipynb`
+
+---
+
+## 9. Workspace Criterion Harness Cross-Reference & Current Limitations
+
+> [!NOTE]
+> Sections 7–8 above reference the external multi-framework (`PyTorch` / `JAX` / `Candle` / `safetensors`) parity repository (`weights/06_smooth_and_physics_informed_ai/...`) rather than native URAE workspace binaries.
+
+In the URAE Rust workspace:
+- **Native ODE / PINN Benchmarks**: Defined in [crates/algebra-engine/benches/engine_benchmarks.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/benches/engine_benchmarks.rs) under `Engine_Numerical_Physics/ode_harmonic_oscillator/{tsitouras54,dopri5,radau_iia5,self_optimizing_meta}` and `Engine_Numerical_Physics/pinn_burgers_hyperdual_64pts`.
+- **Implementation Caveat (`neural_ode.rs`)**: Unlike the $\mathcal{O}(1)$-memory reverse-mode continuous adjoint method described in Section 2.2 above, [AdjointSensitivitySolver::compute_gradient](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/neural_ode.rs#L89) currently ignores `_vector_field`, stores the full $\mathcal{O}(T)$ forward trajectory `NeuralOdeTrajectory`, and steps backward using first-order explicit Euler rather than checkpointed reverse ODE integration. See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).

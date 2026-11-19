@@ -18,28 +18,56 @@ fn test_solveset_linear() {
 
 #[test]
 fn test_solve_ode_linear() {
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let x_sym = graph.symbols.get_or_intern("x");
 
-    // y' + 0 * y = 1 => y(x) = x + C
+    // Non-zero constant coefficient: y' + 1 * y = 1 => particular solution y_p(x) = 1
     let zero = graph.integer(0);
     let one = graph.integer(1);
+    let sol_nonzero = graph.solve_ode_linear(one, one, x_sym).unwrap();
+    let mut bindings = HashMap::new();
+    bindings.insert("x".to_string(), 4.5);
+    let ctx = EvalContext::with_bindings(53, bindings);
+    let val = graph.evalf(sol_nonzero, &ctx).unwrap().to_f64();
+    assert!(
+        (val - 1.0).abs() < 1e-12,
+        "expected y_p(4.5)=1.0, got {val}"
+    );
 
-    let sol = graph.solve_ode_linear(zero, one, x_sym).unwrap();
-    assert!(!graph.is_empty());
-    assert_ne!(sol, zero);
+    // p = 0 (y' = 1): the integrating factor exp(0) used to survive unreduced and the result failed to
+    // evaluate with a division by zero (audit B4, fixed). The particular solution is y = x.
+    let sol_zero_p = graph.solve_ode_linear(zero, one, x_sym).unwrap();
+    let value = graph
+        .evalf(sol_zero_p, &ctx)
+        .expect("y' = 1 has an evaluable solution")
+        .to_f64();
+    assert!(
+        (value - 4.5).abs() < 1e-12,
+        "expected y_p(4.5) = 4.5, got {value}"
+    );
 }
 
 #[test]
 fn test_solve_pde_heat_1d() {
+    use algebra_core::format::{Formatter, UnicodeFormatter};
+
     let graph = ExprGraph::new();
     let alpha = graph.symbol("alpha");
     let x_sym = graph.symbols.get_or_intern("x");
     let t_sym = graph.symbols.get_or_intern("t");
 
     let (x_sol, t_sol) = graph.solve_pde_heat_1d(alpha, x_sym, t_sym).unwrap();
-    assert!(!graph.is_empty());
-    assert_ne!(x_sol, t_sol);
+    let fmt = UnicodeFormatter;
+    let xs = fmt.format(&graph, x_sol).unwrap();
+    let ts = fmt.format(&graph, t_sol).unwrap();
+    assert!(xs.contains("cos") && xs.contains("k_x"), "got spatial={xs}");
+    assert!(
+        ts.contains("exp") && ts.contains("alpha") && ts.contains('t'),
+        "got temporal={ts}"
+    );
 }
 
 #[test]

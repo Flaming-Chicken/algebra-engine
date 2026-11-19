@@ -49,3 +49,10 @@ shadow-verify = []
 
 [dev-dependencies]
 criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "engine_benchmarks"
+harness = false

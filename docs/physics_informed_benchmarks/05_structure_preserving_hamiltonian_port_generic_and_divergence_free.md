@@ -141,3 +141,12 @@ All operators are verified against the deterministic golden reference checkpoint
 - Kernels: `kernels/06_smooth_and_physics_informed_ai/05_structure_preserving_hamiltonian_port_generic_and_divergence_free.rs`
 - Weights: `weights/06_smooth_and_physics_informed_ai/05_structure_preserving_hamiltonian_port_generic_and_divergence_free.safetensors`
 - Notebook: `notebooks/06_smooth_and_physics_informed_ai/05_structure_preserving_hamiltonian_port_generic_and_divergence_free.ipynb`
+
+---
+
+## 9. Workspace Criterion Harness Cross-Reference
+
+> [!NOTE]
+> Sections 7–8 above reference the external multi-framework (`PyTorch` / `JAX` / `Candle` / `safetensors`) parity repository (`weights/06_smooth_and_physics_informed_ai/...`) rather than native URAE workspace binaries.
+
+In the URAE Rust workspace, native Criterion microbenchmarks for structure-preserving symplectic integration live in [crates/algebra-engine/benches/engine_benchmarks.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/benches/engine_benchmarks.rs) (`Engine_Numerical_Physics/verlet2_1000steps` and `Engine_Numerical_Physics/yoshida4_1000steps`), alongside library unit/integration verification in `algebra_engine::symplectic` and [phase20_symplectic_quantum_tests.rs](file:///c:/Users/Liam/Code/algebra-engine/tests/tests/engine/phase20_symplectic_quantum_tests.rs). Note that `algebra_engine::fea` and `algebra_engine::neural_ode` currently remain pure CPU scalar implementations rather than GPU/WebGPU compute kernels; see [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).

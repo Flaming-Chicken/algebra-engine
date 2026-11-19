@@ -3,6 +3,9 @@ use algebra_engine::matrix::SymbolicMatrix;
 
 #[test]
 fn test_matrix_identity_and_multiply() {
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let eye = SymbolicMatrix::identity(&graph, 2);
 
@@ -16,10 +19,24 @@ fn test_matrix_identity_and_multiply() {
 
     assert_eq!(prod.rows, 2);
     assert_eq!(prod.cols, 2);
+
+    let mut bindings = HashMap::new();
+    bindings.insert("a".to_string(), 2.0);
+    bindings.insert("b".to_string(), 3.0);
+    bindings.insert("c".to_string(), 5.0);
+    bindings.insert("d".to_string(), 7.0);
+    let ctx = EvalContext::with_bindings(53, bindings);
+    assert!((graph.evalf(prod.get(0, 0), &ctx).unwrap().to_f64() - 2.0).abs() < 1e-12);
+    assert!((graph.evalf(prod.get(0, 1), &ctx).unwrap().to_f64() - 3.0).abs() < 1e-12);
+    assert!((graph.evalf(prod.get(1, 0), &ctx).unwrap().to_f64() - 5.0).abs() < 1e-12);
+    assert!((graph.evalf(prod.get(1, 1), &ctx).unwrap().to_f64() - 7.0).abs() < 1e-12);
 }
 
 #[test]
 fn test_matrix_determinant_2x2() {
+    use algebra_engine::numeric::{EvalContext, NumericalEval};
+    use std::collections::HashMap;
+
     let graph = ExprGraph::new();
     let a = graph.symbol("a");
     let b = graph.symbol("b");
@@ -27,9 +44,20 @@ fn test_matrix_determinant_2x2() {
     let d = graph.symbol("d");
 
     let mat = SymbolicMatrix::new(2, 2, vec![a, b, c, d]).unwrap();
-    let _det = mat.determinant(&graph).unwrap();
+    let det = mat.determinant(&graph).unwrap();
 
-    assert!(!graph.is_empty());
+    // det([[2, 3], [5, 7]]) = 2*7 - 3*5 = -1
+    let mut bindings = HashMap::new();
+    bindings.insert("a".to_string(), 2.0);
+    bindings.insert("b".to_string(), 3.0);
+    bindings.insert("c".to_string(), 5.0);
+    bindings.insert("d".to_string(), 7.0);
+    let ctx = EvalContext::with_bindings(53, bindings);
+    let det_val = graph.evalf(det, &ctx).unwrap().to_f64();
+    assert!(
+        (det_val - (-1.0)).abs() < 1e-12,
+        "expected -1, got {det_val}"
+    );
 }
 
 #[test]

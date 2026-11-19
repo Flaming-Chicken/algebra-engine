@@ -151,3 +151,34 @@ fn test_frequency_response_bode_eval() {
         phase_res
     );
 }
+
+#[test]
+fn test_control_mimo_boundaries_and_discretization() {
+    // Verify current MIMO / higher-order boundaries are explicit and deterministic
+    let a_mimo = vec![
+        vec![0.0, 1.0, 0.0],
+        vec![0.0, 0.0, 1.0],
+        vec![-1.0, -2.0, -3.0],
+    ];
+    let b_mimo = vec![vec![0.0, 1.0], vec![1.0, 0.0], vec![0.0, 1.0]];
+    let c_mimo = vec![vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0]];
+    let d_mimo = vec![vec![0.0, 0.0], vec![0.0, 0.0]];
+    let sys = StateSpaceSystem::new(a_mimo, b_mimo, c_mimo, d_mimo);
+
+    assert!(sys.is_mimo());
+    assert_eq!(sys.controllability_rank(), 3);
+    assert!(sys.is_controllable());
+
+    // Ackermann and eval_frequency_response_siso currently restrict to 2-state SISO
+    assert!(sys.pole_placement_ackermann(&[-1.0, -2.0, -3.0]).is_err());
+    assert_eq!(sys.eval_frequency_response_siso(1.0), (0.0, 0.0));
+
+    // ZOH discretization preserves dimensions and finiteness for higher-order MIMO systems
+    let dsys = sys.discretize_zoh(0.05);
+    assert!(dsys.is_discrete());
+    assert_eq!(dsys.num_states(), 3);
+    assert_eq!(dsys.num_inputs(), 2);
+    assert_eq!(dsys.num_outputs(), 2);
+    assert!(dsys.a.iter().flatten().all(|v| v.is_finite()));
+    assert!(dsys.b.iter().flatten().all(|v| v.is_finite()));
+}

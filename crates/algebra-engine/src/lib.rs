@@ -61,6 +61,7 @@ pub mod poly;
 pub mod qft;
 pub mod quantum_circuit;
 pub mod query;
+mod rational_pf;
 pub mod risch;
 mod risch_exptrig;
 mod risch_more;

@@ -296,13 +296,26 @@ impl RischIntegrator {
 
     /// Perform full Risch transcendental integration on `expr` with respect to variable `wrt`.
     pub fn integrate(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
+        let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
+        let x = graph.symbol(&wrt_name);
+        // A denominator with a repeated irreducible quadratic (or higher) factor, such as `1/(x^2+1)^2`: the
+        // Hermite code below overflowed the stack on these, so partial fractions over Q go first.
+        if crate::rational_pf::has_repeated_nonlinear_factor(graph, expr, wrt)
+            && let Some(Ok(v)) =
+                crate::rational_pf::integrate_rational_function(graph, expr, wrt, x)
+        {
+            return Ok(v);
+        }
         match Self::integrate_main(graph, expr, wrt) {
             Ok(v) => Ok(v),
-            // The main rules gave up: try the further families (quadratic radicals, by parts, trigonometric
-            // powers); if none applies, report the original error.
+            // The main rules gave up: try partial fractions over Q, then the further families (quadratic
+            // radicals, by parts, trigonometric powers); if none applies, report the original error.
             Err(e) => {
-                let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
-                let x = graph.symbol(&wrt_name);
+                if let Some(Ok(v)) =
+                    crate::rational_pf::integrate_rational_function(graph, expr, wrt, x)
+                {
+                    return Ok(v);
+                }
                 crate::risch_more::fallback_integral(graph, expr, wrt, x).unwrap_or(Err(e))
             }
         }

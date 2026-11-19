@@ -85,3 +85,22 @@ fn deep_compositions_are_fast() {
         start.elapsed()
     );
 }
+
+#[test]
+fn series_with_a_symbolic_constant_term_still_match_the_function() {
+    // sin(cos x) and exp(cos x) have constant terms sin(1), e that are not rational, so they take the differentiation
+    // path; the result must still agree with the function.
+    let h = 0.1f64;
+    for (f, exact) in [
+        ("sin(cos(x))", h.cos().sin()),
+        ("exp(cos(x))", h.cos().exp()),
+        ("cos(exp(x))", h.exp().cos()),
+    ] {
+        let poly = series(&format!("series({f}, x, 0, 10)"));
+        let value = eval_at(&poly, h);
+        assert!(
+            (value - exact).abs() < 1e-8,
+            "{f}: {value} vs {exact} ({poly})"
+        );
+    }
+}

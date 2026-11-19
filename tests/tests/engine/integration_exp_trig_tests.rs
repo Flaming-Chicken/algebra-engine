@@ -179,3 +179,41 @@ fn powers_of_sine_and_cosine_and_their_reciprocals() {
         check(f, &[0.3, 0.7, 1.0]);
     }
 }
+
+// ---- rational functions: partial fractions over Q (rational_pf) ----
+
+#[test]
+fn repeated_irreducible_quadratic_denominators_do_not_overflow_the_stack() {
+    // These aborted the whole process with a stack overflow before.
+    for f in [
+        "1/(x^2+1)^2",
+        "1/(x^2+1)^3",
+        "x/(x^2+1)^2",
+        "1/(x^2+2*x+2)^2",
+        "(3*x+2)/(x^2+x+1)^2",
+        "1/((x^2+1)^2*(x-1))",
+        "x^3/(x^2+4)^3",
+        "1/((x^2+1)*(x^2+4)^2)",
+        "(x^4+1)/(x^2+x+1)^3",
+    ] {
+        check(f, ANY);
+    }
+}
+
+#[test]
+fn rational_functions_with_mixed_factors() {
+    for f in [
+        "1/(x^4+1)",
+        "x^2/(x^4+1)",
+        "(x^3+2*x+1)/(x^4+1)",
+        "1/(x^2*(x+1))",
+        "1/((x-1)^2*(x+2))",
+        "x^5/(x^2+1)",
+        "(x^2+1)/(x^3-x)",
+        "1/(x^4+5*x^2+4)",
+        "(2*x^3-x+7)/((x+3)^2*(x^2+x+1))",
+    ] {
+        // Stay clear of the poles at 0, 1, -2 and -3.
+        check(f, &[0.3, 0.7, 1.9, 2.6, 4.2]);
+    }
+}

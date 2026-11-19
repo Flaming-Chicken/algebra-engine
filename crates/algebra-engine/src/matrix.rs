@@ -7,6 +7,7 @@
 //! - Bareiss, E. H. (1968). Sylvester's identity and multistep integer-preserving Gaussian elimination. *Math. Comp.*, 22(103), 565–578.
 //! - Golub, G. H., & Van Loan, C. F. (2013). *Matrix Computations* (4th ed.). Johns Hopkins University Press.
 
+use crate::numeric::NumericalEval;
 use spodeian_parallel::prelude::*;
 
 use algebra_core::{AlgebraError, AlgebraResult, Domain, ExprGraph, ExprId, ExprKind, ExprNode};
@@ -984,22 +985,72 @@ impl SymbolicMatrix {
         )))
     }
 
-    /// Compute exact symbolic eigenvectors of a 2x2 matrix.
+    /// Eigenvectors of a square matrix: for each distinct eigenvalue `lambda`, a basis of the null space of
+    /// `A - lambda I` (as many vectors as the geometric multiplicity: one for a defective eigenvalue, `n` for a
+    /// multiple of the identity). The null space is computed exactly; when the exact elimination cannot decide that
+    /// an entry vanishes (irrational eigenvalues) a real eigenvalue falls back to a numerical null vector, and a
+    /// non-real irrational eigenvalue is reported as unsupported rather than answered with a wrong vector.
+    ///
+    /// (This used to be a 2x2 formula: it returned two-component vectors for a 3x3 matrix and the zero vector for a
+    /// diagonal matrix.)
     pub fn eigenvectors(&self, graph: &ExprGraph) -> AlgebraResult<Vec<(ExprId, Vec<ExprId>)>> {
+        let n = self.rows;
         let e_vals = self.eigenvalues(graph)?;
-        let mut result = Vec::new();
-
-        let b = self.get(0, 1);
-        let a = self.get(0, 0);
-
-        for lambda in e_vals {
-            // (A - lambda*I) v = 0 => (a - lambda)*v1 + b*v2 = 0
-            // If b != 0: v = [-b, a - lambda]
-            let neg_b = graph.neg(b);
-            let a_minus_lambda = graph.sub(a, lambda);
-            result.push((lambda, vec![neg_b, a_minus_lambda]));
+        let mut distinct: Vec<ExprId> = Vec::new();
+        for l in e_vals {
+            if !distinct.contains(&l) {
+                distinct.push(l);
+            }
         }
-
+        let mut result = Vec::new();
+        for lambda in distinct {
+            let shifted: Vec<ExprId> = (0..n * n)
+                .map(|k| {
+                    let (r, c) = (k / n, k % n);
+                    let entry = if r == c {
+                        graph.sub(self.get(r, c), lambda)
+                    } else {
+                        self.get(r, c)
+                    };
+                    crate::simplify::Simplifier::simplify(graph, entry).unwrap_or(entry)
+                })
+                .collect();
+            let shifted = SymbolicMatrix::new(n, n, shifted)?;
+            let basis = shifted.nullspace(graph)?;
+            if !basis.is_empty() {
+                for v in basis {
+                    result.push((lambda, v));
+                }
+                continue;
+            }
+            // No exact null vector: the entries did not simplify to zero. Try numerically for a real eigenvalue.
+            let ctx = crate::numeric::EvalContext::default();
+            let lam = match graph.evalf(lambda, &ctx) {
+                Ok(crate::numeric::BigValue::Real(v)) => v,
+                _ => {
+                    return Err(AlgebraError::EvaluationError(
+                        "eigenvectors: the eigenvalues are not real and could not be eliminated exactly".into(),
+                    ));
+                }
+            };
+            let mut a = vec![vec![0.0f64; n]; n];
+            for (r, row) in a.iter_mut().enumerate() {
+                for (c, entry) in row.iter_mut().enumerate() {
+                    let v = graph.evalf(self.get(r, c), &ctx)?.to_f64();
+                    *entry = if r == c { v - lam } else { v };
+                }
+            }
+            let vectors = numeric_null_vectors(&a, n);
+            if vectors.is_empty() {
+                return Err(AlgebraError::EvaluationError(
+                    "eigenvectors: no null vector found for an eigenvalue (numerical failure)"
+                        .into(),
+                ));
+            }
+            for v in vectors {
+                result.push((lambda, v.into_iter().map(|x| graph.float(x)).collect()));
+            }
+        }
         Ok(result)
     }
 
@@ -1230,6 +1281,62 @@ impl LieAlgebraFamily {
             }
         }
     }
+}
+
+/// Null vectors of a square real matrix by Gaussian elimination with partial pivoting and a relative tolerance, one
+/// per free column.
+fn numeric_null_vectors(a: &[Vec<f64>], n: usize) -> Vec<Vec<f64>> {
+    let scale = a
+        .iter()
+        .flatten()
+        .fold(0.0f64, |m, v| m.max(v.abs()))
+        .max(1.0);
+    let tol = 1e-8 * scale;
+    let mut m: Vec<Vec<f64>> = a.to_vec();
+    let mut pivots: Vec<usize> = Vec::new();
+    let mut row = 0;
+    for col in 0..n {
+        if row == n {
+            break;
+        }
+        let (best, value) = (row..n)
+            .map(|r| (r, m[r][col].abs()))
+            .fold((row, 0.0), |acc, x| if x.1 > acc.1 { x } else { acc });
+        if value <= tol {
+            continue;
+        }
+        m.swap(row, best);
+        let pivot = m[row][col];
+        for c in col..n {
+            m[row][c] /= pivot;
+        }
+        for r in 0..n {
+            if r != row {
+                let f = m[r][col];
+                if f != 0.0 {
+                    for c in col..n {
+                        let d = f * m[row][c];
+                        m[r][c] -= d;
+                    }
+                }
+            }
+        }
+        pivots.push(col);
+        row += 1;
+    }
+    let mut vectors = Vec::new();
+    for free in 0..n {
+        if pivots.contains(&free) {
+            continue;
+        }
+        let mut v = vec![0.0; n];
+        v[free] = 1.0;
+        for (i, &pc) in pivots.iter().enumerate() {
+            v[pc] = -m[i][free];
+        }
+        vectors.push(v);
+    }
+    vectors
 }
 
 #[cfg(test)]

@@ -49,6 +49,11 @@ fn polynomial_and_radical_equations() {
         ("1/(x-1) + 1/(x+1) - 1", 2),
         ("x/(x-1) - 3", 1),
         ("abs(x) - 2", 2),
+        // Roots with no closed form (`RootOf`) are evaluated numerically: a quintic with one real root, a quartic with four,
+        // a cubic with three.
+        ("x^5 - x - 1", 1),
+        ("x^4 - 3*x^2 + x + 1", 4),
+        ("x^3 - 3*x + 1", 3),
     ] {
         let (checked, _) = check_residuals(eq);
         assert_eq!(checked, real_roots, "{eq}");

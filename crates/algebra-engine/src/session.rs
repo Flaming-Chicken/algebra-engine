@@ -605,6 +605,14 @@ impl UraeSession {
                         return OperationResult::success(out.clone(), latex, out);
                     }
                 } else if all_bound || syms.is_empty() {
+                    if !has_user_bound
+                        && crate::radical::has_radicals(&self.graph, expr_id)
+                        && let Some(r) = crate::radical::evaluate(&self.graph, expr_id)
+                    {
+                        let text = r.format();
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
                     if let Some(text) = crate::complex_exact::simplify_text(&self.graph, expr_id) {
                         self.last_result_text = Some(text.clone());
                         return OperationResult::success(text.clone(), text.clone(), text);
@@ -665,7 +673,52 @@ impl UraeSession {
             }
         }
 
+        // A plain expression with symbols (`x^2*x^3`, `x^5/x^2`, `sqrt(x)*sqrt(x)`): show the simplified form when it
+        // is strictly shorter than the expression as typed, so that obvious reductions are not left undone.
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && let Some(result) = self.shorter_form(&expanded_input)
+        {
+            return result;
+        }
         self.execute_op(&parsed_op)
+    }
+
+    /// The simplified form of `input` if it is shorter than the formatted input; `None` otherwise.
+    fn shorter_form(&mut self, input: &str) -> Option<OperationResult> {
+        use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        let expr_id = parser.parse(input).ok()?;
+        // Relations are not simplified here.
+        if matches!(
+            self.graph.get(expr_id).kind,
+            algebra_core::ExprKind::Relational { .. }
+        ) {
+            return None;
+        }
+        let exec_ctx = self.execution_context();
+        let simplified = crate::simplify::Simplifier::simplify_with_assumptions(
+            &self.graph,
+            expr_id,
+            &exec_ctx.assumptions,
+        )
+        .ok()?;
+        if simplified == expr_id {
+            return None;
+        }
+        let original = UnicodeFormatter.format(&self.graph, expr_id).ok()?;
+        let reduced = UnicodeFormatter.format(&self.graph, simplified).ok()?;
+        if reduced.chars().count() >= original.chars().count() {
+            return None;
+        }
+        let latex = LatexFormatter
+            .format(&self.graph, simplified)
+            .unwrap_or_default();
+        self.last_result_expr = Some(simplified);
+        self.last_result_text = Some(reduced.clone());
+        let mut res = OperationResult::success(reduced.clone(), latex, reduced);
+        res.root_expr = Some(simplified);
+        Some(res)
     }
 
     /// `dsolve <equation>, y(x0) = v, y'(x0) = w, ...`: solve, then fix the constants from the conditions.

@@ -839,6 +839,12 @@ impl SymbolicCalculus for ExprGraph {
         {
             return Ok(crate::poly::expr_from_rational(self, &q));
         }
+        // A constant result built from roots of rationals (`2/3 2^(3/2) - 2/3 1^(3/2)` is `(4 sqrt(2) - 2) / 3`).
+        if crate::radical::has_radicals(self, res)
+            && let Some(radical) = crate::radical::evaluate(self, res)
+        {
+            return Ok(radical.to_expr(self));
+        }
 
         // Guard against finite non-convergent values (e.g. NaN / inf after subtraction)
         if let Ok(val) = self.evalf(res, &ctx)

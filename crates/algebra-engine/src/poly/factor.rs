@@ -495,7 +495,10 @@ fn factor_squarefree(f: &[BigInt]) -> Vec<Vec<BigInt>> {
 }
 
 fn is_prime_small(n: u64) -> bool {
-    n >= 2 && (2..).take_while(|d| d * d <= n).all(|d| !n.is_multiple_of(d))
+    n >= 2
+        && (2..)
+            .take_while(|d| d * d <= n)
+            .all(|d| !n.is_multiple_of(d))
 }
 
 fn mod_inverse(a: &BigInt, modulus: &BigInt) -> BigInt {

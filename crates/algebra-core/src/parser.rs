@@ -1607,7 +1607,81 @@ pub fn parse_domain_declaration(line: &str) -> Option<DomainBound> {
 }
 
 /// Parse raw text string into a strongly-typed `MathOperation`.
+/// Rewrite the call spellings people reach for first (`series(f, x, 0, 5)`, `isprime(97)`, `factorint(360)`,
+/// `inverse(M)`, `limit(f, x, 0)`, `17 mod 5`) into the command forms the parser knows. Without this they were
+/// parsed as an expression and echoed back unevaluated, which looks like an answer but is not one.
+fn normalize_call_syntax(input: &str) -> Option<String> {
+    let input = input.trim();
+    // `a mod b`
+    if let Some((a, b)) = input.split_once(" mod ")
+        && !a.contains(char::is_whitespace)
+        && !b.contains(char::is_whitespace)
+        && !a.is_empty()
+        && !b.is_empty()
+    {
+        return Some(format!("simplify mod({a}, {b})"));
+    }
+    let open = input.find('(')?;
+    let name = &input[..open];
+    if name.is_empty()
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !input.ends_with(')')
+    {
+        return None;
+    }
+    // The call must be a single call: its opening bracket closes at the very end.
+    let mut depth = 0usize;
+    for (i, c) in input[open..].char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 && open + i != input.len() - 1 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let args = input[open + 1..input.len() - 1].trim();
+    let canonical = match name.to_ascii_lowercase().as_str() {
+        "series" | "taylor" | "maclaurin" => "series",
+        "is_prime" | "isprime" => "is_prime",
+        "factorint" | "factor_integer" | "prime_factors" | "prime_factorization" => "prime_factors",
+        "partial_fractions" | "apart" | "partfrac" => "partial_fractions",
+        "inv" | "inverse" | "matrix_inverse" => "inv",
+        "det" | "determinant" => "det",
+        "transpose" => "transpose",
+        "rank" => "rank",
+        "dsolve" => "dsolve",
+        "limit" | "lim" => {
+            // limit(f, x, a) -> `limit f as x -> a`
+            let parts = split_top_level_commas(args);
+            if parts.len() >= 3 {
+                return Some(format!(
+                    "limit {} as {} -> {}",
+                    parts[0].trim(),
+                    parts[1].trim(),
+                    parts[2].trim()
+                ));
+            }
+            return None;
+        }
+        _ => return None,
+    };
+    Some(format!("{canonical} {args}"))
+}
+
+/// Parse one input line into the operation it asks for. Call spellings such as `series(f, x, 0, 5)` are accepted
+/// next to the command spellings `series f, x, 0, 5`.
 pub fn parse_operation(input: &str) -> MathOperation {
+    match normalize_call_syntax(input) {
+        Some(rewritten) => parse_operation_canonical(&rewritten),
+        None => parse_operation_canonical(input),
+    }
+}
+
+fn parse_operation_canonical(input: &str) -> MathOperation {
     let input = input.trim();
     if input.is_empty() {
         return MathOperation::Expression { raw: String::new() };

@@ -2377,25 +2377,42 @@ fn parse_operation_canonical(input: &str) -> MathOperation {
             bindings: HashMap::new(),
         };
     }
+    // The number of digits may follow after a top-level comma: `N(pi, 50)`, `evalf sqrt(2), 100`.
+    let split_digits = |body: &str| -> (String, usize) {
+        let parts = split_top_level_commas(body);
+        if parts.len() >= 2
+            && let Ok(d) = parts[parts.len() - 1].trim().parse::<usize>()
+        {
+            let expression = parts[..parts.len() - 1].join(",");
+            return (expression.trim().to_string(), d);
+        }
+        (body.trim().to_string(), 15)
+    };
     if let Some(body) = input
         .strip_prefix("evalf ")
         .or_else(|| input.strip_prefix("N "))
         .or_else(|| input.strip_prefix("approx "))
+        .or_else(|| input.strip_prefix("float "))
     {
+        let (expression, digits) = split_digits(body);
         return MathOperation::Evaluate {
-            expression: body.trim().to_string(),
-            precision_digits: Some(15),
+            expression,
+            precision_digits: Some(digits),
             bindings: HashMap::new(),
         };
     }
-    if (input.starts_with("N(") || input.starts_with("evalf(") || input.starts_with("approx("))
+    if (input.starts_with("N(")
+        || input.starts_with("evalf(")
+        || input.starts_with("approx(")
+        || input.starts_with("float("))
         && input.ends_with(')')
         && let Some(open) = input.find('(')
     {
         let inner = &input[open + 1..input.len() - 1];
+        let (expression, digits) = split_digits(inner);
         return MathOperation::Evaluate {
-            expression: inner.trim().to_string(),
-            precision_digits: Some(15),
+            expression,
+            precision_digits: Some(digits),
             bindings: HashMap::new(),
         };
     }

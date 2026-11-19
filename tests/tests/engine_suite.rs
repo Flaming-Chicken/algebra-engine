@@ -4,6 +4,8 @@
 
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
+#[path = "engine/bigfloat_tests.rs"]
+mod bigfloat_tests;
 #[path = "engine/factoring_speed_tests.rs"]
 mod factoring_speed_tests;
 #[path = "engine/integer_function_tests.rs"]

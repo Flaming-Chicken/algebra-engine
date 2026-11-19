@@ -139,6 +139,13 @@ panic = "abort"
 strip = true
 overflow-checks = false
 
+# Fast Criterion benchmark compilation & linking without fat single-unit LTO stalls
+[profile.bench]
+inherits = "release"
+lto = "thin"
+codegen-units = 4
+debug = false
+
 # Fast test execution: line-level debuginfo for quick linking, optimized dependencies for faster test runs
 [profile.test]
 debug = 1

@@ -35,3 +35,10 @@ serde = ["dep:serde"]
 
 [dev-dependencies]
 criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "core_benchmarks"
+harness = false

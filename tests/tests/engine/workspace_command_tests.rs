@@ -1325,3 +1325,71 @@ fn kron_diagonalize_and_singular_values() {
         assert!(values[0] >= values[1]);
     }
 }
+
+#[test]
+fn continuous_distributions_match_closed_forms_and_tables() {
+    let v = |q: &str| value(q, &[]);
+    // Closed forms of special cases.
+    for x in [0.3f64, 1.0, 2.5, 7.0] {
+        assert!((v(&format!("chi2_cdf({x}, 2)")) - (1.0 - (-x / 2.0).exp())).abs() < 1e-12);
+        assert!((v(&format!("chi2_cdf({x}, 1)")) - v(&format!("erf(sqrt({x}/2))"))).abs() < 1e-12);
+        assert!((v(&format!("gamma_cdf({x}, 1, 2)")) - (1.0 - (-x / 2.0).exp())).abs() < 1e-12);
+        assert!((v(&format!("gamma_inc_p(1, {x})")) - (1.0 - (-x).exp())).abs() < 1e-12);
+    }
+    for x in [0.1f64, 0.5, 0.8] {
+        // I_x(2, 3) = 6 x^2 - 8 x^3 + 3 x^4
+        assert!(
+            (v(&format!("beta_cdf({x}, 2, 3)"))
+                - (6.0 * x * x - 8.0 * x.powi(3) + 3.0 * x.powi(4)))
+            .abs()
+                < 1e-12
+        );
+    }
+    for t in [-2.0f64, -0.4, 0.0, 1.3, 3.0] {
+        // Student t with 1 degree of freedom is the Cauchy distribution; with 2 it has a closed form.
+        assert!(
+            (v(&format!("t_cdf({t}, 1)")) - (0.5 + t.atan() / std::f64::consts::PI)).abs() < 1e-12
+        );
+        assert!(
+            (v(&format!("t_cdf({t}, 2)")) - (0.5 + t / (2.0 * (2.0 + t * t).sqrt()))).abs() < 1e-12
+        );
+    }
+    // Published critical values (to the digits of the tables).
+    assert!((v("chi2_quantile(0.95, 1)") - 3.841_458_820_694_124).abs() < 1e-9);
+    assert!((v("chi2_quantile(0.95, 10)") - 18.307_038_053_275_146).abs() < 1e-9);
+    assert!((v("t_quantile(0.975, 10)") - 2.228_138_851_986_274).abs() < 1e-9);
+    assert!((v("t_quantile(0.975, 30)") - 2.042_272_456_301_238).abs() < 1e-9);
+    assert!((v("normal_quantile(0.975)") - 1.959_963_984_540_054).abs() < 1e-12);
+    assert!(
+        (v("normal_quantile(0.95, 100, 15)") - (100.0 + 15.0 * 1.644_853_626_951_472_7)).abs()
+            < 1e-9
+    );
+    // Quantiles invert the cdf.
+    for p in [0.01, 0.2, 0.5, 0.9, 0.999] {
+        for k in [1, 3, 12] {
+            assert!(
+                (v(&format!("chi2_cdf(chi2_quantile({p}, {k}), {k})")) - p).abs() < 1e-10,
+                "chi2 p = {p}, k = {k}"
+            );
+            assert!(
+                (v(&format!("t_cdf(t_quantile({p}, {k}), {k})")) - p).abs() < 1e-10,
+                "t p = {p}, k = {k}"
+            );
+        }
+        assert!((v(&format!("normal_cdf(normal_quantile({p}))")) - p).abs() < 1e-12);
+    }
+    // A pdf integrates to the cdf (an independent numerical integral).
+    let integral = run("nintegrate(t_pdf(s, 5), s, -40, 1.7)");
+    let digits: String = integral
+        .split('≈')
+        .nth(1)
+        .unwrap()
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    assert!(
+        (digits.parse::<f64>().unwrap() - v("t_cdf(1.7, 5)")).abs() < 1e-6,
+        "{integral}"
+    );
+}

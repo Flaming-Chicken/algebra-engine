@@ -661,6 +661,17 @@ impl UraeSession {
                         self.last_result_text = Some(text.clone());
                         return OperationResult::success(text.clone(), text.clone(), text);
                     }
+                    // A distribution function of numbers (`chi2_cdf(3.2, 4)`, `t_quantile(0.975, 10)`): its value.
+                    if let algebra_core::ExprKind::Function { name, .. } =
+                        self.graph.get(expr_id).kind.clone()
+                        && let Some(fname) = self.graph.symbols.resolve(name)
+                        && crate::distributions_f64::is_distribution_function(&fname)
+                        && let Ok(value) = self.graph.evalf(expr_id, &EvalContext::default())
+                    {
+                        let text = format_clean_float(value.to_f64());
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
                     if let Some(text) = crate::complex_exact::simplify_text(&self.graph, expr_id) {
                         self.last_result_text = Some(text.clone());
                         return OperationResult::success(text.clone(), text.clone(), text);

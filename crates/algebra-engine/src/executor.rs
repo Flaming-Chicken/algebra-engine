@@ -148,6 +148,98 @@ impl OperationResult {
     }
 }
 
+/// Whether a solution is a real number, a genuinely complex one, or could not be evaluated (free parameters).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolutionKind {
+    Real,
+    NonReal,
+    Unknown,
+}
+
+/// Classify a solution by evaluating it numerically.
+pub fn classify_solution(
+    graph: &ExprGraph,
+    solution: ExprId,
+    eval_ctx: &crate::numeric::EvalContext,
+) -> SolutionKind {
+    match graph.evalf(solution, eval_ctx) {
+        Ok(crate::numeric::BigValue::Real(v)) if v.is_finite() => SolutionKind::Real,
+        Ok(crate::numeric::BigValue::Complex(re, im)) if re.is_finite() && im.is_finite() => {
+            if im.abs() <= 1e-12 * (1.0 + re.abs()) {
+                SolutionKind::Real
+            } else {
+                SolutionKind::NonReal
+            }
+        }
+        _ => SolutionKind::Unknown,
+    }
+}
+
+/// Functions whose inverse is multivalued: solving an equation that contains them by inversion yields the
+/// principal solution only, and the general solution adds the other branches.
+fn has_periodic_function(graph: &ExprGraph, root: ExprId) -> bool {
+    let mut stack = vec![root];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        if let ExprKind::Function { name, .. } = &node.kind {
+            let name = graph.symbols.resolve(*name).unwrap_or_default();
+            if matches!(
+                name.as_str(),
+                "sin" | "cos" | "tan" | "cot" | "sec" | "csc" | "exp"
+            ) {
+                return true;
+            }
+        }
+        stack.extend(node.children());
+    }
+    false
+}
+
+/// Say, in the result's metadata and domain information, which solutions are real, which are not, and whether the
+/// list is the principal solution only.
+fn describe_solution_domain(
+    graph: &ExprGraph,
+    equation: ExprId,
+    solutions: &[ExprId],
+    eval_ctx: &crate::numeric::EvalContext,
+    res: &mut OperationResult,
+) {
+    let kinds: Vec<SolutionKind> = solutions
+        .iter()
+        .map(|&s| classify_solution(graph, s, eval_ctx))
+        .collect();
+    let real = kinds.iter().filter(|k| **k == SolutionKind::Real).count();
+    let nonreal = kinds
+        .iter()
+        .filter(|k| **k == SolutionKind::NonReal)
+        .count();
+    res.metadata
+        .insert("real_solutions".into(), real.to_string());
+    res.metadata
+        .insert("nonreal_solutions".into(), nonreal.to_string());
+    let mut notes = Vec::new();
+    if nonreal > 0 {
+        notes.push(format!(
+            "{real} real, {nonreal} non-real (complex) solution{}",
+            if nonreal == 1 { "" } else { "s" }
+        ));
+    }
+    if !solutions.is_empty() && has_periodic_function(graph, equation) {
+        res.metadata.insert("coverage".into(), "principal".into());
+        notes.push(
+            "principal solution(s) only: the equation is periodic or multivalued, so the general solution adds the other branches"
+                .to_string(),
+        );
+    }
+    if !notes.is_empty() {
+        res.domain_info = Some(notes.join("; "));
+    }
+}
+
 /// Central mathematical operation execution engine.
 pub struct OperationExecutor;
 
@@ -414,6 +506,9 @@ impl OperationExecutor {
                             if filtered.len() == 1 {
                                 res.root_expr = Some(filtered[0]);
                             }
+                            describe_solution_domain(
+                                graph, expr_id, &filtered, &eval_ctx, &mut res,
+                            );
                             res
                         }
                         Err(e) => OperationResult::error(e.to_string()),

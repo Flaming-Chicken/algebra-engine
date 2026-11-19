@@ -22,6 +22,8 @@ mod radical_integrals_tests;
 mod simplify_conditions_tests;
 #[path = "engine/solve_known_roots_tests.rs"]
 mod solve_known_roots_tests;
+#[path = "engine/solver_domain_tests.rs"]
+mod solver_domain_tests;
 #[path = "engine/special_functions_tests.rs"]
 mod special_functions_tests;
 #[path = "engine/topology_betti_tests.rs"]

@@ -148,8 +148,8 @@ pub fn run_repl() {
                 eprintln!("Error: {}\n", res.error_msg.unwrap_or(res.output_text));
             } else {
                 println!("= {}", res.output_text);
-                if let Some(conditions) = res.metadata.get("conditions") {
-                    println!("  (valid where {conditions})");
+                if let Some(note) = &res.domain_info {
+                    println!("  ({note})");
                 }
                 println!();
             }

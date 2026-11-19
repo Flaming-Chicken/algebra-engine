@@ -380,6 +380,11 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // Commands inside the arguments of another command (`factor(expand((x+1)^3 - 1))`,
+        // `integrate(simplify(...), x)`) are evaluated first and replaced by their results.
+        let resolved = self.resolve_nested_commands(trimmed);
+        let trimmed = resolved.as_deref().unwrap_or(trimmed);
+
         // A finite set expression (`2 in {1, 2}`, `{1,2} union {3}`) before the `x in Domain` declaration syntax.
         if trimmed.contains('{')
             && let Some(text) = crate::set_expr::evaluate(trimmed)
@@ -711,6 +716,88 @@ impl UraeSession {
             return result;
         }
         self.execute_op(&parsed_op)
+    }
+
+    /// Replace each inner `expand(...)`, `simplify(...)`, `factor(...)`, ... call that sits inside another call by its
+    /// result (as parseable text). `None` if there is nothing to replace.
+    fn resolve_nested_commands(&mut self, input: &str) -> Option<String> {
+        const INNER: [&str; 10] = [
+            "expand",
+            "simplify",
+            "cancel",
+            "together",
+            "factor",
+            "diff",
+            "apart",
+            "trigsimp",
+            "expand_trig",
+            "collect",
+        ];
+        let chars: Vec<char> = input.chars().collect();
+        let mut replaced = false;
+        let mut result = String::new();
+        let mut i = 0;
+        let mut depth = 0i32;
+        while i < chars.len() {
+            let c = chars[i];
+            if matches!(c, '(' | '[' | '{') {
+                depth += 1;
+            } else if matches!(c, ')' | ']' | '}') {
+                depth -= 1;
+            }
+            if depth >= 1
+                && (c.is_ascii_alphabetic() || c == '_')
+                && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
+            {
+                let start = i;
+                let mut j = i;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                let name: String = chars[start..j].iter().collect();
+                if j < chars.len() && chars[j] == '(' && INNER.contains(&name.as_str()) {
+                    // The matching bracket.
+                    let mut k = j;
+                    let mut d = 0i32;
+                    while k < chars.len() {
+                        match chars[k] {
+                            '(' => d += 1,
+                            ')' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        k += 1;
+                    }
+                    if k < chars.len() {
+                        let inner: String = chars[start..=k].iter().collect();
+                        let outcome = self.execute_line(&inner);
+                        if !outcome.is_error
+                            && !outcome.output_text.contains("w.r.t")
+                            && !outcome.output_text.is_empty()
+                            && outcome.output_text != inner
+                        {
+                            let text = outcome
+                                .output_text
+                                .replace('·', "*")
+                                .replace('√', "sqrt")
+                                .replace('π', "pi");
+                            result.push_str(&format!("({text})"));
+                            replaced = true;
+                            i = k + 1;
+                            // The brackets of the replaced call were counted by the scan above only up to `(`.
+                            continue;
+                        }
+                    }
+                }
+            }
+            result.push(c);
+            i += 1;
+        }
+        replaced.then_some(result)
     }
 
     /// `a and not a` is a contradiction, `a or not a` a tautology; otherwise a satisfying assignment.

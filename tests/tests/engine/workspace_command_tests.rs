@@ -837,3 +837,34 @@ fn finite_set_expressions_agree_with_hash_sets() {
     assert_eq!(run("{1/2, 0.5, 2/4} union {1}"), "{1/2, 1}");
     assert_eq!(run("{1,2} cross {a,b}"), "{(1, a), (1, b), (2, a), (2, b)}");
 }
+
+#[test]
+fn commands_compose_and_large_powers_expand() {
+    // `factor(expand(P))` was echoed back with the inner call unevaluated.
+    let p = "(x^2+x+1)*(x^3+2*x+5)*(x-7)*(x^4+1)";
+    let factored = run(&format!("factor(expand({p}))"));
+    assert!(!factored.contains("expand"), "{factored}");
+    for x in ["0.5", "-1.3", "2.2"] {
+        let (a, b) = (
+            value(p, &[("x", x)]),
+            value(&factored.replace('·', "*"), &[("x", x)]),
+        );
+        assert!((a - b).abs() < 1e-9 * a.abs().max(1.0), "{factored} at {x}");
+    }
+    // The derivative of the antiderivative of an expanded cube is the cube.
+    let anti = run("integrate(expand((x+1)^3), x)");
+    let anti = anti.split(" (w.r.t").next().unwrap().replace('·', "*");
+    let derivative = run(&format!("diff({anti}, x)")).replace('·', "*");
+    for x in ["0.5", "-1.3", "2.2"] {
+        assert!((value(&derivative, &[("x", x)]) - value("(x+1)^3", &[("x", x)])).abs() < 1e-9);
+    }
+    assert_eq!(run("diff(simplify((x^2-1)/(x-1)), x)"), "1");
+    assert_eq!(
+        run("solve(expand((x-1)*(x-2)) = 0, x)"),
+        "Solutions for x: [1, 2]"
+    );
+    // (x + 1)^60: 61 binomial coefficients, the central one C(60, 30).
+    let big = run("expand((x+1)^60)");
+    assert_eq!(big.matches(" + ").count(), 60, "{big}");
+    assert!(big.contains("118264581564861424"));
+}

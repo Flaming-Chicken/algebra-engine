@@ -191,13 +191,30 @@ impl Number {
     /// Create an explicit lossy float number from raw IEEE-754 bit pattern.
     #[inline]
     pub const fn from_bits(bits: u64) -> Self {
-        Self::Float(bits)
+        Self::Float(Self::canonical_float_bits(bits))
+    }
+
+    /// The bit pattern a float is stored under: `-0.0` is stored as `+0.0` and every NaN as one quiet NaN,
+    /// so that numbers that compare equal also hash equal (the node identity of the expression arena
+    /// is the bits, and `0.0` and `-0.0` used to be two different nodes). The sign of a zero is therefore
+    /// not preserved inside an expression; evaluation of operations that depend on it (such as
+    /// `1 / x`) uses the stored `+0.0`.
+    pub const fn canonical_float_bits(bits: u64) -> u64 {
+        const EXPONENT: u64 = 0x7ff0_0000_0000_0000;
+        const MANTISSA: u64 = 0x000f_ffff_ffff_ffff;
+        if bits << 1 == 0 {
+            0
+        } else if bits & EXPONENT == EXPONENT && bits & MANTISSA != 0 {
+            0x7ff8_0000_0000_0000
+        } else {
+            bits
+        }
     }
 
     /// Create an explicit lossy float number from `f64`.
     #[inline]
     pub const fn float(val: f64) -> Self {
-        Self::Float(val.to_bits())
+        Self::Float(Self::canonical_float_bits(val.to_bits()))
     }
 
     /// Returns `true` if this number is exact and lossless (not an approximate Float).

@@ -660,7 +660,7 @@ impl RetrofittableAst for LegacyAstTree {
                 ScalarAtom::One => Number::Integer(1),
                 ScalarAtom::Integer(i) => Number::Integer(*i),
                 ScalarAtom::Rational(n, d) => Number::rational(*n, *d),
-                ScalarAtom::Float(f) => Number::Float(f.to_bits()),
+                ScalarAtom::Float(f) => Number::from_bits(f.to_bits()),
                 ScalarAtom::GaussianInt { re, im } => {
                     // Lower to re + im * i
                     if *im == 0 {
@@ -696,16 +696,16 @@ impl RetrofittableAst for LegacyAstTree {
                 }
                 ScalarAtom::ComplexF64 { re, im } => {
                     return Ok(Self::Add(vec![
-                        Self::Number(Number::Float(re.to_bits())),
+                        Self::Number(Number::from_bits(re.to_bits())),
                         Self::Mul(vec![
-                            Self::Number(Number::Float(im.to_bits())),
+                            Self::Number(Number::from_bits(im.to_bits())),
                             Self::Number(Number::Constant(Constant::I)),
                         ]),
                     ]));
                 }
                 ScalarAtom::Surreal(s) => return Ok(Self::Surreal(s.clone())),
                 ScalarAtom::Adele(a) => return Ok(Self::Adele(a.clone())),
-                _ => Number::Float(0.0f64.to_bits()),
+                _ => Number::float(0.0),
             };
             return Ok(Self::Number(num));
         }

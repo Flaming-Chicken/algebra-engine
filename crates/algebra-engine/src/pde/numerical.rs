@@ -229,6 +229,14 @@ where {
             load[i] = h * f_source(x_nodes[i]);
         }
 
+        // Lift the Dirichlet values into the interior rows before the boundary rows are replaced:
+        // row 1 has K[1, 0] u_left on its left-hand side and row n - 2 has K[n - 2, n - 1] u_right, so
+        // both move to the load (without this a non-zero boundary value never reaches the interior).
+        if n_nodes > 2 {
+            load[1] -= off_diag[0] * u_left;
+            load[n_nodes - 2] -= off_diag[n_nodes - 2] * u_right;
+        }
+
         // Enforce Dirichlet Boundary Conditions: u[0] = u_left, u[n_nodes-1] = u_right
         diag[0] = 1.0;
         off_diag[0] = 0.0;

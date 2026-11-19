@@ -31,11 +31,9 @@ with the rules for keeping it true.
   cylindrical decomposition to three variables, constraint-based CAD, closed solid meshes for gears, screws, springs
   and wings, a finite-element suite with sparse solvers, special functions to about 12 digits, ODE and PDE solvers, the
   egui notebook and the other frontends.
-- **What is not right yet.** The ledger lists 53 catalogued items (28 fixed, 10 partly fixed, 10 open, 2 stale, 1
+- **What is not right yet.** The ledger lists 53 catalogued items (30 fixed, 10 partly fixed, 8 open, 2 stale, 1
   partly different, 2 not verified) plus the audit extension's tracks, which are mostly unverified. Reproduced wrong
-  answers still on `dev`: the 1-D Poisson solver with non-zero Dirichlet values (`F7`), the clamped B-spline basis at
-  its end point (`F8`), `matrix_rank` of `[[0,1],[0,0]]` (`F10`), the hash of `-0.0` (`F5`), Smith normal form
-  (`B13`), surreal ordering (`B16`), polynomial systems outside Shape-Lemma position (`C16`), Betti numbers of a
+  answers still on `dev`: surreal ordering (`B16`), polynomial systems outside Shape-Lemma position (`C16`), Betti numbers of a
   circle (`A14`).
 - **What is thin.** Several advanced-domain modules exist with tests but little depth (ledger `A13`–`A16`, `B16`–`B19`),
   and `ROADMAP.md` section 2.1 lists scope named in the plans that has no code.
@@ -61,7 +59,7 @@ Versions are targets, not promises. A milestone ends when its exit gate is met a
 
 | Milestone | Target | Scope | Exit gate |
 | :--- | :--- | :--- | :--- |
-| **M1 Correct** | 0.7.0 | Fix the reproduced wrong answers (work queue 1 to 8). Verify the rest of the audit extension. Recount production panic sites. | No reproduced wrong answer in the ledger; every catalogued item has a verdict; the panic count is measured |
+| **M1 Correct** | 0.7.0 | Fix the reproduced wrong answers (work queue 2 to 5). Verify the rest of the audit extension. Recount production panic sites. | No reproduced wrong answer in the ledger; every catalogued item has a verdict; the panic count is measured |
 | **M2 Honest** | 0.8.0 | Remaining stubs implemented or turned into explicit errors; `ROADMAP.md` section 2.1 and the README example list matched to the code; the solver's real-versus-complex convention a typed outcome; identity results that name excluded points; `missing_docs` as a lint | Every public feature works or errors; `ROADMAP.md`, README and ledger agree; the GUI web basics (viewport, `100dvh`, local KaTeX) shipped |
 | **M3 Foundations** | 0.9.0 | Architecture wave 1: carrier and operator traits, numerical sparse types with Krylov and multigrid solvers, compensated arithmetic and outward rounding, `const` and WGSL lowering | Wave 1 exit gate in the specification, with the baseline tests unchanged |
 | **M4 Geometry** | 1.0.0 | Wave 2: multi-representation CAD (B-Rep, NURBS, SDF), exact offsets, a file-format hub, differentiable CAD; extends the exact CAD and solid meshes already shipped | Wave 2 exit gate |
@@ -76,16 +74,14 @@ engineering-standards sweep (`missing_docs`, property tests, runnable examples) 
 
 In order. Each item starts with a failing test and ends with a ledger update.
 
-1. **`F7`** `solve_poisson_fem_1d` (`pde/numerical.rs`): lift the Dirichlet values into the load. Test: `u(0) = 1`, `u(1) = 3`, no source gives the line.
-2. **`F8`** `CoxDeBoor::basis_function` (`iga.rs`): partition of unity at the end of a clamped knot vector.
-3. **`F10`** `matrix_rank` (`control.rs`), then check the other `F10` claims (`matrix_exponential`, the numerical systems solver).
-4. **`F5`** `Number::Float` hashing and equality for `±0` and `NaN`; then check the interval claims (outward rounding, indeterminate forms).
-5. **`B13`** Smith normal form with the divisibility invariant, on big integers.
-6. **`B16`** surreal ordering without the `f64` shortcut; fold the two surreal engines into one (design debt).
-7. **`C16`** polynomial systems: branch over the roots of each elimination level; later a rational univariate representation.
-8. The read-confirmed small items: `B15` (one line), `B17`, `B18`, `B19`, `A13`, `A14`, `C17`.
-9. The verification pass: `A15`, `A16`, the rest of `B20`, Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.
-10. Then M2.
+1. ~~`F7` Poisson Dirichlet lifting, `F8` B-spline end point, `F10` rank and exponential, `F5` float hashing, `B13` Smith normal form, `B15` Shirshov factorisation~~ (done, 19 Nov 2026).
+2. **`B16`** surreal ordering without the `f64` shortcut; fold the two surreal engines into one (design debt).
+3. **`C16`** polynomial systems: branch over the roots of each elimination level; later a rational univariate representation.
+4. **`A14`** Betti numbers by boundary-matrix ranks over the rationals (a circle must give `[1, 1]`), then `A13` equivalence classification.
+5. The read-confirmed small items: `B17` (Colombeau products), `B18` (tangent functor rules for every operation), `B19` (dimension of `^` and calls), `C17` (domain categories).
+6. The rest of `F5` and `F10`, then the verification pass below.
+7. The verification pass: `A15`, `A16`, the rest of `B20`, Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; a fresh scan of production panic sites.
+8. Then M2.
 
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit
 factors (an elliptic-curve method); the remainder of `R1` (arbitrary CAD surface meshes as solids).

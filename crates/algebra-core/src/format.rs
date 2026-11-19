@@ -126,6 +126,41 @@ fn format_sum<F: Formatter + ?Sized>(
     Ok(out)
 }
 
+/// A deterministic display key for a factor: numbers first, then symbols and powers of symbols by name, then function
+/// calls by name, then everything else in its stored order.
+fn factor_key(graph: &ExprGraph, id: ExprId) -> (u8, String) {
+    match &graph.get(id).kind {
+        ExprKind::Number(_) => (0, String::new()),
+        ExprKind::Symbol(sym) => (1, graph.symbols.resolve(*sym).unwrap_or_default()),
+        ExprKind::Pow(base, _) => factor_key(graph, *base),
+        ExprKind::Function { name, .. } => (3, graph.symbols.resolve(*name).unwrap_or_default()),
+        _ => (4, String::new()),
+    }
+}
+
+/// The order in which the factors of a product are printed. The stored order follows the order in which symbols were
+/// first typed in the session, so `C1 · cos(x)` and `cos(x) · C1` could both appear for the same expression; a
+/// product of commutative scalar factors is printed in a fixed order instead. Anything that may not commute
+/// (matrices, tensors, Clifford elements) keeps its stored order.
+fn display_order(graph: &ExprGraph, factors: &[ExprId]) -> Vec<ExprId> {
+    let commutative = factors.iter().all(|&f| {
+        let node = graph.get(f);
+        node.domain.is_commutative_mul()
+            && matches!(
+                node.kind,
+                ExprKind::Number(_)
+                    | ExprKind::Symbol(_)
+                    | ExprKind::Pow(..)
+                    | ExprKind::Function { .. }
+            )
+    });
+    let mut out = factors.to_vec();
+    if commutative {
+        out.sort_by_key(|&f| factor_key(graph, f));
+    }
+    out
+}
+
 /// `a · (b + c)`: sums are grouped; only the first factor may carry a minus.
 fn format_product<F: Formatter + ?Sized>(
     f: &F,
@@ -133,8 +168,9 @@ fn format_product<F: Formatter + ?Sized>(
     graph: &ExprGraph,
     factors: &[ExprId],
 ) -> FormatResult<String> {
+    let ordered = display_order(graph, factors);
     let mut parts = Vec::with_capacity(factors.len());
-    for (i, &factor) in factors.iter().enumerate() {
+    for (i, &factor) in ordered.iter().enumerate() {
         let min = if i == 0 {
             Prec::Negative
         } else {

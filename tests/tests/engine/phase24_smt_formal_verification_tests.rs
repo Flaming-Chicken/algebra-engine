@@ -168,3 +168,66 @@ fn test_phase24_dsl_macros() {
             .contains("theorem pythagorean_identity (x : Real) : sin(x)^2 + cos(x)^2 = 1 := by")
     );
 }
+
+#[test]
+fn smt_numbers_are_exact_or_refused_never_silently_zero() {
+    use algebra_core::{Constant, ExprGraph, Number};
+    use num_bigint::BigInt;
+    use num_rational::BigRational;
+    let g = ExprGraph::new();
+    let smt = |n: Number| SmtExpr::from_graph(&g, g.number(n));
+    // Integers beyond 64 bits keep every digit.
+    let big: BigInt = BigInt::from(10).pow(30u32) + BigInt::from(7);
+    assert_eq!(
+        smt(Number::BigInteger(big.clone())).unwrap().to_smtlib2(),
+        "1000000000000000000000000000007"
+    );
+    assert_eq!(
+        smt(Number::BigInteger(-big)).unwrap().to_smtlib2(),
+        "(- 1000000000000000000000000000007)"
+    );
+    // Rationals are exact quotients of real numerals, with no f64 rounding of large numerators.
+    let r = BigRational::new(
+        BigInt::from(10).pow(25u32) + BigInt::from(1),
+        BigInt::from(3),
+    );
+    assert_eq!(
+        smt(Number::BigRational(Box::new(r))).unwrap().to_smtlib2(),
+        "(/ 10000000000000000000000001.0 3.0)"
+    );
+    assert_eq!(
+        smt(Number::Rational(-3, 7)).unwrap().to_smtlib2(),
+        "(/ (- 3.0) 7.0)"
+    );
+    // Scientific notation is exact in both directions: 15 * 10^-3 = 15/1000, 2 * 10^2 = 200.
+    assert_eq!(
+        smt(Number::Scientific {
+            mantissa: 15,
+            exponent: -3
+        })
+        .unwrap()
+        .to_smtlib2(),
+        "(/ 15.0 1000.0)"
+    );
+    assert_eq!(
+        smt(Number::Scientific {
+            mantissa: 2,
+            exponent: 2
+        })
+        .unwrap()
+        .to_smtlib2(),
+        "200.0"
+    );
+    // Negative literals are applications, as SMT-LIB requires.
+    assert_eq!(SmtExpr::Int(-5).to_smtlib2(), "(- 5)");
+    assert_eq!(SmtExpr::Real(-2.5).to_smtlib2(), "(- 2.5)");
+    assert_eq!(SmtExpr::Real(0.0).to_smtlib2(), "0.0");
+    assert_eq!(
+        SmtExpr::Int(i64::MIN).to_smtlib2(),
+        "(- 9223372036854775808)"
+    );
+    // Constants and non-finite floats are errors, not 0.
+    assert!(smt(Number::Constant(Constant::Pi)).is_err());
+    assert!(smt(Number::Float(f64::INFINITY.to_bits())).is_err());
+    assert!(smt(Number::Float(1.5f64.to_bits())).is_ok());
+}

@@ -64,6 +64,10 @@ impl SmtSort {
 pub enum SmtExpr {
     Real(f64),
     Int(i64),
+    /// An exact integer literal of any size, as decimal digits with an optional leading `-` (sort `Int`).
+    IntLiteral(String),
+    /// An exact integer written as a real numeral, as decimal digits with an optional leading `-` (sort `Real`).
+    RealLiteral(String),
     Bool(bool),
     BitVec(u64, usize),
     Var(String),
@@ -97,13 +101,34 @@ impl SmtExpr {
     pub fn to_smtlib2(&self) -> String {
         match self {
             Self::Real(v) => {
-                if v.fract() == 0.0 {
-                    format!("{:.1}", v)
+                // SMT-LIB has no negative literals: `-x` is the application `(- x)`.
+                let magnitude = v.abs();
+                let text = if magnitude.fract() == 0.0 {
+                    format!("{:.1}", magnitude)
+                } else {
+                    format!("{}", magnitude)
+                };
+                if v.is_sign_negative() && magnitude != 0.0 {
+                    format!("(- {text})")
+                } else {
+                    text
+                }
+            }
+            Self::Int(v) => {
+                if *v < 0 {
+                    format!("(- {})", v.unsigned_abs())
                 } else {
                     format!("{}", v)
                 }
             }
-            Self::Int(v) => format!("{}", v),
+            Self::IntLiteral(digits) => match digits.strip_prefix('-') {
+                Some(rest) => format!("(- {rest})"),
+                None => digits.clone(),
+            },
+            Self::RealLiteral(digits) => match digits.strip_prefix('-') {
+                Some(rest) => format!("(- {rest}.0)"),
+                None => format!("{digits}.0"),
+            },
             Self::Bool(b) => {
                 if *b {
                     "true".to_string()
@@ -172,6 +197,47 @@ impl SmtExpr {
         }
     }
 
+    /// An exact SMT term for a number. Nothing is rounded or replaced: a value with no exact encoding (a
+    /// mathematical constant, a non-finite float) is an error rather than a silent `0`.
+    fn from_number(num: &algebra_core::Number) -> Result<Self, algebra_core::error::AlgebraError> {
+        use algebra_core::Number;
+        let real_literal = |n: &num_bigint::BigInt| Self::RealLiteral(n.to_string());
+        match num {
+            Number::Integer(i) => Ok(Self::Int(*i)),
+            Number::BigInteger(i) => Ok(Self::IntLiteral(i.to_string())),
+            Number::Rational(n, d) => Ok(Self::Div(
+                Box::new(real_literal(&(*n).into())),
+                Box::new(real_literal(&(*d).into())),
+            )),
+            Number::BigRational(r) => Ok(Self::Div(
+                Box::new(real_literal(r.numer())),
+                Box::new(real_literal(r.denom())),
+            )),
+            Number::Scientific { mantissa, exponent } => {
+                let m = num_bigint::BigInt::from(*mantissa);
+                let scale = num_bigint::BigInt::from(10).pow(exponent.unsigned_abs());
+                Ok(if *exponent >= 0 {
+                    real_literal(&(m * scale))
+                } else {
+                    Self::Div(Box::new(real_literal(&m)), Box::new(real_literal(&scale)))
+                })
+            }
+            Number::Float(bits) => {
+                let v = f64::from_bits(*bits);
+                if v.is_finite() {
+                    Ok(Self::Real(v))
+                } else {
+                    Err(algebra_core::error::AlgebraError::EvaluationError(format!(
+                        "a non-finite float ({v}) has no SMT-LIB encoding"
+                    )))
+                }
+            }
+            Number::Constant(c) => Err(algebra_core::error::AlgebraError::EvaluationError(
+                format!("the constant {c:?} has no exact SMT-LIB encoding"),
+            )),
+        }
+    }
+
     /// Converts an expression node from `ExprGraph` directly into a typed `SmtExpr`.
     pub fn from_graph(
         graph: &algebra_core::ExprGraph,
@@ -179,15 +245,7 @@ impl SmtExpr {
     ) -> Result<Self, algebra_core::error::AlgebraError> {
         let node = graph.get(expr);
         match &node.kind {
-            algebra_core::ExprKind::Number(num) => match num {
-                algebra_core::Number::Integer(i) => Ok(Self::Int(*i)),
-                algebra_core::Number::Rational(n, d) => Ok(Self::Div(
-                    Box::new(Self::Real(*n as f64)),
-                    Box::new(Self::Real(*d as f64)),
-                )),
-                algebra_core::Number::Float(f) => Ok(Self::Real(f64::from_bits(*f))),
-                _ => Ok(Self::Real(0.0)),
-            },
+            algebra_core::ExprKind::Number(num) => Self::from_number(num),
             algebra_core::ExprKind::Symbol(sym) => {
                 let name = graph
                     .symbols

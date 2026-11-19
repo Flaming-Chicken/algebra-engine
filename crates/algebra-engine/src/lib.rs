@@ -21,6 +21,7 @@ pub mod cartan_symbolic;
 pub mod cat_eval;
 pub mod cft;
 pub mod combinatorics;
+pub mod complex_exact;
 pub mod control;
 pub mod curvature;
 pub mod diffalg;

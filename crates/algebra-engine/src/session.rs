@@ -478,7 +478,8 @@ impl UraeSession {
                     let has_unc_nodes =
                         crate::numeric::expr_has_uncertainty_nodes(&self.graph, rhs_id);
                     let all_bound = syms.iter().all(|s| {
-                        self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
+                        self.bindings.contains_key(s)
+                            || matches!(s.as_str(), "pi" | "π" | "e" | "i" | "I")
                     }) && !syms.iter().any(|s| s == lhs);
 
                     if all_bound && (has_unc_syms || has_unc_nodes) {
@@ -575,7 +576,8 @@ impl UraeSession {
             if let Ok(expr_id) = parser.parse(&expanded_input) {
                 let syms = self.extract_symbols(expr_id);
                 let all_bound = syms.iter().all(|s| {
-                    self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
+                    self.bindings.contains_key(s)
+                        || matches!(s.as_str(), "pi" | "π" | "e" | "i" | "I")
                 });
                 let has_user_bound = syms.iter().any(|s| self.bindings.contains_key(s));
                 let has_unc_syms = syms.iter().any(|s| {
@@ -597,7 +599,11 @@ impl UraeSession {
                         let latex = u.format_latex();
                         return OperationResult::success(out.clone(), latex, out);
                     }
-                } else if (has_user_bound && all_bound) || syms.is_empty() {
+                } else if all_bound || syms.is_empty() {
+                    if let Some(text) = crate::complex_exact::simplify_text(&self.graph, expr_id) {
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
                     let exec_ctx = self.execution_context();
                     let simp_id = crate::simplify::Simplifier::simplify_with_assumptions(
                         &self.graph,

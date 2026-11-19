@@ -447,3 +447,117 @@ fn laurent_series_agree_with_the_function_near_the_pole() {
         "-1/3 · x + x^(-1) - 1/45 · x^3"
     );
 }
+
+/// The number in an interval end point: an integer or a fraction (the cases below have no other end points).
+fn endpoint(text: &str) -> f64 {
+    match text.trim() {
+        "-∞" => f64::NEG_INFINITY,
+        "∞" => f64::INFINITY,
+        t => match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("end point {t}")),
+        },
+    }
+}
+
+/// Whether `x` lies in a printed union such as `(-∞, -2) ∪ [2, ∞)` or `{1}`.
+fn in_union(set: &str, x: f64) -> bool {
+    set.split(" ∪ ").any(|part| {
+        let part = part.trim();
+        if let Some(point) = part.strip_prefix('{') {
+            return (x - endpoint(point.trim_end_matches('}'))).abs() < 1e-9;
+        }
+        let (open, close) = (part.starts_with('['), part.ends_with(']'));
+        let (lo, hi) = part[1..part.len() - 1]
+            .split_once(", ")
+            .map(|(a, b)| (endpoint(a), endpoint(b)))
+            .unwrap();
+        (x > lo || (open && x == lo)) && (x < hi || (close && x == hi))
+    })
+}
+
+#[test]
+fn inequalities_agree_with_direct_evaluation() {
+    type Predicate = fn(f64) -> bool;
+    let cases: [(&str, Predicate); 12] = [
+        ("x^2 > 4", |x| x * x > 4.0),
+        ("x^2 >= 4", |x| x * x >= 4.0),
+        ("abs(x) < 3", |x| x.abs() < 3.0),
+        ("(x-1)/(x+2) >= 0", |x| {
+            x != -2.0 && (x - 1.0) / (x + 2.0) >= 0.0
+        }),
+        ("x^3 - x > 0", |x| x * x * x - x > 0.0),
+        ("x^2 - 4*x + 3 <= 0", |x| x * x - 4.0 * x + 3.0 <= 0.0),
+        ("1/x > 1", |x| x != 0.0 && 1.0 / x > 1.0),
+        ("sqrt(x) < 2", |x| x >= 0.0 && x.sqrt() < 2.0),
+        ("x^4 - 5*x^2 + 4 < 0", |x| {
+            x.powi(4) - 5.0 * x * x + 4.0 < 0.0
+        }),
+        ("x*(x-2)*(x+3) < 0", |x| x * (x - 2.0) * (x + 3.0) < 0.0),
+        ("(x-1)^2 <= 0", |x| (x - 1.0).powi(2) <= 0.0),
+        ("x^2 + 1 > 0", |x| x * x + 1.0 > 0.0),
+    ];
+    for (inequality, predicate) in cases {
+        let out = run(&format!("solve({inequality}, x)"));
+        let set = out.strip_prefix("Solutions for x: ").unwrap();
+        // A grid that includes the critical points themselves (integers and halves) and points between them.
+        for k in -80..=80 {
+            let x = k as f64 / 8.0;
+            let expected = predicate(x);
+            let got = !set.starts_with("no real") && in_union(set, x);
+            assert_eq!(got, expected, "{inequality} -> {set} at x = {x}");
+        }
+    }
+    // Periodic inequalities have infinitely many intervals: an error, not a wrong finite answer.
+    assert!(
+        UraeSession::new()
+            .execute_line("solve(sin(x) > 0, x)")
+            .is_error
+    );
+}
+
+#[test]
+fn gaussian_integrals_and_one_sided_limits() {
+    for (integral, expected) in [
+        ("exp(-x^2), x, -oo, oo", "√(π)"),
+        ("exp(-x^2), x, 0, oo", "1/2 · √(π)"),
+        ("exp(-2*x^2), x, -oo, oo", "√(π / 2)"),
+        ("exp(-x^2 + 2*x), x, -oo, oo", "exp(1) · √(π)"),
+    ] {
+        let out = run(&format!("integrate({integral})"));
+        assert!(out.starts_with(expected), "{integral}: {out}");
+    }
+    // The exact value agrees with the numerical integral.
+    let numeric = run("nintegrate(exp(-x^2), x, -oo, oo)");
+    let digits: String = numeric
+        .split('≈')
+        .nth(1)
+        .unwrap()
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-'))
+        .collect();
+    let approx: f64 = digits.parse().unwrap();
+    assert!((approx - std::f64::consts::PI.sqrt()).abs() < 1e-9);
+    assert_eq!(
+        run("integrate(sqrt(x), x, 0, 4)"),
+        "16/3 (w.r.t x along [0, 4])"
+    );
+    // One-sided limits, and values that the symbolic engine used to get wrong.
+    for (query, expected) in [
+        ("limit(abs(x)/x, x, 0, +)", "= 1"),
+        ("limit(abs(x)/x, x, 0, -)", "= -1"),
+        ("limit(abs(x)/x, x, 0)", "= Undefined"),
+        ("limit(1/x, x, 0, +)", "= ∞"),
+        ("limit(1/x, x, 0, -)", "= -∞"),
+        ("limit(exp(1/x), x, 0, +)", "= ∞"),
+        ("limit(exp(1/x), x, 0, -)", "= 0"),
+        ("limit(sin(1/x), x, 0)", "= Undefined"),
+        ("limit(tan(x), x, pi/2, -)", "= ∞"),
+        ("limit(sin(x)/x, x, 0)", "= 1"),
+        ("limit((1 - cos(x))/x^2, x, 0)", "= 1/2"),
+    ] {
+        let out = run(query);
+        assert!(out.ends_with(expected), "{query}: {out}");
+    }
+}

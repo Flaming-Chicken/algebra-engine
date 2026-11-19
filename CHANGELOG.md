@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: input nested a hundred levels deep (`sin(sin(...))`, `x^(x^(...))`) overflowed the stack and aborted the process; the parser and the simplifier now refuse nesting beyond 64 levels with an error.
+- Added: a deterministic panic hunt (`panic_hunt_tests`) over the parser, simplifier, differentiation and integration; the production panic count is recounted with the compiler (three documented overload panics).
 - Fixed: `SmtExpr::from_graph` turned big integers, big rationals, scientific notation and constants into `0.0`, rounded rationals through `f64` and accepted `NaN`; numbers are now exact, and a constant or non-finite float is an error. Negative numerals print as `(- n)`, as SMT-LIB requires.
 - Added: arithmetic in `GF(p^n)` (`GaloisField::arithmetic`: validated field, `+`, `-`, `*`, inverse, powers, Frobenius, irreducibility test) and `ModuloInt::{inverse, div, sub, checked_pow, checked_new}`.
 - Added: `poly::factor::factor_integer_polynomial` and `factor_rational_polynomial`, complete factorisation of univariate polynomials over `Z` and `Q` (Zassenhaus with Hensel lifting); `galois::galois_group_over_q`, the Galois group of any polynomial of degree at most 4 (and of products of quadratics). Fixed: `FieldExtension::quadratic(d)` for perfect squares.

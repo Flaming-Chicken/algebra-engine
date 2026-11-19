@@ -22,6 +22,40 @@ pub enum SimplifyError {
 /// Specialized Result alias for simplification operations.
 pub type SimplifyResult<T> = Result<T, SimplifyError>;
 
+/// The deepest expression the recursive simplifier accepts. Simplification recurses once per level of nesting, so
+/// an unbounded depth is a stack overflow, which aborts the process; 64 levels is far beyond what is written by
+/// hand and leaves a wide margin on a 1 MiB stack even in an unoptimised build.
+pub const MAX_SIMPLIFY_DEPTH: usize = 64;
+
+/// The nesting depth of an expression (a leaf has depth 1), computed without recursion.
+pub fn expression_depth(graph: &ExprGraph, root: ExprId) -> usize {
+    use std::collections::HashMap;
+    let mut depth: HashMap<ExprId, usize> = HashMap::new();
+    let mut stack = vec![(root, false)];
+    while let Some((id, children_done)) = stack.pop() {
+        if depth.contains_key(&id) {
+            continue;
+        }
+        let children = graph.get(id).children();
+        if children_done || children.is_empty() {
+            let below = children
+                .iter()
+                .map(|c| depth.get(c).copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            depth.insert(id, below + 1);
+        } else {
+            stack.push((id, true));
+            for c in children {
+                if !depth.contains_key(&c) {
+                    stack.push((c, false));
+                }
+            }
+        }
+    }
+    depth.get(&root).copied().unwrap_or(1)
+}
+
 pub mod bridges;
 pub mod detector;
 pub mod dynamic;
@@ -289,6 +323,12 @@ impl Simplifier {
         goal: algebra_core::domain::GoalDomain,
         assumptions: &crate::logic::AssumptionsContext,
     ) -> SimplifyResult<ExprId> {
+        let depth = expression_depth(graph, root);
+        if depth > MAX_SIMPLIFY_DEPTH {
+            return Err(SimplifyError::Custom(format!(
+                "the expression is nested {depth} levels deep; the limit is {MAX_SIMPLIFY_DEPTH}"
+            )));
+        }
         let node = graph.get(root);
         if let ExprKind::Relational { op, lhs, rhs } = &node.kind {
             let simp_lhs = Self::simplify_with_goal_and_assumptions(graph, *lhs, goal, assumptions)

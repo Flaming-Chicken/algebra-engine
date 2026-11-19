@@ -164,6 +164,45 @@ pub fn normalize_latex_input(input: &str) -> String {
     s
 }
 
+/// The deepest bracket nesting the recursive-descent parser accepts. Each level costs several stack frames, so an
+/// unbounded depth is a stack overflow (which aborts the process); 64 is far beyond what is written by hand.
+pub const MAX_NESTING_DEPTH: usize = 64;
+
+/// An estimate of the recursion depth the text will need: the maximum bracket nesting (`(`, `[`, `{`) plus the
+/// longest run of prefix signs plus the longest chain of right-associative `^` operators.
+fn bracket_depth(text: &str) -> usize {
+    let (mut depth, mut max) = (0usize, 0usize);
+    let (mut signs, mut max_signs) = (0usize, 0usize);
+    let (mut carets, mut max_carets) = (0usize, 0usize);
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if c == '-' || c == '+' {
+            signs += 1;
+            max_signs = max_signs.max(signs);
+        } else if !c.is_whitespace() {
+            signs = 0;
+        }
+        match c {
+            '^' => {
+                carets += 1;
+                max_carets = max_carets.max(carets);
+            }
+            '+' | '-' | '*' | '/' | '=' | '<' | '>' | ',' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                carets = 0
+            }
+            _ => {}
+        }
+    }
+    max + max_signs + max_carets
+}
+
 /// Parser converting mathematical expression and LaTeX strings into [`ExprGraph`] nodes.
 pub struct ExprParser<'a> {
     graph: &'a ExprGraph,
@@ -177,6 +216,12 @@ impl<'a> ExprParser<'a> {
     /// Parse input text or LaTeX string into an [`ExprId`] in the expression graph.
     pub fn parse(&self, input: &str) -> ParseResult<ExprId> {
         let normalized = normalize_latex_input(input);
+        let depth = bracket_depth(&normalized);
+        if depth > MAX_NESTING_DEPTH {
+            return Err(ParseError::InvalidSyntax(format!(
+                "the input is nested {depth} brackets deep; the limit is {MAX_NESTING_DEPTH}"
+            )));
+        }
         let (rem, expr) = self.parse_relation(normalized.trim()).map_err(|e| {
             ParseError::InvalidSyntax(format!("Failed to parse input '{input}': {e}"))
         })?;

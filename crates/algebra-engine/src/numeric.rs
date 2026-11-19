@@ -1702,6 +1702,18 @@ fn eval_binary_fn(
     ctx: &EvalContext,
     default_sel: &BranchSelection,
 ) -> AlgebraResult<BigValue> {
+    if matches!(
+        fn_name,
+        "polygamma" | "hurwitz_zeta" | "besseli" | "besselj"
+    ) {
+        let (a, b) = (
+            graph.evalf(arg0, ctx)?.to_f64(),
+            graph.evalf(arg1, ctx)?.to_f64(),
+        );
+        if let Some(v) = crate::bigfloat::special2_f64(fn_name, a, b) {
+            return Ok(BigValue::Real(v));
+        }
+    }
     match fn_name {
         "uncertain" | "measurement" => return graph.evalf(arg0, ctx),
         "interval" => {

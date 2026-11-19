@@ -148,3 +148,53 @@ fn zeta_digamma_beta_and_bessel_match_published_digits_and_identities() {
         assert!(below(&n(&expr, 50), 40), "{expr}");
     }
 }
+
+#[test]
+fn zeta_below_one_polygamma_hurwitz_and_modified_bessel() {
+    // Published values: zeta(1/2), zeta(-1/2), zeta(-3/2), psi'(1) = pi^2/6, psi''(1) = -2 zeta(3), I_0(1).
+    assert!(n("zeta(1/2)", 40).starts_with("-1.46035450880958681288949915251529801246"));
+    assert!(n("zeta(-1/2)", 35).starts_with("-0.20788622497735456601730672539704"));
+    assert!(n("zeta(-3/2)", 30).starts_with("-0.025485201889833035949542986910"));
+    assert!(n("polygamma(2, 1)", 35).starts_with("-2.40411380631918857079947632302"));
+    assert!(n("besseli(0, 1)", 35).starts_with("1.2660658777520083355982446252147"));
+    // The functional equation zeta(1 - s) = 2 (2 pi)^-s cos(pi s / 2) Gamma(s) zeta(s), at non-integer s.
+    for s in ["5/2", "37/10", "4/3"] {
+        let residual = n(
+            &format!("zeta(1 - {s}) - 2*(2*pi)^(-({s}))*cos(pi*({s})/2)*gamma({s})*zeta({s})"),
+            60,
+        );
+        assert!(below(&residual, 40), "s = {s}: {residual}");
+    }
+    // Recurrence of the polygamma function, psi^(m)(x + 1) = psi^(m)(x) + (-1)^m m! / x^(m+1), and the Hurwitz relation
+    // zeta(s, a) - zeta(s, a + 1) = a^-s.
+    for (m, x) in [(1, "3/7"), (2, "5/2"), (3, "1/3")] {
+        let sign = if m % 2 == 0 { 1 } else { -1 };
+        let factorial: i64 = (1..=m).product();
+        let residual = n(
+            &format!(
+                "polygamma({m}, {x} + 1) - polygamma({m}, {x}) - ({sign})*{factorial}/({x})^({m} + 1)"
+            ),
+            50,
+        );
+        assert!(below(&residual, 35), "m = {m}, x = {x}: {residual}");
+    }
+    let hurwitz = n(
+        "hurwitz_zeta(7/3, 2/5) - hurwitz_zeta(7/3, 2/5 + 1) - (2/5)^(-7/3)",
+        50,
+    );
+    assert!(below(&hurwitz, 35), "{hurwitz}");
+    // psi'(1/2) = pi^2/2 and psi'(1) = pi^2/6.
+    assert!(below(&n("polygamma(1, 1/2) - pi^2/2", 50), 40));
+    assert!(below(&n("polygamma(1, 1) - pi^2/6", 50), 40));
+    // I_(n-1)(x) - I_(n+1)(x) = (2 n / x) I_n(x).
+    for (order, x) in [(1, "1"), (2, "5/2"), (4, "12"), (3, "30")] {
+        let expr = format!(
+            "besseli({}, {x}) - besseli({}, {x}) - {}/({x}) * besseli({order}, {x})",
+            order - 1,
+            order + 1,
+            2 * order
+        );
+        let residual = n(&expr, 50);
+        assert!(below(&residual, 30), "{expr}: {residual}");
+    }
+}

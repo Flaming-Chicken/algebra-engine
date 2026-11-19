@@ -6,5 +6,5 @@ pub mod functor;
 pub mod weil_ideal;
 
 pub use colombeau::GeneralizedDistribution;
-pub use functor::TangentFunctor;
+pub use functor::{TangentError, TangentFunctor};
 pub use weil_ideal::{CalculusKind, WeilJet};

@@ -36,22 +36,39 @@ impl EquivalenceClassifier {
         Self
     }
 
-    /// Classify the equivalence level between two expression nodes in an `ExprGraph`.
-    pub fn classify(&self, graph: &ExprGraph, a: ExprId, b: ExprId) -> EquivalenceKind {
+    /// Classify the equivalence level between two expression nodes in an `ExprGraph`: `Some(SyntacticIdentity)` for
+    /// the same node, `Some(AlgebraicEquality)` when their difference is zero, and `None` when they are not equal.
+    ///
+    /// Algebraic equality is decided by simplifying `a - b` to zero and otherwise by multi-prime Schwartz–Zippel
+    /// evaluation (a mismatch at any sample point is a proof of inequality; agreement at every sample certifies
+    /// equality with error probability below `1e-12`). The tiers above algebraic equality (isomorphism,
+    /// category equivalence, homotopy, elementary equivalence, bisimulation) are relations between structures, not
+    /// between two expressions, and are not decided here (see [`EquivalenceClassifier::check_isomorphism`] for
+    /// named domains). This used to return `AlgebraicEquality` for every pair of distinct expressions.
+    pub fn classify(&self, graph: &ExprGraph, a: ExprId, b: ExprId) -> Option<EquivalenceKind> {
+        use algebra_core::probabilistic::{ProbabilisticVerifier, Solution};
         if a == b {
-            return EquivalenceKind::SyntacticIdentity;
+            return Some(EquivalenceKind::SyntacticIdentity);
         }
-
         let diff = graph.sub(a, b);
-        if let Ok(simp) = algebra_engine::simplify::Simplifier::simplify(graph, diff) {
-            let simp_node = graph.get(simp);
-            if let algebra_core::ExprKind::Number(algebra_core::Number::Integer(0)) = simp_node.kind
-            {
-                return EquivalenceKind::AlgebraicEquality;
+        if let Ok(simplified) = algebra_engine::simplify::Simplifier::simplify(graph, diff) {
+            match graph.get(simplified).kind {
+                algebra_core::ExprKind::Number(algebra_core::Number::Integer(0)) => {
+                    return Some(EquivalenceKind::AlgebraicEquality);
+                }
+                algebra_core::ExprKind::Number(algebra_core::Number::Integer(_))
+                | algebra_core::ExprKind::Number(algebra_core::Number::Rational(_, _)) => {
+                    return None; // a non-zero constant difference
+                }
+                _ => {}
             }
         }
-
-        EquivalenceKind::AlgebraicEquality
+        match ProbabilisticVerifier::verify_equivalence(graph, a, b, 1e-12) {
+            Solution::Deterministic(true) | Solution::Probabilistic { result: true, .. } => {
+                Some(EquivalenceKind::AlgebraicEquality)
+            }
+            _ => None,
+        }
     }
 
     /// Check if two mathematical domains are structurally isomorphic (e.g. Quaternions ≅ M_2(C)).

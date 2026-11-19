@@ -34,6 +34,8 @@ mod simplify_conditions_tests;
 mod solve_known_roots_tests;
 #[path = "engine/solver_domain_tests.rs"]
 mod solver_domain_tests;
+#[path = "engine/solver_residual_tests.rs"]
+mod solver_residual_tests;
 #[path = "engine/special_functions_tests.rs"]
 mod special_functions_tests;
 #[path = "engine/topology_betti_tests.rs"]

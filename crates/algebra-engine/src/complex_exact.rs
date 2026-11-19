@@ -76,6 +76,14 @@ pub fn evaluate(graph: &ExprGraph, id: ExprId) -> Option<C> {
         ExprKind::Pow(base, exponent) => {
             let base = evaluate(graph, base)?;
             let e = evaluate(graph, exponent)?;
+            // The principal square root of a negative rational with a rational root: (-4)^(1/2) = 2 i.
+            if e.1.is_zero()
+                && e.0 == Q::new(1.into(), 2.into())
+                && base.1.is_zero()
+                && base.0.is_negative()
+            {
+                return rational_sqrt(&-base.0.clone()).map(|r| (Q::zero(), r));
+            }
             if !e.1.is_zero() || !e.0.is_integer() {
                 return None;
             }

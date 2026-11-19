@@ -198,6 +198,131 @@ fn jacobi(a: &BigInt, n: &BigInt) -> Option<i32> {
     Some(if n.is_one() { result } else { 0 })
 }
 
+fn mul_mod(a: u128, b: u128, m: u128) -> u128 {
+    a * b % m
+}
+
+fn pow_mod(mut base: u128, mut exponent: u128, modulus: u128) -> u128 {
+    let mut result = 1 % modulus;
+    base %= modulus;
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            result = mul_mod(result, base, modulus);
+        }
+        base = mul_mod(base, base, modulus);
+        exponent >>= 1;
+    }
+    result
+}
+
+fn factors_u64(n: u64) -> Vec<(u64, u32)> {
+    crate::numbertheory::integer_prime_factors(n)
+}
+
+fn carmichael(n: u64) -> BigInt {
+    use num::Integer as _;
+    let mut lambda = BigInt::one();
+    for (p, k) in factors_u64(n) {
+        let value = if p == 2 {
+            match k {
+                1 => 1u64,
+                2 => 2,
+                _ => 1u64 << (k - 2),
+            }
+        } else {
+            p.pow(k - 1) * (p - 1)
+        };
+        lambda = lambda.lcm(&BigInt::from(value));
+    }
+    lambda
+}
+
+/// The multiplicative order of `a` modulo `n` (`gcd(a, n) = 1`).
+fn order_mod(a: u64, n: u64) -> Option<u64> {
+    use num::Integer as _;
+    if n < 2 || a.gcd(&n) != 1 {
+        return None;
+    }
+    let lambda = u64::try_from(carmichael(n)).ok()?;
+    // The order divides lambda: strip prime factors while the power stays 1.
+    let mut order = lambda;
+    for (p, _) in factors_u64(lambda) {
+        while order.is_multiple_of(p) && pow_mod(a as u128, (order / p) as u128, n as u128) == 1 {
+            order /= p;
+        }
+    }
+    Some(order)
+}
+
+/// A square root of `a` modulo the odd prime `p` (the smaller one), by Tonelli-Shanks.
+fn sqrt_mod(a: u64, p: u64) -> Option<u64> {
+    if p == 2 {
+        return Some(a % 2);
+    }
+    if p < 3 || !crate::numbertheory::is_prime(p) {
+        return None;
+    }
+    let a = (a % p) as u128;
+    let p128 = p as u128;
+    if a == 0 {
+        return Some(0);
+    }
+    if pow_mod(a, (p128 - 1) / 2, p128) != 1 {
+        return None;
+    }
+    let (mut q, mut s) = (p128 - 1, 0u32);
+    while q % 2 == 0 {
+        q /= 2;
+        s += 1;
+    }
+    let mut z = 2u128;
+    while pow_mod(z, (p128 - 1) / 2, p128) != p128 - 1 {
+        z += 1;
+    }
+    let (mut m, mut c) = (s, pow_mod(z, q, p128));
+    let (mut t, mut r) = (pow_mod(a, q, p128), pow_mod(a, q.div_ceil(2), p128));
+    while t != 1 {
+        let mut i = 0;
+        let mut x = t;
+        while x != 1 {
+            x = mul_mod(x, x, p128);
+            i += 1;
+        }
+        let b = pow_mod(c, 1u128 << (m - i - 1), p128);
+        m = i;
+        c = mul_mod(b, b, p128);
+        t = mul_mod(t, c, p128);
+        r = mul_mod(r, b, p128);
+    }
+    let other = p128 - r;
+    Some(r.min(other) as u64)
+}
+
+/// The least `x >= 0` with `g^x = h (mod p)`, by baby-step giant-step (`p` up to about 10^12).
+fn discrete_log(g: u64, h: u64, p: u64) -> Option<u64> {
+    if !(2..=1_000_000_000_000).contains(&p) {
+        return None;
+    }
+    let (g, h, m) = (g as u128 % p as u128, h as u128 % p as u128, p as u128);
+    let n = (p as f64).sqrt().ceil() as u128 + 1;
+    let mut table = std::collections::HashMap::new();
+    let mut value = 1u128;
+    for j in 0..n {
+        table.entry(value).or_insert(j);
+        value = mul_mod(value, g, m);
+    }
+    let factor = pow_mod(g, m - 2, m); // g^-1 for a prime modulus
+    let giant = pow_mod(factor, n, m);
+    let mut gamma = h;
+    for i in 0..n {
+        if let Some(&j) = table.get(&gamma) {
+            return Some((i * n + j) as u64);
+        }
+        gamma = mul_mod(gamma, giant, m);
+    }
+    None
+}
+
 /// Evaluate `name(args)` exactly, or `None` if the function is not one of these or the arguments are out of range.
 pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
     let integer_result = |n: BigInt| Some(Q::from_integer(n));
@@ -272,6 +397,35 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
         ("legendre" | "jacobi", [a, n]) => {
             let (a, n) = (as_integer(a)?, as_integer(n)?);
             Some(Q::from_integer(BigInt::from(jacobi(&a, &n)?)))
+        }
+        ("carmichael", [n]) => integer_result(carmichael(as_u64(n, u64::MAX >> 1)?.max(1))),
+        ("radical" | "rad", [n]) => {
+            let n = as_u64(n, u64::MAX >> 1)?;
+            if n == 0 {
+                return None;
+            }
+            integer_result(
+                factors_u64(n)
+                    .iter()
+                    .fold(BigInt::one(), |r, &(p, _)| r * p),
+            )
+        }
+        ("order_mod" | "multiplicative_order", [a, n]) => integer_result(BigInt::from(order_mod(
+            as_u64(a, u64::MAX >> 1)?,
+            as_u64(n, u64::MAX >> 1)?,
+        )?)),
+        ("sqrt_mod", [a, p]) => integer_result(BigInt::from(sqrt_mod(
+            as_u64(a, u64::MAX >> 1)?,
+            as_u64(p, u64::MAX >> 1)?,
+        )?)),
+        ("discrete_log" | "dlog", [g, h, p]) => integer_result(BigInt::from(discrete_log(
+            as_u64(g, u64::MAX >> 1)?,
+            as_u64(h, u64::MAX >> 1)?,
+            as_u64(p, u64::MAX >> 1)?,
+        )?)),
+        ("gray_code" | "gray", [n]) => {
+            let n = as_u64(n, u64::MAX >> 1)?;
+            integer_result(BigInt::from(n ^ (n >> 1)))
         }
         ("isqrt", [n]) => {
             let n = as_integer(n)?;

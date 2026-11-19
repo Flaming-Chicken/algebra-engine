@@ -868,3 +868,130 @@ fn commands_compose_and_large_powers_expand() {
     assert_eq!(big.matches(" + ").count(), 60, "{big}");
     assert!(big.contains("118264581564861424"));
 }
+
+/// `[ a, b ; c, d ]` as numbers (fractions allowed).
+fn grid(text: &str) -> Vec<Vec<f64>> {
+    let number = |s: &str| -> f64 {
+        match s.trim().split_once('/') {
+            Some((a, b)) => a.trim().parse::<f64>().unwrap() / b.trim().parse::<f64>().unwrap(),
+            None => s
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("number {s} in {text}")),
+        }
+    };
+    text.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(';')
+        .map(|row| row.split(',').map(number).collect())
+        .collect()
+}
+
+fn literal(m: &[Vec<f64>]) -> String {
+    format!(
+        "[{}]",
+        m.iter()
+            .map(|r| format!(
+                "[{}]",
+                r.iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn mat_mul(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    (0..a.len())
+        .map(|i| {
+            (0..b[0].len())
+                .map(|j| (0..b.len()).map(|k| a[i][k] * b[k][j]).sum())
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn matrix_arithmetic_agrees_with_direct_computation() {
+    // `[[1,2],[3,4]] + [[1,1],[1,1]]` and `2*A` were echoed back as `matrix(row(...))` text.
+    let (a, b) = (
+        vec![
+            vec![2.0, -1.0, 3.0],
+            vec![0.0, 4.0, 1.0],
+            vec![5.0, 2.0, -2.0],
+        ],
+        vec![
+            vec![1.0, 1.0, 0.0],
+            vec![-2.0, 0.0, 3.0],
+            vec![4.0, 1.0, 1.0],
+        ],
+    );
+    let (ta, tb) = (literal(&a), literal(&b));
+    let sum = grid(&run(&format!("{ta} + {tb}")));
+    let difference = grid(&run(&format!("{ta} - {tb}")));
+    let product = grid(&run(&format!("{ta} * {tb}")));
+    let scaled = grid(&run(&format!("3*{ta} - {tb}/2")));
+    for i in 0..3 {
+        for j in 0..3 {
+            assert_eq!(sum[i][j], a[i][j] + b[i][j]);
+            assert_eq!(difference[i][j], a[i][j] - b[i][j]);
+            assert_eq!(scaled[i][j], 3.0 * a[i][j] - b[i][j] / 2.0);
+        }
+    }
+    assert_eq!(product, mat_mul(&a, &b));
+    // (AB)^T = B^T A^T, A A^-1 = I, A^3 = A A A, and the Cayley-Hamilton theorem for the characteristic polynomial.
+    let left = grid(&run(&format!("transpose({ta} * {tb})")));
+    let right = grid(&run(&format!("transpose({tb}) * transpose({ta})")));
+    assert_eq!(left, right);
+    let inverse = grid(&run(&format!("{ta}^-1")));
+    let identity = mat_mul(&a, &inverse);
+    for i in 0..3 {
+        for j in 0..3 {
+            assert!((identity[i][j] - if i == j { 1.0 } else { 0.0 }).abs() < 1e-12);
+        }
+    }
+    assert_eq!(
+        grid(&run(&format!("{ta}^3"))),
+        mat_mul(&mat_mul(&a, &a), &a)
+    );
+    assert_eq!(
+        run("[[1,2],[3,4]]^2 - 5*[[1,2],[3,4]] - 2*identity(2)"),
+        "[ 0, 0 ; 0, 0 ]"
+    );
+    // A matrix times a vector, a vector times a matrix, and a solved linear system.
+    assert_eq!(run("[[1,2],[3,4]] * [1,1]"), "[ 3 ; 7 ]");
+    assert_eq!(run("[1,1] * [[1,2],[3,4]]"), "[ 4, 6 ]");
+    let x = grid(&run("solve_linear([[2,1],[1,3]], [5,10])"));
+    assert!(
+        (2.0 * x[0][0] + x[1][0] - 5.0).abs() < 1e-12
+            && (x[0][0] + 3.0 * x[1][0] - 10.0).abs() < 1e-12
+    );
+    // Eigenvectors satisfy A v = lambda v.
+    let out = run("eigenvectors([[2,1],[1,2]])");
+    for part in out.split("; ") {
+        let (lambda, vector) = part.trim_start_matches("λ = ").split_once(": ").unwrap();
+        let lambda: f64 = lambda.parse().unwrap();
+        let v: Vec<f64> = vector
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(", ")
+            .map(|s| s.parse().unwrap())
+            .collect();
+        let av = [2.0 * v[0] + v[1], v[0] + 2.0 * v[1]];
+        assert!(
+            (av[0] - lambda * v[0]).abs() < 1e-12 && (av[1] - lambda * v[1]).abs() < 1e-12,
+            "{part}"
+        );
+    }
+    assert_eq!(run("eigenvalues([[0,1],[-1,0]])"), "[i, -i]");
+    assert_eq!(run("det(inverse([[1,2],[3,4]]))"), "-1/2");
+    assert_eq!(run("identity(3)"), "[ 1, 0, 0 ; 0, 1, 0 ; 0, 0, 1 ]");
+    assert_eq!(run("x*[[1,2],[3,4]]"), "[ x, 2 · x ; 3 · x, 4 · x ]");
+    assert!(
+        UraeSession::new()
+            .execute_line("[[1,2],[3,4]] * [[1,2,3]]")
+            .is_error
+    );
+}

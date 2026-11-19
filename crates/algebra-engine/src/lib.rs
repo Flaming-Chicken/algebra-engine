@@ -52,6 +52,7 @@ pub mod limits;
 pub mod linprog;
 pub mod logic;
 pub mod macros;
+pub mod matexpr;
 pub mod matrix;
 pub mod mcts;
 pub mod neural_ode;

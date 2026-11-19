@@ -1219,6 +1219,16 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
                 upper = Some(u.trim().to_string());
             }
             clean_body = clean_body[..idx].trim().to_string();
+        } else if !clean_body.starts_with("sum")
+            && !clean_body.starts_with("suma")
+            && let Some((body, bounds)) = clean_body.split_once(" from ")
+            && let Some((l, u)) = bounds.split_once(" to ")
+        {
+            // `integrate f(x) from a to b`: definite integral. (Dropping the bounds, as this branch once did,
+            // returned the antiderivative as if it were the answer.)
+            lower = Some(l.trim().to_string());
+            upper = Some(u.trim().to_string());
+            clean_body = body.trim().to_string();
         } else if clean_body.contains("_{")
             && clean_body.contains("}^{")
             && let Some(lower_start) = clean_body.find("_{")
@@ -2796,7 +2806,8 @@ pub fn parse_operation(input: &str) -> MathOperation {
                     Some(expr_parts[1].trim().to_string()),
                 )
             } else {
-                (expr_part.trim().to_string(), None)
+                // `integrate x^2 dx from 0 to 1`: the differential names the variable.
+                split_expr_and_var(expr_part.trim())
             };
             let upper_parts = split_top_level_commas(upper_p);
             let upper = if var.is_none() && upper_parts.len() >= 2 {

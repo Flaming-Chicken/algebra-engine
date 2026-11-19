@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: `integrate f from a to b` (and `integral of f from a to b`) returned the antiderivative with the bounds silently dropped; it now returns the value of the definite integral, accepts `dx` before `from`, and refuses a multi-variable integrand with bounds instead of guessing. `factor 360` returned `360`; it now returns the prime factorisation.
 - Changed: `missing_docs` is denied in `urae`, `cat-tangent` and `cat-numbers` (the remaining crates are being documented; see `docs/PLANNING.md`).
 - Changed: the `solve` command says which solutions are real and which are complex (`x^3 - 1 = 0`: "1 real, 2 non-real (complex) solutions") and marks equations with periodic or multivalued functions (`exp(x) = -1`, `sin(x) = a`) as giving the principal solution only. New `executor::classify_solution` and `SolutionKind`; the counts are in the result's metadata (`real_solutions`, `nonreal_solutions`, `coverage`).
 - Changed: the `simplify` command now says where the result is valid when it dropped a restriction (`x/x` gives `1` with `valid where x ≠ 0`): in the CLI REPL, in the JSON response (`conditions`) and as the notebook's domain info.

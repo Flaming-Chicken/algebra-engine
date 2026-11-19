@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: arithmetic in `GF(p^n)` (`GaloisField::arithmetic`: validated field, `+`, `-`, `*`, inverse, powers, Frobenius, irreducibility test) and `ModuloInt::{inverse, div, sub, checked_pow, checked_new}`.
 - Added: `poly::factor::factor_integer_polynomial` and `factor_rational_polynomial`, complete factorisation of univariate polynomials over `Z` and `Q` (Zassenhaus with Hensel lifting); `galois::galois_group_over_q`, the Galois group of any polynomial of degree at most 4 (and of products of quadratics). Fixed: `FieldExtension::quadratic(d)` for perfect squares.
 - Added: `ReedSolomonCode` is a real code over `GF(2^8)`: systematic `encode`, `syndromes`, and `decode` (Berlekamp–Massey, Chien search, Forney) correcting up to `(n - k) / 2` wrong symbols. Fixed: elliptic-curve discriminant overflow, truncated factoring of the discriminant, the split-reduction criterion and the `F_2` point count in `crypto.rs`.
 - Fixed: `cat-numbers` surreals carry exact dyadic values like `algebra-advanced`: sums, products and order are exact (`{0 | 3}` is `1`), tiny dyadics are no longer mistaken for the infinitesimal stand-in, and the `omega`/`epsilon` stand-ins are flagged `transfinite`.

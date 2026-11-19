@@ -324,6 +324,10 @@ impl NumericalEval for ExprGraph {
             }
             ExprKind::Function { name, args } => {
                 let fn_name = self.symbols.resolve(*name).unwrap_or_default();
+                // Named formulas (`normal_cdf`, `circle_area`, `poisson_pmf`) stand for expressions.
+                if let Some(rewritten) = crate::formulary::rewrite(self, &fn_name, args) {
+                    return self.evalf(rewritten, ctx);
+                }
                 let default_sel = ctx
                     .branch_sheet
                     .map(BranchSelection::Sheet)

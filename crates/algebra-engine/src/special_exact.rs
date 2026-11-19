@@ -154,6 +154,18 @@ pub fn evaluate(graph: &ExprGraph, expr: ExprId) -> ExprId {
             {
                 return expr_from_rational(graph, &result);
             }
+            // Named formulas of geometry and probability with constant arguments.
+            // `pi` typed as a symbol and the constant pi must meet in one form for the formula to cancel.
+            let pi_symbol = graph.symbols.get_or_intern("pi");
+            let pi_constant = graph.constant(Constant::Pi);
+            let canonical: Vec<ExprId> = new_args
+                .iter()
+                .map(|&a| graph.substitute(a, pi_symbol, pi_constant))
+                .collect();
+            if let Some(rewritten) = crate::formulary::rewrite(graph, &fname, &canonical) {
+                return crate::simplify::Simplifier::simplify(graph, rewritten)
+                    .unwrap_or(rewritten);
+            }
             if new_args == args.to_vec() {
                 expr
             } else {

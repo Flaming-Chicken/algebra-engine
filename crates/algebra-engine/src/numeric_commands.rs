@@ -30,7 +30,7 @@ fn split_args(args: &[String]) -> Vec<String> {
     args.iter().map(|a| a.trim().to_string()).collect()
 }
 
-fn parse(graph: &ExprGraph, text: &str) -> Result<ExprId, String> {
+pub(crate) fn parse(graph: &ExprGraph, text: &str) -> Result<ExprId, String> {
     ExprParser::new(graph)
         .parse(text)
         .map_err(|e| e.to_string())
@@ -467,7 +467,7 @@ fn exact(graph: &ExprGraph, text: &str) -> Result<Q, String> {
         .ok_or_else(|| format!("{text} is not an exact rational number"))
 }
 
-fn list_items(text: &str) -> Vec<String> {
+pub(crate) fn list_items(text: &str) -> Vec<String> {
     let trimmed = text.trim();
     // Remove one pair of outer brackets (not every leading bracket: `[[0, 0], [1, 1]]` is a list of lists).
     let t = if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
@@ -973,6 +973,8 @@ fn trigonometric(graph: &ExprGraph, name: &str, args: &[String]) -> Result<Numer
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
+        "gradient" | "hessian" | "jacobian" | "divergence" | "curl" | "laplacian" | "cross"
+        | "dot" | "norm" => crate::vectorcalc::run(graph, name, args),
         "product" => product(graph, args),
         "trigsimp" | "expand_trig" => trigonometric(graph, name, args),
         "matpow" => matrix_power(graph, args),
@@ -1030,6 +1032,15 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "gradient" | "grad" => "gradient",
+        "hessian" => "hessian",
+        "jacobian" => "jacobian",
+        "divergence" => "divergence",
+        "curl" => "curl",
+        "laplacian" => "laplacian",
+        "cross" | "cross_product" => "cross",
+        "dot" | "dot_product" => "dot",
+        "norm" => "norm",
         "trigsimp" | "trig_simplify" => "trigsimp",
         "expand_trig" | "trigexpand" => "expand_trig",
         "matpow" | "matrix_power" | "mpow" => "matpow",

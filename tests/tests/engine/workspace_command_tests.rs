@@ -322,3 +322,128 @@ fn initial_value_problems_satisfy_the_equation_and_the_conditions() {
             .is_error
     );
 }
+
+/// A vector printed as `[ a, b, c ]` becomes input text again.
+fn as_input(printed: &str) -> String {
+    printed
+        .replace('·', "*")
+        .replace("[ ", "[")
+        .replace(" ]", "]")
+}
+
+#[test]
+fn vector_calculus_identities_and_finite_differences() {
+    let f = "x^2*y*z + sin(x*y) + z^3";
+    let g = "[x*y*z, x^2 - z, y*sin(x) + z^2]";
+    // curl(grad f) = 0 and div(curl F) = 0 for smooth fields.
+    assert_eq!(
+        run(&format!(
+            "curl({}, [x,y,z])",
+            as_input(&run(&format!("gradient({f}, [x,y,z])")))
+        )),
+        "[ 0, 0, 0 ]"
+    );
+    let curl = as_input(&run(&format!("curl({g}, [x,y,z])")));
+    assert_eq!(run(&format!("divergence({curl}, [x,y,z])")), "0");
+    // laplacian = divergence of the gradient.
+    let gradient = as_input(&run(&format!("gradient({f}, [x,y,z])")));
+    let (laplacian, divergence) = (
+        run(&format!("laplacian({f}, [x,y,z])")),
+        run(&format!("divergence({gradient}, [x,y,z])")),
+    );
+    for point in [("0.3", "-0.8", "1.2"), ("1.5", "0.4", "-0.6")] {
+        let vars = [("x", point.0), ("y", point.1), ("z", point.2)];
+        assert!((value(&laplacian, &vars) - value(&divergence, &vars)).abs() < 1e-9);
+    }
+    // The gradient against a central finite difference at a point.
+    let components: Vec<String> = as_input(&run(&format!("gradient({f}, [x,y,z])")))
+        .trim_matches(|c| c == '[' || c == ']')
+        .split(", ")
+        .map(String::from)
+        .collect();
+    let at = [0.3f64, -0.8, 1.2];
+    let evaluate = |p: [f64; 3]| {
+        value(
+            f,
+            &[
+                ("x", &p[0].to_string()),
+                ("y", &p[1].to_string()),
+                ("z", &p[2].to_string()),
+            ],
+        )
+    };
+    for (i, component) in components.iter().enumerate() {
+        let h = 1e-5;
+        let (mut hi, mut lo) = (at, at);
+        hi[i] += h;
+        lo[i] -= h;
+        let numeric = (evaluate(hi) - evaluate(lo)) / (2.0 * h);
+        let exact = value(component, &[("x", "0.3"), ("y", "-0.8"), ("z", "1.2")]);
+        assert!(
+            (numeric - exact).abs() < 1e-6,
+            "d/d{i}: {numeric} vs {exact}"
+        );
+    }
+    // Jacobian and Hessian shapes, and the vector products.
+    assert_eq!(run("jacobian([x*y, x+y], [x,y])"), "[ y, x ; 1, 1 ]");
+    assert_eq!(run("hessian(x^2*y, [x,y])"), "[ 2 · y, 2 · x ; 2 · x, 0 ]");
+    assert_eq!(run("cross([1,2,3],[4,5,6])"), "[ -3, 6, -3 ]");
+    assert_eq!(run("dot([1,2,3],[4,5,6])"), "32");
+    assert_eq!(run("norm([3,4])"), "5");
+    // Lagrange's identity |a x b|^2 = |a|^2 |b|^2 - (a . b)^2 on integer vectors.
+    for (a, b) in [([1i64, 2, 3], [4i64, 5, 6]), ([2, -1, 0], [3, 3, 7])] {
+        let cross = run(&format!("cross({:?}, {:?})", a, b));
+        let c: Vec<i64> = cross
+            .trim_matches(|ch| ch == '[' || ch == ']' || ch == ' ')
+            .split(", ")
+            .map(|s| s.parse().unwrap())
+            .collect();
+        let dot: i64 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+        let (na, nb): (i64, i64) = (a.iter().map(|x| x * x).sum(), b.iter().map(|x| x * x).sum());
+        assert_eq!(c.iter().map(|x| x * x).sum::<i64>(), na * nb - dot * dot);
+        assert_eq!(c.iter().zip(&a).map(|(x, y)| x * y).sum::<i64>(), 0);
+    }
+}
+
+#[test]
+fn laurent_series_agree_with_the_function_near_the_pole() {
+    // `series(1/x, x, 0, 3)` once returned `x^2/2 + x^3/6`, and sums with a pole were reported as not analytic or
+    // contained `oo`. The oracle: the truncated series equals the function a short distance from the point (the error
+    // is of the order of the first omitted term).
+    let cases: [(&str, &str, &str); 14] = [
+        ("1/x", "0", "0.01"),
+        ("1/x + 1/(1-x)", "0", "0.01"),
+        ("1/x - 1/(x+1)", "0", "0.01"),
+        ("1/x^2 + 1", "0", "0.01"),
+        ("1/(x*(1-x))", "0", "0.01"),
+        ("cot(x)", "0", "0.05"),
+        ("1/sin(x)", "0", "0.05"),
+        ("exp(x)/x^3", "0", "0.02"),
+        ("1/(exp(x) - 1)", "0", "0.05"),
+        ("x*cot(x)", "0", "0.05"),
+        ("x/(exp(x) - 1)", "0", "0.05"),
+        ("1/x^2 - 1/sin(x)^2", "0", "0.05"),
+        ("1/(x - 1)", "1", "1.01"),
+        ("1/(x - 1)^2 + 1/(x - 1)", "1", "1.01"),
+    ];
+    for (expression, point, near) in cases {
+        let series = run(&format!("series({expression}, x, {point}, 8)"));
+        assert!(
+            !series.contains("oo") && !series.contains('∞'),
+            "{expression}: {series}"
+        );
+        let (f, s) = (
+            value(expression, &[("x", near)]),
+            value(&series, &[("x", near)]),
+        );
+        assert!(
+            (f - s).abs() < 1e-9 * f.abs().max(1.0),
+            "series({expression}) = {series}: {f} vs {s} at x = {near}"
+        );
+    }
+    assert_eq!(run("series(1/x, x, 0, 3)"), "x^(-1)");
+    assert_eq!(
+        run("series(cot(x), x, 0, 3)"),
+        "-1/3 · x + x^(-1) - 1/45 · x^3"
+    );
+}

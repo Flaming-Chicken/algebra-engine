@@ -6,6 +6,7 @@
 
 use crate::calculus::SymbolicCalculus;
 use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, SymbolId};
+use num_traits::Zero as _;
 
 /// Series expansion and reversion algorithms extension trait.
 pub trait SymbolicSeries {
@@ -134,6 +135,41 @@ impl SymbolicSeries for ExprGraph {
                     "series: the function is not analytic at this point (a power whose base is zero there has an exponent that depends on the variable, as in x^x at 0), so it has no Taylor series there"
                         .into(),
                 ));
+            }
+            // A pole at the point: exact Laurent coefficients by power-series arithmetic.
+            if let Some((p, coeffs)) = crate::series_fast::laurent_coeffs_fast(
+                self,
+                expr,
+                wrt,
+                point,
+                regular_order as usize,
+            ) {
+                let name = self.symbols.resolve(wrt).unwrap_or_default();
+                let x = self.symbol(&name);
+                let t = if point == self.integer(0) {
+                    x
+                } else {
+                    self.sub(x, point)
+                };
+                let mut terms = Vec::new();
+                for (k, c) in coeffs.iter().enumerate() {
+                    if c.is_zero() {
+                        continue;
+                    }
+                    let c = crate::poly::expr_from_rational(self, c);
+                    let e = k as i64 - p as i64;
+                    terms.push(if e == 0 {
+                        c
+                    } else {
+                        self.mul([c, self.pow(t, self.integer(e))])
+                    });
+                }
+                let sum = if terms.is_empty() {
+                    self.integer(0)
+                } else {
+                    self.add(terms)
+                };
+                return Ok(crate::simplify::Simplifier::simplify(self, sum).unwrap_or(sum));
             }
             crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.set(false));
             crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.set(false));

@@ -380,6 +380,13 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // A finite set expression (`2 in {1, 2}`, `{1,2} union {3}`) before the `x in Domain` declaration syntax.
+        if trimmed.contains('{')
+            && let Some(text) = crate::set_expr::evaluate(trimmed)
+        {
+            return OperationResult::success(text.clone(), text.clone(), text);
+        }
+
         // Check for domain declaration e.g. `a in Reals [0, 100]`
         if let Some(bound) = parse_domain_declaration(trimmed) {
             self.set_domain(bound.clone());
@@ -576,6 +583,23 @@ impl UraeSession {
         // Evaluate pure expressions (constants, exact rationals, or all-bound expressions/uncertainties)
         // A bare matrix literal is displayed by the executor as a grid, not simplified as a scalar expression.
         let bare_matrix = crate::executor::is_single_bracket_group(&expanded_input);
+        // A finite set expression typed as plain input (`{1,2,3} union {3,4}`, `2 in {1,2}`).
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && let Some(text) = crate::set_expr::evaluate(&expanded_input)
+        {
+            return OperationResult::success(text.clone(), text.clone(), text);
+        }
+        // A propositional formula typed as plain input (`a and not a`, `p implies q`): classify it.
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && algebra_core::parser::ExprParser::new(&self.graph)
+                .parse(&expanded_input)
+                .is_err()
+            && let Some(result) = Self::classify_formula(&expanded_input)
+        {
+            return result;
+        }
         if matches!(parsed_op, MathOperation::Expression { .. }) && !bare_matrix {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
@@ -687,6 +711,63 @@ impl UraeSession {
             return result;
         }
         self.execute_op(&parsed_op)
+    }
+
+    /// `a and not a` is a contradiction, `a or not a` a tautology; otherwise a satisfying assignment.
+    fn classify_formula(input: &str) -> Option<OperationResult> {
+        use crate::logic::{BoolExpr, SatSolver};
+        let lowered = format!(" {} ", input.to_ascii_lowercase());
+        let keywords = [
+            " and ",
+            " or ",
+            " not ",
+            " xor ",
+            " implies ",
+            " iff ",
+            "->",
+            "=>",
+            "<->",
+            "<=>",
+            "&",
+            "|",
+            "~",
+            "!",
+            "¬",
+            "∧",
+            "∨",
+        ];
+        if !keywords.iter().any(|k| lowered.contains(k)) {
+            return None;
+        }
+        let (expr, vars) = SatSolver::parse_formula(input).ok()?;
+        if vars
+            .iter()
+            .any(|(_, n)| !n.chars().next().is_some_and(|c| c.is_alphabetic()))
+        {
+            return None;
+        }
+        let describe = |model: &std::collections::HashMap<u32, bool>| -> String {
+            vars.iter()
+                .map(|(id, name)| format!("{name}={}", model.get(id).copied().unwrap_or(false)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let satisfying = SatSolver::solve_model(&expr);
+        let refuting = SatSolver::solve_model(&BoolExpr::Not(Box::new(expr)));
+        let text = match (satisfying, refuting) {
+            (None, _) => format!(
+                "{}: contradiction (false for every assignment)",
+                input.trim()
+            ),
+            (Some(_), None) => format!("{}: tautology (true for every assignment)", input.trim()),
+            (Some(yes), Some(no)) => format!(
+                "{}: contingent; true for {}, false for {}",
+                input.trim(),
+                describe(&yes.into_iter().collect()),
+                describe(&no.into_iter().collect())
+            ),
+        };
+        Some(OperationResult::success(text.clone(), text.clone(), text))
     }
 
     /// The simplified form of `input` if it is shorter than the formatted input; `None` otherwise.

@@ -81,6 +81,26 @@ In order. Each item starts with a failing test and ends with a ledger update.
 6. The verification pass: Galois groups of degree 5 and above (`A15`), Tracks `E`, `F1–F3`, `F9`, `F11–F16`, `G–J`; stack depth and the FFI and WASM boundaries of Track `E` (the production panic recount is done).
 7. Then M2.
 
+**Usability probe loop (running since 20 Nov 2026).** Alongside the queue above, each round feeds the engine a batch of
+ordinary inputs from one field (calculus, linear algebra, number theory, solving, units, statistics, ...), reads every
+answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
+input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
+oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
+(`R14`-`R33` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+spellings a new user types first. The open list, by field:
+
+- **Calculus and series.** Laurent series outside the power-series family (poles of `gamma`, `1/ln x`, expansions at
+  infinity); Gaussian integrals with a polynomial factor; integrals with non-linear arguments, `sqrt` of cubics and
+  irreducible quartic denominators; systems of inequalities; periodic inequalities.
+- **Special functions.** `zeta` for `s < 1` and complex `s`, Bessel `Y`, `I`, `K` and non-integer order, `polygamma`.
+- **Numbers.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `sqrt` of negative rationals with irrational parts, exact `sin(pi/5)`,
+  continued fractions of irrationals, `lcm` of polynomials.
+- **Transforms and ODEs.** Z-transform of `sin(w n)`, boundary value problems, conditions for systems.
+- **Input forms.** Logic and set expressions as plain input, quantities with units in arithmetic, sympy-style
+  `Sum(f, (k, 1, n))` and `Integral(f, (x, a, b))`, `dec2bin`, `bin2dec`.
+- **Structure.** The two parser tables of command names (`parser.rs` and `numeric_commands.rs`) must stay in step; one
+  table would remove a class of mistakes.
+
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit
 factors (an elliptic-curve method); the remainder of `R1` (arbitrary CAD surface meshes as solids).
 

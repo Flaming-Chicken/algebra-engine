@@ -121,31 +121,38 @@ impl Radical {
                 terms: BTreeMap::from([(exponents, coefficient)]),
             });
         }
-        // r + s sqrt(n): multiply by the conjugate.
-        let conjugate = {
-            let mut terms = BTreeMap::new();
-            let mut sqrt_terms = 0;
-            for (m, c) in &self.terms {
-                if m.is_empty() {
-                    terms.insert(m.clone(), c.clone());
-                } else if m.iter().all(|&(_, n, d)| n == 1 && d == 2) {
-                    sqrt_terms += 1;
-                    terms.insert(m.clone(), -c);
-                } else {
-                    return None;
-                }
-            }
-            if sqrt_terms != 1 || self.terms.len() != 2 {
+        // A sum of square roots (and a rational part): multiply by the conjugate of the smallest prime's root, which
+        // removes that prime from the denominator; repeat on the norm.
+        let prime = self
+            .terms
+            .keys()
+            .flat_map(|m| m.iter().map(|&(p, _, _)| p))
+            .min()?;
+        let mut conjugate = BTreeMap::new();
+        for (m, c) in &self.terms {
+            if !m.iter().all(|&(_, n, d)| n == 1 && d == 2) {
                 return None;
             }
-            Radical { terms }
-        };
+            if m.iter().any(|&(p, _, _)| p == prime) {
+                conjugate.insert(m.clone(), -c);
+            } else {
+                conjugate.insert(m.clone(), c.clone());
+            }
+        }
+        let conjugate = Radical { terms: conjugate };
         let norm = self.mul(&conjugate)?;
-        if !norm.is_rational() {
+        if norm.terms.is_empty() {
             return None;
         }
-        let n = norm.terms.get(&Vec::new())?.clone();
-        conjugate.mul(&Radical::constant(Q::one() / n))
+        // The norm no longer contains `prime`.
+        if norm
+            .terms
+            .keys()
+            .any(|m| m.iter().any(|&(p, _, _)| p == prime))
+        {
+            return None;
+        }
+        conjugate.mul(&norm.inverse()?)
     }
 
     /// `self^(p/q)` for a single positive term.
@@ -326,6 +333,9 @@ pub fn evaluate(graph: &ExprGraph, id: ExprId) -> Option<Radical> {
         ExprKind::Function { name, args } => {
             let fname = graph.symbols.resolve(name)?;
             match (fname.as_str(), args.len()) {
+                ("sin" | "cos" | "tan" | "cot" | "sec" | "csc", 1) => {
+                    trig_value(graph, &fname, args[0])
+                }
                 ("exp", 1) => exp_of_log_sum(&log_sum(graph, args[0])?),
                 ("log2" | "log10", 1) | ("log", 2) => logarithm_value(graph, id),
                 ("sqrt", 1) => evaluate(graph, args[0])?.pow_rational(1, 2),
@@ -358,7 +368,22 @@ pub fn has_radicals(graph: &ExprGraph, id: ExprId) -> bool {
         ExprKind::Function { name, args } => {
             matches!(
                 graph.symbols.resolve(name).as_deref(),
-                Some("sqrt" | "cbrt" | "root" | "exp" | "log2" | "log10" | "ln" | "log")
+                Some(
+                    "sqrt"
+                        | "cbrt"
+                        | "root"
+                        | "exp"
+                        | "log2"
+                        | "log10"
+                        | "ln"
+                        | "log"
+                        | "sin"
+                        | "cos"
+                        | "tan"
+                        | "cot"
+                        | "sec"
+                        | "csc"
+                )
             ) || args.iter().any(|&a| has_radicals(graph, a))
         }
         ExprKind::Add(ts) | ExprKind::Mul(ts) => ts.iter().any(|&t| has_radicals(graph, t)),
@@ -548,5 +573,87 @@ impl Radical {
         } else {
             graph.add(sum)
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Exact trigonometric values at multiples of pi/12
+// ---------------------------------------------------------------------------------------------------------------
+
+fn is_pi(graph: &ExprGraph, id: ExprId) -> bool {
+    match &graph.get(id).kind {
+        ExprKind::Number(algebra_core::Number::Constant(algebra_core::Constant::Pi)) => true,
+        ExprKind::Symbol(s) => matches!(graph.symbols.resolve(*s).as_deref(), Some("pi" | "π")),
+        _ => false,
+    }
+}
+
+/// `expr = r pi` for a rational `r`.
+fn pi_multiple(graph: &ExprGraph, id: ExprId) -> Option<Q> {
+    if is_pi(graph, id) {
+        return Some(Q::one());
+    }
+    match graph.get(id).kind.clone() {
+        ExprKind::Number(n) => {
+            let q = rational_from_number(&n).ok()?;
+            q.is_zero().then_some(q)
+        }
+        ExprKind::Neg(a) => Some(-pi_multiple(graph, a)?),
+        ExprKind::Add(ts) => {
+            let mut total = Q::zero();
+            for t in ts.iter() {
+                total += pi_multiple(graph, *t)?;
+            }
+            Some(total)
+        }
+        ExprKind::Sub(a, b) => Some(pi_multiple(graph, a)? - pi_multiple(graph, b)?),
+        ExprKind::Mul(fs) => {
+            let (mut k, mut multiple) = (Q::one(), None);
+            for f in fs.iter() {
+                if let Some(v) = rational_value(graph, *f) {
+                    k *= v;
+                } else if multiple.is_none() {
+                    multiple = Some(pi_multiple(graph, *f)?);
+                } else {
+                    return None;
+                }
+            }
+            Some(k * multiple?)
+        }
+        ExprKind::Div(a, b) => Some(pi_multiple(graph, a)? / rational_value(graph, b)?),
+        _ => None,
+    }
+}
+
+/// `sin`, `cos`, `tan`, `cot`, `sec` or `csc` of `k pi / 12`, exactly.
+fn trig_value(graph: &ExprGraph, name: &str, argument: ExprId) -> Option<Radical> {
+    let r = pi_multiple(graph, argument)?;
+    let twelfths = r * Q::from_integer(12.into());
+    if !twelfths.is_integer() {
+        return None;
+    }
+    let k = twelfths
+        .to_integer()
+        .mod_floor(&BigInt::from(24))
+        .to_i64()?;
+    let root = |n: i64| Radical::constant(Q::from_integer(n.into())).pow_rational(1, 2);
+    let quarter = Radical::constant(Q::new(1.into(), 4.into()));
+    let (r6, r2) = (root(6)?, root(2)?);
+    let sin_unit = quarter.mul(&r6.add(&r2.negate()))?;
+    let cos_unit = quarter.mul(&r6.add(&r2))?;
+    let (mut s, mut c) = (Radical::constant(Q::zero()), Radical::constant(Q::one()));
+    for _ in 0..k {
+        let next_s = s.mul(&cos_unit)?.add(&c.mul(&sin_unit)?);
+        let next_c = c.mul(&cos_unit)?.add(&s.mul(&sin_unit)?.negate());
+        (s, c) = (next_s, next_c);
+    }
+    match name {
+        "sin" => Some(s),
+        "cos" => Some(c),
+        "tan" => s.mul(&c.inverse()?),
+        "cot" => c.mul(&s.inverse()?),
+        "sec" => c.inverse(),
+        "csc" => s.inverse(),
+        _ => None,
     }
 }

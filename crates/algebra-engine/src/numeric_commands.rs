@@ -581,6 +581,29 @@ fn statistics(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericO
             sqrt_text(&(sum_squares(&values) / Q::from_integer((n - 1).into())))
         }
         "pstddev" => sqrt_text(&(sum_squares(&values) / Q::from_integer(n.into()))),
+        "range" => {
+            q_text(&(values.iter().max().ok_or("empty")? - values.iter().min().ok_or("empty")?))
+        }
+        "mode" => {
+            let mut counts: Vec<(Q, usize)> = Vec::new();
+            for v in &values {
+                match counts.iter_mut().find(|(x, _)| x == v) {
+                    Some(entry) => entry.1 += 1,
+                    None => counts.push((v.clone(), 1)),
+                }
+            }
+            let best = counts.iter().map(|(_, c)| *c).max().ok_or("empty")?;
+            let modes: Vec<String> = counts
+                .iter()
+                .filter(|(_, c)| *c == best)
+                .map(|(v, _)| q_text(v))
+                .collect();
+            if best == 1 && counts.len() > 1 {
+                "no value repeats (every value is a mode)".to_string()
+            } else {
+                modes.join(", ")
+            }
+        }
         "min" => q_text(values.iter().min().ok_or("empty")?),
         "max" => q_text(values.iter().max().ok_or("empty")?),
         other => return Err(format!("unknown statistic {other}")),
@@ -970,12 +993,72 @@ fn trigonometric(graph: &ExprGraph, name: &str, args: &[String]) -> Result<Numer
     Ok(NumericOutput::Expression(result, name.replace('_', " ")))
 }
 
+/// `covariance` and `correlation` of paired data: a list of pairs, or two lists.
+fn paired(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
+    let args = split_args(args);
+    let pairs: Vec<(Q, Q)> = if args.len() == 2 {
+        let (xs, ys) = (data(graph, &args[..1])?, data(graph, &args[1..])?);
+        if xs.len() != ys.len() {
+            return Err("the two lists need the same length".into());
+        }
+        xs.into_iter().zip(ys).collect()
+    } else {
+        points(
+            graph,
+            args.first().ok_or("a list of (x, y) pairs is needed")?,
+        )?
+    };
+    let n = pairs.len();
+    if n < 2 {
+        return Err("at least two pairs are needed".into());
+    }
+    let count = Q::from_integer((n as i64).into());
+    let mean_x = pairs.iter().fold(Q::zero(), |s, (x, _)| s + x) / &count;
+    let mean_y = pairs.iter().fold(Q::zero(), |s, (_, y)| s + y) / &count;
+    let sxy = pairs
+        .iter()
+        .fold(Q::zero(), |s, (x, y)| s + (x - &mean_x) * (y - &mean_y));
+    let sxx = pairs
+        .iter()
+        .fold(Q::zero(), |s, (x, _)| s + (x - &mean_x) * (x - &mean_x));
+    let syy = pairs
+        .iter()
+        .fold(Q::zero(), |s, (_, y)| s + (y - &mean_y) * (y - &mean_y));
+    let show = |r: &Q| {
+        if r.is_integer() {
+            q_text(r)
+        } else {
+            format!("{} ≈ {}", q_text(r), decimal(r))
+        }
+    };
+    if name == "covariance" {
+        let cov = sxy / Q::from_integer(((n - 1) as i64).into());
+        return Ok(NumericOutput::Text(format!("covariance = {}", show(&cov))));
+    }
+    if sxx.is_zero() || syy.is_zero() {
+        return Err("the correlation is undefined when one variable is constant".into());
+    }
+    // r = sxy / sqrt(sxx syy): exact when sxy^2 / (sxx syy) is the square of a rational.
+    let squared = (&sxy * &sxy) / (&sxx * &syy);
+    let (sn, sd) = (squared.numer().sqrt(), squared.denom().sqrt());
+    let text = if &sn * &sn == *squared.numer() && &sd * &sd == *squared.denom() {
+        let r = Q::new(sn, sd);
+        show(&if sxy < Q::zero() { -r } else { r })
+    } else {
+        let value = decimal(&sxy) / (decimal(&sxx) * decimal(&syy)).sqrt();
+        format!("sign · √({}) ≈ {value}", q_text(&squared))
+            .replace("sign · ", if sxy < Q::zero() { "-" } else { "" })
+    };
+    Ok(NumericOutput::Text(format!("correlation = {text}")))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "gradient" | "hessian" | "jacobian" | "divergence" | "curl" | "laplacian" | "cross"
         | "dot" | "norm" => crate::vectorcalc::run(graph, name, args),
         "product" => product(graph, args),
+        "covariance" | "correlation" => paired(graph, name, args),
         "trigsimp" | "expand_trig" => trigonometric(graph, name, args),
         "matpow" => matrix_power(graph, args),
         "lu" => lu(graph, args),
@@ -987,7 +1070,7 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
         "interpolate" | "lagrange" => interpolate(graph, args),
         "fit" | "polyfit" => fit(graph, args),
         "mean" | "average" | "median" | "variance" | "var" | "pvariance" | "stddev" | "std"
-        | "sd" | "pstddev" | "min" | "max" => statistics(graph, name, args),
+        | "sd" | "pstddev" | "min" | "max" | "mode" | "range" => statistics(graph, name, args),
         "divmod" | "floordiv" | "digits" | "egcd" | "crt" | "continued_fraction"
         | "convergents" => {
             let mut parsed: Vec<Vec<Q>> = Vec::new();
@@ -1032,6 +1115,10 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "mode" => "mode",
+        "range" => "range",
+        "covariance" | "cov" => "covariance",
+        "correlation" | "corr" => "correlation",
         "gradient" | "grad" => "gradient",
         "hessian" => "hessian",
         "jacobian" => "jacobian",

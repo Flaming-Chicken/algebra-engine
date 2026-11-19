@@ -619,3 +619,117 @@ fn radicals_and_logarithms_of_rationals_are_exact_and_correct() {
     // ...and an irrational logarithm stays symbolic.
     assert_eq!(run("ln(2)/ln(3)"), "ln(2) / ln(3)");
 }
+
+/// The number after the last `=` of `5 [km] = 3.1 [miles]`.
+fn converted(out: &str) -> f64 {
+    let after = out.rsplit_once('=').unwrap().1.trim();
+    after.split_whitespace().next().unwrap().parse().unwrap()
+}
+
+#[test]
+fn unit_conversion_is_dimensionally_checked_and_correct() {
+    // `convert 5 km to miles` used to answer 5 (and `convert 100 F to C` 100): every unknown pair was the identity.
+    for (query, expected) in [
+        ("convert 5 km to miles", 5000.0 / 1609.344),
+        ("convert 100 F to C", 37.777_777_78),
+        ("convert 0 C to K", 273.15),
+        ("convert 100 C to F", 212.0),
+        ("convert 32 F to K", 273.15),
+        ("convert 60 mph to km/h", 96.560_64),
+        ("convert 9.81 m/s^2 to ft/s^2", 9.81 / 0.3048),
+        ("convert 1 kWh to J", 3.6e6),
+        ("convert 1 atm to psi", 14.695_948_78),
+        ("convert 72 km/h to m/s", 20.0),
+        ("convert 1 N to kg*m/s^2", 1.0),
+        ("convert 2 hours to minutes", 120.0),
+        ("convert 1 GHz to Hz", 1e9),
+        ("convert 1 L to m^3", 1e-3),
+        ("convert 180 deg to rad", std::f64::consts::PI),
+    ] {
+        let got = converted(&run(query));
+        assert!(
+            (got - expected).abs() <= 1e-8 * expected.abs().max(1.0),
+            "{query}: {got} vs {expected}"
+        );
+    }
+    // Round trips through another unit of the same dimension return the value.
+    for (a, b) in [
+        ("km", "mi"),
+        ("lb", "kg"),
+        ("psi", "bar"),
+        ("F", "C"),
+        ("mph", "m/s"),
+        ("eV", "J"),
+    ] {
+        let there = converted(&run(&format!("convert 7.25 {a} to {b}")));
+        let back = converted(&run(&format!("convert {there} {b} to {a}")));
+        assert!((back - 7.25).abs() < 1e-6, "{a} -> {b} -> {a}: {back}");
+    }
+    // Incompatible dimensions and unknown units are errors.
+    for bad in [
+        "convert 5 km to kg",
+        "convert 1 s to m",
+        "convert 1 foo to m",
+        "convert 5 J to W",
+    ] {
+        assert!(UraeSession::new().execute_line(bad).is_error, "{bad}");
+    }
+}
+
+#[test]
+fn undefined_arithmetic_and_more_statistics() {
+    // `0/0` was `1`, `oo - oo` was `0`.
+    for q in ["0/0", "1/0", "oo - oo", "5/(3-3)", "0^(-1)"] {
+        assert!(run(q).starts_with("Undefined"), "{q}");
+    }
+    assert_eq!(run("mode [1,2,2,3]"), "mode = 2");
+    assert_eq!(run("mode [5,5,6,6,7]"), "mode = 5, 6");
+    assert_eq!(run("range [3,9,1]"), "range = 8");
+    // Covariance and correlation against the definitions computed here.
+    let (xs, ys) = ([1.0f64, 2.0, 3.0, 4.0], [2.0f64, 4.0, 6.0, 9.0]);
+    let (mx, my) = (xs.iter().sum::<f64>() / 4.0, ys.iter().sum::<f64>() / 4.0);
+    let sxy: f64 = xs.iter().zip(&ys).map(|(x, y)| (x - mx) * (y - my)).sum();
+    let sxx: f64 = xs.iter().map(|x| (x - mx).powi(2)).sum();
+    let syy: f64 = ys.iter().map(|y| (y - my).powi(2)).sum();
+    let number_after_approx =
+        |out: String| -> f64 { out.split('≈').nth(1).unwrap().trim().parse().unwrap() };
+    assert!(
+        (number_after_approx(run("covariance [1,2,3,4], [2,4,6,9]")) - sxy / 3.0).abs() < 1e-12
+    );
+    assert!(
+        (number_after_approx(run("correlation [1,2,3,4], [2,4,6,9]")) - sxy / (sxx * syy).sqrt())
+            .abs()
+            < 1e-12
+    );
+    assert_eq!(run("correlation [[1,2],[2,4],[3,6]]"), "correlation = 1");
+    assert_eq!(run("corr [1,2,3], [3,2,1]"), "correlation = -1");
+}
+
+#[test]
+fn exact_trigonometric_values_at_multiples_of_pi_over_twelve() {
+    for k in -30i64..=30 {
+        let angle = k as f64 * std::f64::consts::PI / 12.0;
+        for (name, f) in [("sin", f64::sin as fn(f64) -> f64), ("cos", f64::cos)] {
+            let out = run(&format!("{name}({k}*pi/12)"));
+            let got = value(&out.replace('√', "sqrt").replace('·', "*"), &[]);
+            assert!(
+                (got - f(angle)).abs() < 1e-12,
+                "{name}({k} pi/12) = {out}: {got} vs {}",
+                f(angle)
+            );
+        }
+        // tan at the odd multiples of pi/2 is undefined.
+        if k.rem_euclid(12) != 6 {
+            let out = run(&format!("tan({k}*pi/12)"));
+            let got = value(&out.replace('√', "sqrt").replace('·', "*"), &[]);
+            assert!(
+                (got - angle.tan()).abs() < 1e-9 * angle.tan().abs().max(1.0),
+                "tan({k} pi/12) = {out}"
+            );
+        }
+    }
+    assert_eq!(run("tan(pi/12)"), "2 - √(3)");
+    assert_eq!(run("sin(pi/6)"), "1/2");
+    assert_eq!(run("cos(pi/4)"), "1/2 · √(2)");
+    assert_eq!(run("sin(pi/12)"), "-1/4 · √(2) + 1/4 · √(6)");
+}

@@ -14,6 +14,8 @@ mod integration_exp_trig_tests;
 mod limit_tests;
 #[path = "engine/limits_series_audit_tests.rs"]
 mod limits_series_audit_tests;
+#[path = "engine/linalg_oracle_tests.rs"]
+mod linalg_oracle_tests;
 #[path = "engine/m1_wrong_answer_tests.rs"]
 mod m1_wrong_answer_tests;
 #[path = "engine/natural_spelling_tests.rs"]

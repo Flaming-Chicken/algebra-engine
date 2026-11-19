@@ -1813,6 +1813,9 @@ fn eval_ternary_fn(
         let (r, i) = mv.primary_value();
         return Ok(BigValue::from_complex(r, i));
     }
+    if fn_name == "RootOf" {
+        return eval_root_of(graph, arg0, arg1, arg2, ctx);
+    }
     Err(AlgebraError::EvaluationError(format!(
         "Unsupported ternary function '{}' in numerical evaluation",
         fn_name
@@ -2167,5 +2170,82 @@ pub fn eval_uncertain(
         mean: nominal,
         std_dev: combined_sigma,
         interval,
+    })
+}
+
+/// `RootOf(p(x), x, k)`: the `k`-th root (counting from 1) of a polynomial with rational coefficients, in the canonical
+/// order real roots ascending, then non-real roots by real part and then imaginary part. The roots come from
+/// Durand-Kerner iteration polished by Newton steps on the original polynomial.
+fn eval_root_of(
+    graph: &ExprGraph,
+    equation: ExprId,
+    variable: ExprId,
+    index: ExprId,
+    ctx: &EvalContext,
+) -> AlgebraResult<BigValue> {
+    let ExprKind::Symbol(sym) = graph.get(variable).kind else {
+        return Err(AlgebraError::EvaluationError(
+            "RootOf: the second argument must be a symbol".into(),
+        ));
+    };
+    let k = graph.evalf(index, ctx)?.to_f64().round() as i64;
+    let poly = crate::poly::UniPoly::from_expr(graph, equation, sym).map_err(|_| {
+        AlgebraError::EvaluationError(
+            "RootOf: the polynomial has coefficients that are not rational numbers".into(),
+        )
+    })?;
+    let degree = poly.degree();
+    if degree == 0 || k < 1 || k as usize > degree {
+        return Err(AlgebraError::EvaluationError(format!(
+            "RootOf: root number {k} does not exist for a polynomial of degree {degree}"
+        )));
+    }
+    use num_traits::ToPrimitive;
+    let ascending: Vec<f64> = poly
+        .coeffs
+        .iter()
+        .map(|c| c.to_f64().unwrap_or(f64::NAN))
+        .collect();
+    let lead = ascending[degree];
+    let monic_descending: Vec<f64> = ascending.iter().rev().map(|c| c / lead).collect();
+    let mut roots: Vec<(f64, f64)> =
+        crate::poly::roots::DurandKernerSolver::solve(&monic_descending, 2000, 1e-15)
+            .into_iter()
+            .map(|r| (r.re, r.im))
+            .collect();
+    // Newton polish on the original polynomial.
+    let value_and_slope = |z: (f64, f64)| -> ((f64, f64), (f64, f64)) {
+        let (mut p, mut dp) = ((0.0, 0.0), (0.0, 0.0));
+        for &c in monic_descending.iter() {
+            dp = (dp.0 * z.0 - dp.1 * z.1 + p.0, dp.0 * z.1 + dp.1 * z.0 + p.1);
+            p = (p.0 * z.0 - p.1 * z.1 + c, p.0 * z.1 + p.1 * z.0);
+        }
+        (p, dp)
+    };
+    for z in roots.iter_mut() {
+        for _ in 0..6 {
+            let (p, dp) = value_and_slope(*z);
+            let den = dp.0 * dp.0 + dp.1 * dp.1;
+            if den < 1e-300 {
+                break;
+            }
+            *z = (
+                z.0 - (p.0 * dp.0 + p.1 * dp.1) / den,
+                z.1 - (p.1 * dp.0 - p.0 * dp.1) / den,
+            );
+        }
+    }
+    let is_real = |z: &(f64, f64)| z.1.abs() <= 1e-9 * (1.0 + z.0.abs());
+    roots.sort_by(|a, b| match (is_real(a), is_real(b)) {
+        (true, true) => a.0.total_cmp(&b.0),
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (false, false) => a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)),
+    });
+    let z = roots[(k - 1) as usize];
+    Ok(if is_real(&z) {
+        BigValue::Real(z.0)
+    } else {
+        BigValue::Complex(z.0, z.1)
     })
 }

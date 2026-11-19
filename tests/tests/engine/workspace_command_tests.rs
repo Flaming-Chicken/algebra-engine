@@ -109,3 +109,55 @@ fn series_refuses_functions_that_are_not_analytic_at_the_point() {
     let out = run("series((1 + x)^x, x, 0, 3)");
     assert_eq!(out, "x^2 - 1/2 · x^3 + 1");
 }
+
+#[test]
+fn constants_and_complex_numbers_are_evaluated_exactly() {
+    // These were echoed back: constants built from pi, and any arithmetic with i.
+    for (q, expected) in [
+        ("sin(pi/6)", "1/2"),
+        ("cos(pi/3)", "1/2"),
+        ("tan(pi/4)", "1"),
+        ("sin(pi)", "0"),
+        ("cos(pi)", "-1"),
+        ("(1+2i)*(3-i)", "5 + 5i"),
+        ("(2+3i)/(1-i)", "-1/2 + 5i/2"),
+        ("(1+i)^2", "2i"),
+        ("(1+i)^8", "16"),
+        ("i^2", "-1"),
+        ("sqrt(-4)", "2i"),
+        ("abs(3+4i)", "5"),
+        ("conj(1+i)", "1 - i"),
+        ("re(2+3i)", "2"),
+        ("im(2+3i)", "3"),
+    ] {
+        assert_eq!(run(q), expected, "{q}");
+    }
+    // Oracle: the exact complex product agrees with component arithmetic for many small Gaussian integers.
+    for (a, b, c, d) in [
+        (1i64, 2i64, 3i64, -1i64),
+        (-4, 5, 7, 2),
+        (0, 3, 3, 0),
+        (2, -2, -2, 2),
+    ] {
+        let out = run(&format!("(({a})+({b})*i)*(({c})+({d})*i)"));
+        let (re, im) = (a * c - b * d, a * d + b * c);
+        let expected = match (re, im) {
+            (r, 0) => r.to_string(),
+            (0, 1) => "i".into(),
+            (0, -1) => "-i".into(),
+            (0, m) => format!("{}i", m),
+            (r, m) => format!(
+                "{r} {} {}",
+                if m < 0 { "-" } else { "+" },
+                if m.abs() == 1 {
+                    "i".into()
+                } else {
+                    format!("{}i", m.abs())
+                }
+            ),
+        };
+        assert_eq!(out, expected, "({a}+{b}i)({c}+{d}i)");
+    }
+    // A symbol keeps the expression symbolic.
+    assert_eq!(run("x + i"), "x + i");
+}

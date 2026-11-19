@@ -1466,3 +1466,34 @@ fn euler_power_and_the_scope_of_a_sum() {
     // The whole-input call is not treated as a nested one (this recursed without end).
     assert_eq!(run("simplify(x - x)"), "0");
 }
+
+#[test]
+fn series_at_infinity_agree_with_the_function_for_large_x() {
+    // The oracle: at a large x the truncated expansion equals the function up to the first omitted term (~ x^-(n+1)).
+    let cases = [
+        ("1/(x+1)", 6),
+        ("1/(x^2+1)", 6),
+        ("x/(x+1)", 6),
+        ("(x+1)/(x-1)", 6),
+        ("x^2/(x+1)", 5),
+        ("exp(1/x)", 6),
+        ("sin(1/x)", 7),
+        ("ln(1+1/x)", 6),
+        ("(x^2+3)/(x^2-1)", 6),
+    ];
+    for (expression, order) in cases {
+        let series = run(&format!("series({expression}, x, oo, {order})"));
+        assert!(!series.contains("(x^(-1))"), "unsimplified: {series}");
+        for x in ["30", "55.5", "-40"] {
+            let (f, s) = (value(expression, &[("x", x)]), value(&series, &[("x", x)]));
+            assert!(
+                (f - s).abs() < 1e-8 * f.abs().max(1.0),
+                "series({expression}, oo) = {series}: {f} vs {s} at x = {x}"
+            );
+        }
+    }
+    assert_eq!(
+        run("series(1/(x+1), x, oo, 4)"),
+        "x^(-1) - x^(-2) + x^(-3) - x^(-4)"
+    );
+}

@@ -978,7 +978,43 @@ impl OperationExecutor {
                 (Ok(expr_id), Ok(pt_expr)) => {
                     let wrt_sym = graph.symbols.get_or_intern(variable);
                     use crate::series::SymbolicSeries;
-                    match graph.laurent_series(expr_id, wrt_sym, pt_expr, 0, *order as u32) {
+                    // An expansion at infinity: substitute x = 1/t, expand about t = 0 and substitute back.
+                    let at_infinity = matches!(
+                        graph.get(pt_expr).kind,
+                        ExprKind::Number(algebra_core::Number::Constant(
+                            algebra_core::Constant::Infinity
+                        ))
+                    ) || matches!(graph.get(pt_expr).kind, ExprKind::Symbol(s)
+                        if matches!(graph.symbols.resolve(s).as_deref(), Some("oo" | "inf" | "infinity" | "∞")));
+                    let expansion = if at_infinity {
+                        let t_name = "__t_inf";
+                        let t_sym = graph.symbols.get_or_intern(t_name);
+                        let t = graph.symbol(t_name);
+                        let in_t =
+                            graph.substitute(expr_id, wrt_sym, graph.div(graph.integer(1), t));
+                        let in_t = Simplifier::simplify(graph, in_t).unwrap_or(in_t);
+                        // 1/(1/t + 1) is t/(t + 1): clear the inner fractions so that the expansion at t = 0 is a
+                        // Taylor series.
+                        let in_t = AlgebraicTransformations::cancel(
+                            graph,
+                            AlgebraicTransformations::together(graph, in_t),
+                        );
+                        graph
+                            .laurent_series(in_t, t_sym, graph.integer(0), 0, *order as u32)
+                            .map(|series| {
+                                merge_negative_powers(
+                                    graph,
+                                    graph.substitute(
+                                        series,
+                                        t_sym,
+                                        graph.pow(graph.symbol(variable), graph.integer(-1)),
+                                    ),
+                                )
+                            })
+                    } else {
+                        graph.laurent_series(expr_id, wrt_sym, pt_expr, 0, *order as u32)
+                    };
+                    match expansion {
                         Ok(series_id) => {
                             let simp_id = graph.simplify(series_id);
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
@@ -4577,5 +4613,51 @@ fn execute_solve_system(
                 }
             }
         }
+    }
+}
+
+/// `(b^p)^n` with an integer `n` and a rational `p` as `b^(p n)`, everywhere in `expr` (so that the terms of an
+/// expansion in `1/x` print as `x^(-2)`, not `(x^(-1))^2`).
+fn merge_negative_powers(graph: &ExprGraph, expr: ExprId) -> ExprId {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Pow(base, exponent) => {
+            let base = merge_negative_powers(graph, base);
+            if let ExprKind::Pow(inner_base, inner_exp) = graph.get(base).kind.clone()
+                && let Ok(Some(n)) = crate::numeric::try_eval_exact(
+                    graph,
+                    exponent,
+                    &std::collections::HashMap::new(),
+                )
+                && n.is_integer()
+                && let Ok(Some(p)) = crate::numeric::try_eval_exact(
+                    graph,
+                    inner_exp,
+                    &std::collections::HashMap::new(),
+                )
+            {
+                return graph.pow(inner_base, crate::poly::expr_from_rational(graph, &(p * n)));
+            }
+            graph.pow(base, exponent)
+        }
+        ExprKind::Add(ts) => graph.add(
+            ts.iter()
+                .map(|&t| merge_negative_powers(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Mul(fs) => graph.mul(
+            fs.iter()
+                .map(|&t| merge_negative_powers(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Sub(a, b) => graph.sub(
+            merge_negative_powers(graph, a),
+            merge_negative_powers(graph, b),
+        ),
+        ExprKind::Neg(a) => graph.neg(merge_negative_powers(graph, a)),
+        ExprKind::Div(a, b) => graph.div(
+            merge_negative_powers(graph, a),
+            merge_negative_powers(graph, b),
+        ),
+        _ => expr,
     }
 }

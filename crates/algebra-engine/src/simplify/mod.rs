@@ -325,12 +325,15 @@ impl Simplifier {
         goal: algebra_core::domain::GoalDomain,
         assumptions: &crate::logic::AssumptionsContext,
     ) -> SimplifyResult<ExprId> {
+        // The depth check comes first: everything below recurses once per level.
         let depth = expression_depth(graph, root);
         if depth > MAX_SIMPLIFY_DEPTH {
             return Err(SimplifyError::Custom(format!(
                 "the expression is nested {depth} levels deep; the limit is {MAX_SIMPLIFY_DEPTH}"
             )));
         }
+        // `gamma(5)` is 24, `gamma(1/2)` is sqrt(pi), `zeta(2)` is pi^2/6: exact values first.
+        let root = crate::special_exact::evaluate(graph, root);
         let node = graph.get(root);
         if let ExprKind::Relational { op, lhs, rhs } = &node.kind {
             let simp_lhs = Self::simplify_with_goal_and_assumptions(graph, *lhs, goal, assumptions)

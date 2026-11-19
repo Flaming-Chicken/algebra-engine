@@ -44,6 +44,8 @@ mod solve_known_roots_tests;
 mod solver_domain_tests;
 #[path = "engine/solver_residual_tests.rs"]
 mod solver_residual_tests;
+#[path = "engine/special_function_tests.rs"]
+mod special_function_tests;
 #[path = "engine/special_functions_tests.rs"]
 mod special_functions_tests;
 #[path = "engine/topology_betti_tests.rs"]

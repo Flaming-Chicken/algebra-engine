@@ -1658,12 +1658,20 @@ fn eval_unary_fn(
         ("BringRadical" | "BR", BigValue::Real(r)) => {
             Ok(BigValue::Real(crate::poly::roots::BringRadical::eval(*r)))
         }
-        ("gamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_gamma(*r))),
-        ("log_gamma" | "lngamma", BigValue::Real(r)) => Ok(BigValue::Real(eval_log_gamma(*r))),
+        ("gamma", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("gamma", *r).unwrap_or_else(|| eval_gamma(*r)),
+        )),
+        ("log_gamma" | "lngamma" | "lgamma", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("lgamma", *r).unwrap_or_else(|| eval_log_gamma(*r)),
+        )),
         ("digamma" | "psi", BigValue::Real(r)) => Ok(BigValue::Real(eval_digamma(*r))),
         ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(eval_zeta(*r))),
-        ("erf", BigValue::Real(r)) => Ok(BigValue::Real(eval_erf(*r))),
-        ("erfc", BigValue::Real(r)) => Ok(BigValue::Real(eval_erfc(*r))),
+        ("erf", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("erf", *r).unwrap_or_else(|| eval_erf(*r)),
+        )),
+        ("erfc", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("erfc", *r).unwrap_or_else(|| eval_erfc(*r)),
+        )),
         ("si" | "Si", BigValue::Real(r)) => Ok(BigValue::Real(eval_si(*r))),
         ("ci" | "Ci", BigValue::Real(r)) => Ok(BigValue::Real(eval_ci(*r))),
         ("airy_ai" | "Ai", BigValue::Real(r)) => Ok(BigValue::Real(eval_airy_ai(*r))),

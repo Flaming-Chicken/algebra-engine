@@ -76,6 +76,7 @@ pub mod quantum_circuit;
 pub mod query;
 pub mod radical;
 mod rational_pf;
+pub mod recurrence;
 pub mod risch;
 mod risch_exptrig;
 mod risch_more;

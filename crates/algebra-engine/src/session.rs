@@ -598,6 +598,9 @@ impl UraeSession {
         }
 
         // `dsolve(y' = 2*y, y(0) = 1)`: a general solution with initial conditions.
+        if let Some(result) = self.try_rsolve(trimmed) {
+            return result;
+        }
         if let Some(result) = self.try_dsolve_with_conditions(trimmed) {
             return result;
         }
@@ -929,6 +932,96 @@ impl UraeSession {
         let mut res = OperationResult::success(reduced.clone(), latex, reduced);
         res.root_expr = Some(simplified);
         Some(res)
+    }
+
+    /// `rsolve a(n+2) = a(n+1) + a(n), a(0) = 0, a(1) = 1`: the closed form of a linear recurrence.
+    fn try_rsolve(&mut self, input: &str) -> Option<OperationResult> {
+        let body = [
+            "rsolve",
+            "solve_recurrence",
+            "recurrence",
+            "recurrence_solve",
+        ]
+        .iter()
+        .find_map(|name| {
+            input
+                .strip_prefix(&format!("{name}("))
+                .and_then(|b| b.strip_suffix(')'))
+                .or_else(|| input.strip_prefix(&format!("{name} ")))
+        })?;
+        let mut parts = Vec::new();
+        let (mut depth, mut current) = (0i32, String::new());
+        for c in body.chars() {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+            if c == ',' && depth == 0 {
+                parts.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        parts.push(current);
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        let mut initial = Vec::new();
+        let mut equation = None;
+        for part in &parts {
+            match crate::ode_ic::parse_condition(part) {
+                // `a(0) = 1` is an initial value; `a(n+2) = ...` (a non-numeric index) is the recurrence itself.
+                Some(condition)
+                    if condition.order == 0
+                        && condition
+                            .point
+                            .trim()
+                            .trim_start_matches('-')
+                            .chars()
+                            .all(|c| c.is_ascii_digit())
+                        && !condition.point.trim().is_empty() =>
+                {
+                    let index = condition.point.trim().parse::<i64>().ok().or_else(|| {
+                        parser
+                            .parse(&condition.point)
+                            .ok()
+                            .and_then(|id| {
+                                crate::numeric::try_eval_exact(
+                                    &self.graph,
+                                    id,
+                                    &std::collections::HashMap::new(),
+                                )
+                                .ok()
+                                .flatten()
+                            })
+                            .filter(|q| q.is_integer())
+                            .and_then(|q| num_traits::ToPrimitive::to_i64(&q.to_integer()))
+                    });
+                    match index {
+                        Some(i) => initial.push((i, condition.value)),
+                        None => {
+                            return Some(OperationResult::error(
+                                "the index of an initial value must be an integer",
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    if equation.is_none() {
+                        equation = Some(part.trim().to_string());
+                    }
+                }
+            }
+        }
+        let equation = equation?;
+        Some(
+            match crate::recurrence::solve(&self.graph, &equation, &initial) {
+                Ok((name, text)) => {
+                    let out = format!("{name}(n) = {text}");
+                    OperationResult::success(out.clone(), out.clone(), out)
+                }
+                Err(e) => OperationResult::error(e),
+            },
+        )
     }
 
     /// `dsolve <equation>, y(x0) = v, y'(x0) = w, ...`: solve, then fix the constants from the conditions.

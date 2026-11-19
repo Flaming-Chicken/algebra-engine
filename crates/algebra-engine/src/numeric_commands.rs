@@ -954,10 +954,27 @@ fn lu(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
     )))
 }
 
+/// `trigsimp(e)` and `expand_trig(e)`.
+fn trigonometric(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
+    let args = split_args(args);
+    let text = args.first().ok_or("an expression is needed")?;
+    let expr = parse(graph, text)?;
+    let result = if name == "trigsimp" {
+        crate::simplify::trig_expand::trigsimp(graph, expr)
+    } else {
+        graph.simplify(crate::simplify::AlgebraicTransformations::expand(
+            graph,
+            crate::simplify::trig_expand::expand_trig(graph, expr),
+        ))
+    };
+    Ok(NumericOutput::Expression(result, name.replace('_', " ")))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "product" => product(graph, args),
+        "trigsimp" | "expand_trig" => trigonometric(graph, name, args),
         "matpow" => matrix_power(graph, args),
         "lu" => lu(graph, args),
         "ztransform" => ztransform(graph, args),
@@ -1013,6 +1030,8 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "trigsimp" | "trig_simplify" => "trigsimp",
+        "expand_trig" | "trigexpand" => "expand_trig",
         "matpow" | "matrix_power" | "mpow" => "matpow",
         "lu" | "lu_decomposition" => "lu",
         "ztransform" | "z_transform" | "ztrans" => "ztransform",

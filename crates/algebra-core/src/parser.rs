@@ -1643,6 +1643,8 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "stddev" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "trigsimp" | "trig_simplify" => "trigsimp",
+        "expand_trig" | "trigexpand" => "expand_trig",
         "matpow" | "matrix_power" | "mpow" => "matpow",
         "lu" | "lu_decomposition" => "lu",
         "ztransform" | "z_transform" | "ztrans" => "ztransform",

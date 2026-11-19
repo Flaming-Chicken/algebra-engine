@@ -230,3 +230,95 @@ fn matrix_powers_lu_and_integer_factorisation() {
         assert_eq!(product, n, "{out}");
     }
 }
+
+#[test]
+fn trigonometric_expansion_and_simplification_preserve_the_value() {
+    // The oracle is numerical: the transformed expression must agree with the original at several points.
+    let cases = [
+        ("expand", "sin(2*x)"),
+        ("expand", "cos(x+y)"),
+        ("expand", "sin(x - y)"),
+        ("expand", "cos(3*x)"),
+        ("expand", "sin(4*x + y)"),
+        ("expand_trig", "tan(x + y)"),
+        ("trigsimp", "sin(x)^2 + cos(x)^2"),
+        ("trigsimp", "sin(x)^4 - cos(x)^4"),
+        ("trigsimp", "cos(2*x) + 2*sin(x)^2"),
+        ("trigsimp", "sin(2*x)/(2*sin(x))"),
+        ("trigsimp", "sin(x)^2*cos(x)^2 + cos(x)^4"),
+    ];
+    for (command, expression) in cases {
+        let transformed = run(&format!("{command}({expression})"));
+        for (x, y) in [("0.3", "1.1"), ("-0.7", "0.4"), ("2.2", "-1.3")] {
+            let (a, b) = (
+                value(expression, &[("x", x), ("y", y)]),
+                value(&transformed, &[("x", x), ("y", y)]),
+            );
+            assert!(
+                (a - b).abs() < 1e-9 * a.abs().max(1.0),
+                "{command}({expression}) = {transformed} at x = {x}, y = {y}: {a} vs {b}"
+            );
+        }
+    }
+    assert_eq!(run("trigsimp(sin(x)^2 + cos(x)^2)"), "1");
+    assert_eq!(run("trigsimp(cos(2*x) + 2*sin(x)^2)"), "1");
+    assert_eq!(run("expand(sin(2*x))"), "2 · cos(x) · sin(x)");
+}
+
+#[test]
+fn initial_value_problems_satisfy_the_equation_and_the_conditions() {
+    // (equation as a residual of y, y', y'', conditions as (order, point, value)).
+    type Residual = fn(f64, f64, f64, f64) -> f64;
+    type Case<'a> = (&'a str, &'a [(usize, f64, f64)], Residual);
+    let cases: [Case; 6] = [
+        ("y' = 2*y, y(0)=1", &[(0, 0.0, 1.0)], |_, y, d1, _| {
+            d1 - 2.0 * y
+        }),
+        (
+            "y'' + y = 0, y(0)=1, y'(0)=0",
+            &[(0, 0.0, 1.0), (1, 0.0, 0.0)],
+            |_, y, _, d2| d2 + y,
+        ),
+        (
+            "y'' - 3*y' + 2*y = 0, y(0)=0, y'(0)=1",
+            &[(0, 0.0, 0.0), (1, 0.0, 1.0)],
+            |_, y, d1, d2| d2 - 3.0 * d1 + 2.0 * y,
+        ),
+        ("y' + y = x, y(0)=2", &[(0, 0.0, 2.0)], |x, y, d1, _| {
+            d1 + y - x
+        }),
+        ("y' = y^2, y(0)=1", &[(0, 0.0, 1.0)], |_, y, d1, _| {
+            d1 - y * y
+        }),
+        (
+            "y'' = 0, y(0)=1, y'(0)=2",
+            &[(0, 0.0, 1.0), (1, 0.0, 2.0)],
+            |_, _, _, d2| d2,
+        ),
+    ];
+    for (problem, conditions, residual) in cases {
+        let out = run(&format!("dsolve({problem})"));
+        let solution = out.split_once('=').unwrap().1.trim().to_string();
+        let first = run(&format!("diff({solution}, x)"));
+        let second = run(&format!("diff({solution}, x, 2)"));
+        for &(order, point, expected) in conditions {
+            let text = [&solution, &first, &second][order];
+            let got = value(text, &[("x", &point.to_string())]);
+            assert!(
+                (got - expected).abs() < 1e-9,
+                "{problem}: y^({order})({point}) = {got}, expected {expected} ({out})"
+            );
+        }
+        for x in [0.2f64, 0.45, 0.3] {
+            let at = |text: &str| value(text, &[("x", &x.to_string())]);
+            let r = residual(x, at(&solution), at(&first), at(&second));
+            assert!(r.abs() < 1e-8, "{problem}: residual {r} at x = {x} ({out})");
+        }
+    }
+    // Too few conditions is an error, not a partly determined answer.
+    assert!(
+        UraeSession::new()
+            .execute_line("dsolve(y'' + y = 0, y(0)=1)")
+            .is_error
+    );
+}

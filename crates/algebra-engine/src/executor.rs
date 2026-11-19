@@ -627,6 +627,12 @@ impl OperationExecutor {
                                 .unwrap_or(expr_id)
                         }
                         SimplifyStrategy::Expand => {
+                            let expr_id = if crate::simplify::trig_expand::has_trig(graph, expr_id)
+                            {
+                                crate::simplify::trig_expand::expand_trig(graph, expr_id)
+                            } else {
+                                expr_id
+                            };
                             AlgebraicTransformations::expand(graph, expr_id)
                         }
                         SimplifyStrategy::Factor => integer_prime_factorisation(graph, expr_id)

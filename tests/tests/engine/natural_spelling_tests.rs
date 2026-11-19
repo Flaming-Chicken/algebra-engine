@@ -92,3 +92,29 @@ fn a_product_of_matrix_literals_is_a_matrix_product() {
     // Not commutative: the order matters.
     assert_ne!(product, run("[[0,1],[1,0]]*[[1,2],[3,4]]"));
 }
+
+#[test]
+fn a_bare_matrix_literal_prints_as_a_grid() {
+    assert_eq!(run("[[1,2],[3,4]]"), "[ 1, 2 ; 3, 4 ]");
+    assert_eq!(
+        run("[[1,0,0],[0,1,0],[0,0,1]]"),
+        "[ 1, 0, 0 ; 0, 1, 0 ; 0, 0, 1 ]"
+    );
+    // Symbolic entries survive.
+    let m = run("[[a,b],[c,d]]");
+    assert!(
+        m.starts_with("[ ") && m.contains(" ; ") && m.contains('a') && m.contains('d'),
+        "{m}"
+    );
+    // A row vector prints as a one-row grid.
+    assert!(!run("[1,2,3]").contains("matrix(row"));
+}
+
+#[test]
+fn bracket_groups_that_are_not_one_literal_are_left_alone() {
+    // `[1,2]+[3,4]` starts with `[` and ends with `]` but is a sum of two literals, not one literal: it must not
+    // be shown as the grid of its first group.
+    let r = UraeSession::new().execute_line("[1,2]+[3,4]");
+    assert!(!r.is_error, "{}", r.output_text);
+    assert_ne!(r.output_text, "[ 1, 2 ]");
+}

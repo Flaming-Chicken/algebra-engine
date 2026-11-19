@@ -268,6 +268,29 @@ fn integer_prime_factorisation(graph: &ExprGraph, id: ExprId) -> Option<ExprId> 
     })
 }
 
+/// Whether the text is one bracketed group `[ ... ]` whose first bracket closes at the very end (so `[1,2]+[3,4]`
+/// is not one).
+pub(crate) fn is_single_bracket_group(text: &str) -> bool {
+    let text = text.trim();
+    if !text.starts_with('[') || !text.ends_with(']') {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '[' | '(' | '{' => depth += 1,
+            ']' | ')' | '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i == text.len() - 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Central mathematical operation execution engine.
 pub struct OperationExecutor;
 
@@ -287,6 +310,18 @@ impl OperationExecutor {
                 let trimmed = raw.trim();
                 if trimmed.is_empty() {
                     return OperationResult::success("", "", "");
+                }
+                // A bare matrix literal is shown as a grid (`[ 1, 2 ; 3, 4 ]`), not as its internal
+                // `matrix(row(...))` form.
+                if is_single_bracket_group(trimmed)
+                    && let Ok(m) = SymbolicMatrix::from_expr_str(graph, trimmed)
+                {
+                    let mat_id = m.to_expr_id(graph);
+                    let latex = latex_fmt.format(graph, mat_id).unwrap_or_default();
+                    let unicode = unicode_fmt.format(graph, mat_id).unwrap_or_default();
+                    let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                    res.root_expr = Some(mat_id);
+                    return res;
                 }
                 match parser.parse(trimmed) {
                     Ok(expr_id) => {

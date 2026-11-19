@@ -319,6 +319,37 @@ fn eval_node(fx: &Fixed, graph: &ExprGraph, id: ExprId) -> AlgebraResult<BigInt>
         ExprKind::Function { name, args } if args.len() == 2 => {
             let fname = graph.symbols.resolve(*name).unwrap_or_default();
             match fname.as_str() {
+                "polygamma" => {
+                    let m = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=500).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("polygamma needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    fx.polygamma(m, &x)
+                }
+                "hurwitz_zeta" | "zeta" => {
+                    let (s, a) = (
+                        eval_node(fx, graph, args[0])?,
+                        eval_node(fx, graph, args[1])?,
+                    );
+                    fx.hurwitz(&s, &a)
+                }
+                "besseli" | "bessel_i" => {
+                    let order = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=10_000).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("besseli needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    bessel_i_fixed(fx, order, &x)
+                }
                 "beta" => {
                     let (a, b) = (
                         eval_node(fx, graph, args[0])?,
@@ -555,7 +586,7 @@ pub fn special_f64(name: &str, x: f64) -> Option<f64> {
         }
         "lgamma" => fx.ln_gamma(&fixed_x).ok()?,
         "digamma" => fx.digamma(&fixed_x).ok()?,
-        "zeta" if x > 1.0 => fx.zeta(&fixed_x).ok()?,
+        "zeta" if (x - 1.0).abs() > 1e-9 && x > -400.0 => fx.zeta(&fixed_x).ok()?,
         "erf" => {
             if x.abs() > 27.0 {
                 return Some(x.signum());
@@ -629,33 +660,49 @@ impl Fixed {
         Ok(sum - correction)
     }
 
-    /// The Riemann zeta function for real `s > 1`, by Euler-Maclaurin summation.
+    /// The Riemann zeta function for real `s != 1` (analytic continuation by Euler-Maclaurin summation).
     fn zeta(&self, s: &BigInt) -> AlgebraResult<BigInt> {
+        self.hurwitz(s, &self.one())
+    }
+
+    /// The Hurwitz zeta function `sum_{k >= 0} (a + k)^(-s)` for real `s != 1` and `a > 0`, continued analytically
+    /// by Euler-Maclaurin summation (so it is also the Riemann zeta function for `a = 1`, at any real `s != 1`).
+    fn hurwitz(&self, s: &BigInt, a: &BigInt) -> AlgebraResult<BigInt> {
         let one = self.one();
-        if *s <= one {
-            return Err(err(
-                "zeta is available at arbitrary precision for real s > 1",
-            ));
+        if !a.is_positive() {
+            return Err(err("hurwitz zeta needs a positive second argument"));
         }
-        let n_terms = (self.p as usize) / 4 + 20;
-        let m_terms = (self.p as usize) / 5 + 10;
+        if (s - &one).abs() < (BigInt::one() << (self.p / 2)) {
+            return Err(err("zeta has a pole at s = 1"));
+        }
+        // The summation point grows with |s| so that the correction terms stay small.
+        let magnitude = (s.abs() >> self.p.saturating_sub(8))
+            .to_f64()
+            .unwrap_or(0.0)
+            / 256.0;
+        if magnitude > 400.0 {
+            return Err(err("zeta: |s| is too large"));
+        }
+        let n_terms = (self.p as usize) / 4 + 20 + magnitude.ceil() as usize;
+        let m_terms = (self.p as usize) / 5 + 10 + magnitude.ceil() as usize / 2;
         let neg_s = -s.clone();
         let integer =
             |k: usize| self.scale_rational(&BigRational::from_integer(BigInt::from(k as u64)));
         let mut sum = BigInt::zero();
-        for k in 1..n_terms {
-            let ln_k = self.ln(&integer(k))?;
+        for k in 0..n_terms {
+            let point = a + integer(k);
+            let ln_k = self.ln(&point)?;
             sum += self.exp(&self.mul(&neg_s, &ln_k))?;
         }
-        let n_fixed = integer(n_terms);
-        let ln_n = self.ln(&n_fixed)?;
-        let pw = self.exp(&self.mul(&neg_s, &ln_n))?; // N^-s
-        sum += self.div(&self.mul(&pw, &n_fixed), &(s - &one))?;
+        let x = a + integer(n_terms);
+        let ln_x = self.ln(&x)?;
+        let pw = self.exp(&self.mul(&neg_s, &ln_x))?; // x^-s
+        sum += self.div(&self.mul(&pw, &x), &(s - &one))?;
         sum += &pw >> 1;
         let bernoulli = bernoulli_numbers(2 * m_terms);
-        let inv_n = self.div(&one, &n_fixed)?;
-        let inv_n2 = self.mul(&inv_n, &inv_n);
-        let mut inv_power = inv_n.clone(); // N^-(2j-1)
+        let inv_x = self.div(&one, &x)?;
+        let inv_x2 = self.mul(&inv_x, &inv_x);
+        let mut inv_power = inv_x.clone(); // x^-(2j-1)
         let mut rising = s.clone(); // s (s+1) ... (s + 2j - 2)
         let mut factorial = BigInt::one(); // (2j)!
         for j in 1..=m_terms {
@@ -669,12 +716,28 @@ impl Fixed {
                 break;
             }
             sum += term;
-            let a = s + integer(2 * j - 1);
-            let b = s + integer(2 * j);
-            rising = self.mul(&self.mul(&rising, &a), &b);
-            inv_power = self.mul(&inv_power, &inv_n2);
+            let p1 = s + integer(2 * j - 1);
+            let p2 = s + integer(2 * j);
+            rising = self.mul(&self.mul(&rising, &p1), &p2);
+            inv_power = self.mul(&inv_power, &inv_x2);
         }
         Ok(sum)
+    }
+
+    /// The polygamma function `psi^(m)(x) = (-1)^(m+1) m! zeta(m + 1, x)` for `m >= 1` and `x > 0` (`m = 0` is the
+    /// digamma function).
+    fn polygamma(&self, m: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+        if m == 0 {
+            return self.digamma(x);
+        }
+        if !x.is_positive() {
+            return Err(err("polygamma is available for x > 0"));
+        }
+        let s = self.scale_rational(&BigRational::from_integer(BigInt::from(m as u64 + 1)));
+        let h = self.hurwitz(&s, x)?;
+        let factorial: BigInt = (1..=m as u64).map(BigInt::from).product();
+        let value = h * factorial;
+        Ok(if m.is_multiple_of(2) { -value } else { value })
     }
 
     /// `B(a, b) = Gamma(a) Gamma(b) / Gamma(a + b)`.
@@ -717,4 +780,55 @@ fn bessel_j_fixed(fx: &Fixed, order: u32, x: &BigInt) -> AlgebraResult<BigInt> {
         }
     }
     Ok(sum >> extra)
+}
+
+/// Modified Bessel function of the first kind of non-negative integer order: all terms of the power series are
+/// positive, so there is no cancellation.
+fn bessel_i_fixed(fx: &Fixed, order: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+    let half = x >> 1;
+    let half2 = fx.mul(&half, &half);
+    let mut term = fx.one();
+    for k in 1..=order {
+        term = fx.mul(&term, &half) / k;
+    }
+    let mut sum = term.clone();
+    let mut m = 0u64;
+    loop {
+        m += 1;
+        term = fx.mul(&term, &half2) / BigInt::from(m * (m + order as u64));
+        if term.is_zero() {
+            break;
+        }
+        sum += &term;
+        if m > 200_000 {
+            return Err(err("besseli: the series did not converge"));
+        }
+    }
+    Ok(sum)
+}
+
+/// Correctly rounded `f64` values of the two-argument special functions: `polygamma(m, x)`, `hurwitz_zeta(s, a)` and
+/// `besseli(n, x)`.
+pub fn special2_f64(name: &str, a: f64, b: f64) -> Option<f64> {
+    if !(a.is_finite() && b.is_finite()) {
+        return None;
+    }
+    let bits = 192 + (1.5 * b.abs()).min(4000.0) as u32;
+    let fx = Fixed { p: bits };
+    let scale =
+        |v: f64| -> Option<BigInt> { Some(fx.scale_rational(&BigRational::from_float(v)?)) };
+    let value = match name {
+        "polygamma" if a >= 0.0 && a.fract() == 0.0 && a <= 500.0 => {
+            fx.polygamma(a as u32, &scale(b)?).ok()?
+        }
+        "hurwitz_zeta" => fx.hurwitz(&scale(a)?, &scale(b)?).ok()?,
+        "besseli" if a >= 0.0 && a.fract() == 0.0 && a <= 10_000.0 => {
+            bessel_i_fixed(&fx, a as u32, &scale(b)?).ok()?
+        }
+        "besselj" if a >= 0.0 && a.fract() == 0.0 && a <= 10_000.0 => {
+            bessel_j_fixed(&fx, a as u32, &scale(b)?).ok()?
+        }
+        _ => return None,
+    };
+    BigRational::new(value, BigInt::one() << bits).to_f64()
 }

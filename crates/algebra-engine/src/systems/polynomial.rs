@@ -10,7 +10,7 @@
 
 use crate::poly::grobner::GrobnerBasis;
 use crate::poly::multivariate::{MonomialOrder, MultiPoly};
-use crate::poly::roots::{CardanoSolver, ComplexRoot, DurandKernerSolver, FerrariSolver};
+use crate::poly::roots::ComplexRoot;
 use algebra_core::error::{AlgebraError, AlgebraResult};
 use algebra_core::{ExprGraph, ExprId};
 
@@ -53,172 +53,220 @@ impl PolynomialSystemSolver {
             }
         }
 
-        // 3. Find univariate polynomial in the last variable (x_n)
-        let last_var_idx = num_vars - 1;
-        let mut univariate_poly = None;
+        // 3. Solve level by level, last variable first (lexicographic order makes the basis triangular in
+        //    the elimination ideals): at each level take the basis polynomials that involve only the variables
+        //    from this one on, substitute the values already found, solve the resulting univariate polynomial
+        //    over the complex numbers and branch over its roots. A level with no equation left means a free
+        //    variable, that is a positive-dimensional variety.
+        let basis: Vec<&MultiPoly> = gb.polynomials.iter().filter(|p| !p.is_zero()).collect();
+        let mut tuples: Vec<Vec<Cx>> = Vec::new();
+        let mut current = vec![Cx::ZERO; num_vars];
+        Self::solve_level(&basis, num_vars, num_vars - 1, &mut current, &mut tuples)?;
+        Ok(tuples
+            .into_iter()
+            .map(|t| {
+                t.into_iter()
+                    .map(|z| ComplexRoot::complex(z.re, z.im))
+                    .collect()
+            })
+            .collect())
+    }
 
-        for p in &gb.polynomials {
-            let is_univariate_in_last = p.terms.iter().all(|t| {
-                t.monomial
-                    .exponents
-                    .iter()
-                    .enumerate()
-                    .all(|(idx, &exp)| idx == last_var_idx || exp == 0)
-            });
-
-            if is_univariate_in_last && !p.is_zero() {
-                univariate_poly = Some(p.clone());
-                break;
+    /// Branch over the roots of variable `var` given the values already in `current[var + 1..]`.
+    fn solve_level(
+        basis: &[&MultiPoly],
+        num_vars: usize,
+        var: usize,
+        current: &mut Vec<Cx>,
+        out: &mut Vec<Vec<Cx>>,
+    ) -> AlgebraResult<()> {
+        // The univariate polynomials (ascending coefficients) in `var` from the elimination ideal.
+        let mut candidates: Vec<Vec<Cx>> = Vec::new();
+        for p in basis {
+            if p.terms
+                .iter()
+                .any(|t| t.monomial.exponents[..var].iter().any(|&e| e != 0))
+            {
+                continue; // involves a variable that is solved later
             }
-        }
-
-        let uni = match univariate_poly {
-            Some(u) => u,
-            None => {
-                // If not strictly univariate in last variable, attempt to solve 2-variable system via resultant or first element
-                if gb.polynomials.len() == 1 && num_vars == 1 {
-                    gb.polynomials[0].clone()
-                } else {
-                    return Err(AlgebraError::EvaluationError(
-                        "Positive-dimensional variety or underdetermined polynomial system".into(),
-                    ));
-                }
-            }
-        };
-
-        // Extract dense coefficient array for univariate polynomial: a_d * x^d + ... + a_0
-        let deg = uni
-            .terms
-            .first()
-            .map(|t| t.monomial.exponents[last_var_idx])
-            .unwrap_or(0);
-        let mut coeffs = vec![0.0; deg + 1];
-        for t in &uni.terms {
-            let exp = t.monomial.exponents[last_var_idx];
-            let idx = deg - exp;
-            coeffs[idx] = t.coeff;
-        }
-
-        // 4. Solve for last variable roots
-        let last_var_roots = Self::solve_univariate_roots(&coeffs)?;
-
-        // 5. Back-solve for remaining variables
-        let mut solutions = Vec::new();
-        for root_n in last_var_roots {
-            let mut current_tuple = vec![ComplexRoot::real(0.0); num_vars];
-            current_tuple[last_var_idx] = root_n;
-
-            // Back substitution for preceding variables (x_{n-1}, ..., x_1)
-            let mut solvable = true;
-            for var_idx in (0..last_var_idx).rev() {
-                // Find polynomial with leading term in var_idx
-                let mut found_linear_sub = false;
-                for p in &gb.polynomials {
-                    if let Some(lm) = p.leading_monomial()
-                        && lm.exponents[var_idx] == 1
-                        && lm.exponents[..var_idx].iter().all(|&e| e == 0)
-                    {
-                        // Substitute known values of variables (var_idx + 1 .. n)
-                        let mut val_sum_re = 0.0;
-                        let mut val_sum_im = 0.0;
-                        let mut lc = 1.0;
-
-                        for t in &p.terms {
-                            if t.monomial.exponents[var_idx] == 1 {
-                                lc = t.coeff;
-                            } else {
-                                // Evaluate known terms
-                                let mut term_val_re = t.coeff;
-                                let mut term_val_im = 0.0;
-                                for k in (var_idx + 1)..num_vars {
-                                    let exp_k = t.monomial.exponents[k];
-                                    if exp_k > 0 {
-                                        for _ in 0..exp_k {
-                                            let r_re = current_tuple[k].re;
-                                            let r_im = current_tuple[k].im;
-                                            let new_re = term_val_re * r_re - term_val_im * r_im;
-                                            let new_im = term_val_re * r_im + term_val_im * r_re;
-                                            term_val_re = new_re;
-                                            term_val_im = new_im;
-                                        }
-                                    }
-                                }
-                                val_sum_re += term_val_re;
-                                val_sum_im += term_val_im;
-                            }
-                        }
-
-                        let sol_re = -val_sum_re / lc;
-                        let sol_im = -val_sum_im / lc;
-                        current_tuple[var_idx] = ComplexRoot::complex(sol_re, sol_im);
-                        found_linear_sub = true;
-                        break;
+            let degree = p
+                .terms
+                .iter()
+                .map(|t| t.monomial.exponents[var])
+                .max()
+                .unwrap_or(0);
+            let mut coeffs = vec![Cx::ZERO; degree + 1];
+            for t in &p.terms {
+                let mut value = Cx::real(t.coeff);
+                for k in (var + 1)..num_vars {
+                    for _ in 0..t.monomial.exponents[k] {
+                        value = value.mul(current[k]);
                     }
                 }
-
-                if !found_linear_sub {
-                    solvable = false;
-                    break;
-                }
+                let d = t.monomial.exponents[var];
+                coeffs[d] = coeffs[d].add(value);
             }
-
-            if solvable {
-                solutions.push(current_tuple);
+            let scale = coeffs.iter().map(|c| c.abs()).fold(0.0_f64, f64::max);
+            if scale == 0.0 {
+                continue;
+            }
+            while coeffs.len() > 1 && coeffs[coeffs.len() - 1].abs() <= 1e-10 * scale {
+                coeffs.pop();
+            }
+            if coeffs.len() == 1 {
+                if coeffs[0].abs() > 1e-8 * scale.max(1.0) {
+                    return Ok(()); // a non-zero constant: this branch has no solution
+                }
+                continue; // identically zero here: no constraint
+            }
+            candidates.push(coeffs);
+        }
+        let Some(first) = candidates.iter().min_by_key(|c| c.len()) else {
+            return Err(AlgebraError::EvaluationError(
+                "Positive-dimensional variety or underdetermined polynomial system".into(),
+            ));
+        };
+        let mut roots = complex_roots(first);
+        // Keep only the roots at which every other candidate vanishes too.
+        roots.retain(|&z| {
+            candidates.iter().all(|c| {
+                let scale: f64 = c
+                    .iter()
+                    .enumerate()
+                    .map(|(k, a)| a.abs() * z.abs().powi(k as i32))
+                    .sum();
+                eval_poly(c, z).abs() <= 1e-7 * scale.max(1.0)
+            })
+        });
+        for z in roots {
+            current[var] = z;
+            if var == 0 {
+                out.push(current.clone());
+            } else {
+                Self::solve_level(basis, num_vars, var - 1, current, out)?;
             }
         }
-
-        Ok(solutions)
+        Ok(())
     }
+}
 
-    /// Solves dense univariate polynomial using exact radical formulas for degree 1..4 or Durand-Kerner.
-    fn solve_univariate_roots(coeffs: &[f64]) -> AlgebraResult<Vec<ComplexRoot>> {
-        let deg = coeffs.len().saturating_sub(1);
-        match deg {
-            0 => Ok(Vec::new()),
-            1 => {
-                // a*x + b = 0 -> x = -b / a
-                let a = coeffs[0];
-                let b = coeffs[1];
-                if a.abs() < 1e-14 {
-                    return Err(AlgebraError::EvaluationError(
-                        "Degenerate linear polynomial".into(),
-                    ));
+/// A complex number for the back-substitution (the solver's own, to keep `ComplexRoot` a plain record).
+#[derive(Clone, Copy, Debug)]
+struct Cx {
+    re: f64,
+    im: f64,
+}
+
+impl Cx {
+    const ZERO: Cx = Cx { re: 0.0, im: 0.0 };
+    fn real(re: f64) -> Self {
+        Self { re, im: 0.0 }
+    }
+    fn add(self, o: Cx) -> Cx {
+        Cx {
+            re: self.re + o.re,
+            im: self.im + o.im,
+        }
+    }
+    fn sub(self, o: Cx) -> Cx {
+        Cx {
+            re: self.re - o.re,
+            im: self.im - o.im,
+        }
+    }
+    fn mul(self, o: Cx) -> Cx {
+        Cx {
+            re: self.re * o.re - self.im * o.im,
+            im: self.re * o.im + self.im * o.re,
+        }
+    }
+    fn div(self, o: Cx) -> Cx {
+        let d = o.re * o.re + o.im * o.im;
+        Cx {
+            re: (self.re * o.re + self.im * o.im) / d,
+            im: (self.im * o.re - self.re * o.im) / d,
+        }
+    }
+    fn abs(self) -> f64 {
+        self.re.hypot(self.im)
+    }
+}
+
+/// Horner evaluation of ascending coefficients.
+fn eval_poly(c: &[Cx], z: Cx) -> Cx {
+    c.iter().rev().fold(Cx::ZERO, |acc, &a| acc.mul(z).add(a))
+}
+
+/// All complex roots of a polynomial with ascending complex coefficients (non-zero leading coefficient), by
+/// Aberth–Ehrlich simultaneous iteration followed by Newton polishing; roots closer than a small tolerance are
+/// reported once (a repeated root of the elimination polynomial is one solution value).
+fn complex_roots(c: &[Cx]) -> Vec<Cx> {
+    let degree = c.len() - 1;
+    if degree == 0 {
+        return Vec::new();
+    }
+    let lead = c[degree];
+    if degree == 1 {
+        return vec![Cx::ZERO.sub(c[0]).div(lead)];
+    }
+    let monic: Vec<Cx> = c.iter().map(|&a| a.div(lead)).collect();
+    let derivative: Vec<Cx> = (1..=degree)
+        .map(|k| monic[k].mul(Cx::real(k as f64)))
+        .collect();
+    let radius = 1.0
+        + monic[..degree]
+            .iter()
+            .map(|a| a.abs())
+            .fold(0.0_f64, f64::max);
+    let mut z: Vec<Cx> = (0..degree)
+        .map(|k| {
+            let angle = 2.0 * std::f64::consts::PI * k as f64 / degree as f64 + 0.4;
+            Cx {
+                re: radius * 0.5 * angle.cos(),
+                im: radius * 0.5 * angle.sin(),
+            }
+        })
+        .collect();
+    for _ in 0..500 {
+        let mut moved = 0.0_f64;
+        for k in 0..degree {
+            let f = eval_poly(&monic, z[k]);
+            let df = eval_poly(&derivative, z[k]);
+            if f.abs() == 0.0 {
+                continue;
+            }
+            let ratio = f.div(df);
+            let mut repulsion = Cx::ZERO;
+            for (j, zj) in z.iter().enumerate() {
+                if j != k {
+                    repulsion = repulsion.add(Cx::real(1.0).div(z[k].sub(*zj)));
                 }
-                Ok(vec![ComplexRoot::real(-b / a)])
             }
-            2 => {
-                // a*x^2 + b*x + c = 0
-                let a = coeffs[0];
-                let b = coeffs[1];
-                let c = coeffs[2];
-                let disc = b * b - 4.0 * a * c;
-                if disc >= 0.0 {
-                    let r1 = (-b + disc.sqrt()) / (2.0 * a);
-                    let r2 = (-b - disc.sqrt()) / (2.0 * a);
-                    Ok(vec![ComplexRoot::real(r1), ComplexRoot::real(r2)])
-                } else {
-                    let re = -b / (2.0 * a);
-                    let im = (-disc).sqrt() / (2.0 * a);
-                    Ok(vec![
-                        ComplexRoot::complex(re, im),
-                        ComplexRoot::complex(re, -im),
-                    ])
-                }
-            }
-            3 => {
-                // Cubic Cardano
-                CardanoSolver::solve(coeffs[0], coeffs[1], coeffs[2], coeffs[3])
-            }
-            4 => {
-                // Quartic Ferrari
-                FerrariSolver::solve(coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4])
-            }
-            _ => {
-                // Degree >= 5: Durand-Kerner simultaneous iteration
-                let lc = coeffs[0];
-                let monic_coeffs: Vec<f64> = coeffs.iter().map(|&c| c / lc).collect();
-                Ok(DurandKernerSolver::solve(&monic_coeffs, 100, 1e-10))
+            let step = ratio.div(Cx::real(1.0).sub(ratio.mul(repulsion)));
+            z[k] = z[k].sub(step);
+            moved = moved.max(step.abs() / (1.0 + z[k].abs()));
+        }
+        if moved < 1e-15 {
+            break;
+        }
+    }
+    // Newton polish on the original polynomial.
+    for zk in z.iter_mut() {
+        for _ in 0..3 {
+            let df = eval_poly(&derivative, *zk);
+            if df.abs() > 0.0 {
+                *zk = zk.sub(eval_poly(&monic, *zk).div(df));
             }
         }
     }
+    let mut distinct: Vec<Cx> = Vec::new();
+    for zk in z {
+        if !distinct
+            .iter()
+            .any(|d| d.sub(zk).abs() <= 1e-6 * (1.0 + zk.abs()))
+        {
+            distinct.push(zk);
+        }
+    }
+    distinct
 }

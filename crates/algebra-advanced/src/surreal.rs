@@ -16,6 +16,8 @@
 //!   - Infinitesimal $\epsilon = \{ 0 \mid 1, 1/2, 1/4, \dots \}$
 //!   - Transfinite $\omega = \{ 0, 1, 2, 3, \dots \mid \emptyset \}$
 
+use num_rational::BigRational;
+use num_traits::{One, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
 use std::fmt;
 
@@ -28,8 +30,56 @@ pub struct SurrealNo {
     pub right: Vec<SurrealNo>,
     /// Birthday / generation index.
     pub birthday: usize,
-    /// Cached dyadic / float approximation.
+    /// Cached floating-point value (the exact value rounded when [`SurrealNo::value`] is known).
     pub approx: f64,
+    /// The exact value, a dyadic rational, when the form is a valid number (every left option below every right option).
+    ///
+    /// Every surreal built from finite sets is a dyadic rational, namely the simplest number between its
+    /// largest left option and its smallest right option; infinite sets (a true $\omega$ or $\epsilon$) cannot
+    /// be stored in a `Vec`, so `omega(n)` and `epsilon(n)` below are finite truncations with finite values.
+    pub value: Option<BigRational>,
+}
+
+/// The simplest dyadic rational strictly between `lo` and `hi` (either bound may be absent): the integer of smallest
+/// absolute value if there is one, else the fraction with the smallest power-of-two denominator.
+fn simplest_between(lo: Option<&BigRational>, hi: Option<&BigRational>) -> BigRational {
+    let zero = BigRational::zero();
+    match (lo, hi) {
+        (None, None) => zero,
+        (Some(l), None) => {
+            if l.is_negative() {
+                zero
+            } else {
+                BigRational::from_integer(l.floor().to_integer() + 1)
+            }
+        }
+        (None, Some(h)) => {
+            if h.is_positive() {
+                zero
+            } else {
+                BigRational::from_integer(h.ceil().to_integer() - 1)
+            }
+        }
+        (Some(l), Some(h)) => {
+            if l.is_negative() && h.is_positive() {
+                return zero;
+            }
+            if !l.is_negative() {
+                // 0 <= l < h: search upward, integers first and then halves, quarters, ...
+                let mut denominator = BigRational::one();
+                loop {
+                    let candidate = (l * &denominator).floor() + BigRational::one();
+                    let value = candidate / &denominator;
+                    if &value < h {
+                        return value;
+                    }
+                    denominator *= BigRational::from_integer(2.into());
+                }
+            }
+            // l < h <= 0: mirror image.
+            -simplest_between(Some(&-h.clone()), Some(&-l.clone()))
+        }
+    }
 }
 
 impl SurrealNo {
@@ -49,7 +99,28 @@ impl SurrealNo {
             .fold(f64::NEG_INFINITY, f64::max);
         let right_approx = right.iter().map(|s| s.approx).fold(f64::INFINITY, f64::min);
 
-        let approx = if left.is_empty() && right.is_empty() {
+        // The exact value, from the children's cached values: the simplest number between the largest
+        // left option and the smallest right option, provided every left option is below every right one.
+        let value = {
+            let lefts: Option<Vec<&BigRational>> = left.iter().map(|s| s.value.as_ref()).collect();
+            let rights: Option<Vec<&BigRational>> =
+                right.iter().map(|s| s.value.as_ref()).collect();
+            match (lefts, rights) {
+                (Some(l), Some(r)) => {
+                    let max_l = l.into_iter().max();
+                    let min_r = r.into_iter().min();
+                    match (max_l, min_r) {
+                        (Some(a), Some(b)) if a >= b => None,
+                        (a, b) => Some(simplest_between(a, b)),
+                    }
+                }
+                _ => None,
+            }
+        };
+
+        let approx = if let Some(v) = &value {
+            v.to_f64().unwrap_or(f64::NAN)
+        } else if left.is_empty() && right.is_empty() {
             0.0
         } else if right.is_empty() {
             left_approx + 1.0
@@ -64,7 +135,13 @@ impl SurrealNo {
             right,
             birthday,
             approx,
+            value,
         }
+    }
+
+    /// The exact value of a valid number as a dyadic rational (`None` for a game that is not a number).
+    pub fn value(&self) -> Option<&BigRational> {
+        self.value.as_ref()
     }
 
     /// Surreal Zero $\mathbf{0} = \{ \emptyset \mid \emptyset \}$.
@@ -74,6 +151,7 @@ impl SurrealNo {
             right: Vec::new(),
             birthday: 0,
             approx: 0.0,
+            value: Some(BigRational::zero()),
         }
     }
 
@@ -111,7 +189,8 @@ impl SurrealNo {
         }
     }
 
-    /// Surreal Transfinite Ordinal $\omega = \{ 0, 1, 2, \dots \mid \emptyset \}$.
+    /// The finite truncation $\{ 0, 1, \dots, n - 1 \mid \emptyset \}$ of $\omega = \{ 0, 1, 2, \dots \mid \emptyset \}$,
+    /// which equals the integer `depth` (a true $\omega$ needs an infinite left set).
     pub fn omega(depth: usize) -> Self {
         let mut left = Vec::with_capacity(depth);
         let mut cur = Self::zero();
@@ -122,7 +201,8 @@ impl SurrealNo {
         Self::new(left, Vec::new())
     }
 
-    /// Surreal Infinitesimal $\epsilon = \{ 0 \mid 1, 1/2, 1/4, \dots \}$.
+    /// The finite truncation $\{ 0 \mid 1, 1/2, \dots, 2^{1-n} \}$ of $\epsilon = \{ 0 \mid 1, 1/2, 1/4, \dots \}$,
+    /// which equals $2^{-n}$ (a true $\epsilon$ needs an infinite right set).
     pub fn epsilon(depth: usize) -> Self {
         let mut right = Vec::with_capacity(depth);
         let mut cur = Self::one();
@@ -134,10 +214,12 @@ impl SurrealNo {
     }
 
     /// Conway Partial Order: $x \le y \iff (\forall l \in L_x, l \not\ge y) \land (\forall r \in R_y, x \not\ge r)$.
+    ///
+    /// For two valid numbers this compares their exact dyadic values (an `f64` shortcut here gave wrong answers:
+    /// $\{0 \mid 3\} = 1$ was compared as $1.5$); for games that are not numbers it is the recursive definition.
     pub fn leq(&self, other: &Self) -> bool {
-        // Fast float check if separated
-        if (self.approx - other.approx).abs() > 1e-9 {
-            return self.approx <= other.approx;
+        if let (Some(a), Some(b)) = (&self.value, &other.value) {
+            return a <= b;
         }
 
         for l in &self.left {

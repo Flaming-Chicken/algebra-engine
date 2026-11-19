@@ -56,7 +56,7 @@ $$\Delta = E_1 - E_2$$
 $$\Delta \pmod G = 0$$
 
 > [!NOTE]
-> **Implementation Status & Known Limitations**: While `GrobnerBasis::from_exprs` supports arbitrary side-relation polynomials, the current `GrobnerProver` call site in [crates/algebra-engine/src/lemma_miner.rs](file:///c:/Users/Liam/Code/algebra-engine/crates/algebra-engine/src/lemma_miner.rs#L90) invokes `GrobnerBasis::from_exprs(graph, &[], ...)` with an empty side-relation slice `&[]`. General identity certification involving nonlinear trig/algebraic constraints requires wiring side-relation extraction into that call site. See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](file:///c:/Users/Liam/Code/algebra-engine/docs/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).
+> **Implementation Status & Known Limitations**: While `GrobnerBasis::from_exprs` supports arbitrary side-relation polynomials, the current `GrobnerProver` call site in [crates/algebra-engine/src/lemma_miner.rs](../../../crates/algebra-engine/src/lemma_miner.rs#L90) invokes `GrobnerBasis::from_exprs(graph, &[], ...)` with an empty side-relation slice `&[]`. General identity certification involving nonlinear trig/algebraic constraints requires wiring side-relation extraction into that call site. See [CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md](../../audits/CODEBASE_AUDIT_AND_REMEDIATION_PLAN.md).
 
 ---
 

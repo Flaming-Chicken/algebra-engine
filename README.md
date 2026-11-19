@@ -2,7 +2,7 @@
 
 [![Rust Workspace](https://img.shields.io/badge/Rust-1.85%2B%20%7C%202024%20Edition-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE.md)
-[![Tests Passing](https://img.shields.io/badge/Tests-720%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-926%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20Warnings-brightgreen.svg)](Cargo.toml)
 [![WASM Ready](https://img.shields.io/badge/WebAssembly-Cloudflare%20Pages%20%7C%20PWA-9cf?logo=webassembly)](crates/urae-wasm)
 
@@ -131,8 +131,8 @@ graph TD
 | **Polynomials & Ideals** | Sparse univariate/multivariate polynomials, Gröbner bases, resultants, Sturm chains | Yun square-free decomposition, subresultant GCD, Buchberger + Gebauer-Möller criteria |
 | **Linear Algebra** | `SymbolicMatrix` (`det`, `inv`, `rref`, `rank`, `nullspace`, `charpoly`, `eigenvalues`), Lie Cartan matrices | Bareiss elimination, Faddeev-LeVerrier / cofactor expansion, exact RREF |
 | **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines, FDM/FEM | Adaptive embedded RK5(4), stiff implicit Runge-Kutta, symplectic Hamiltonian integration |
-| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proof export (skeleton only, see `docs/PLANNING.md` A9) | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
-| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 notebook export (unformatted stubs, `docs/PLANNING.md` A11) |
+| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proof export (skeleton only, see `docs/LEDGER.md` A9) | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
+| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 notebook export (unformatted stubs, `docs/LEDGER.md` A11) |
 
 ---
 
@@ -300,12 +300,12 @@ fn main() {
 All workspace integration and unit tests are centralized in the `tests/` directory:
 
 ```bash
-# Run all 890+ workspace unit, integration, and doc tests
+# Run all workspace unit, integration, and doc tests (926 pass as of 19 Nov 2026)
 cargo test --workspace
 
-# Run specific integration suites (counts as of 18 Nov 2026)
+# Run specific integration suites (counts as of 19 Nov 2026)
 cargo test --test notebook_suite    # GUI notepad, smart stream, plot bounds, sliders, exports & workspace routing (115 tests)
-cargo test --test engine_suite      # Symbolic engine, physics, CAD, FEA, summation & differential forms (484 tests, 1 ignored)
+cargo test --test engine_suite      # Symbolic engine, physics, CAD, FEA, summation & differential forms (512 tests, 1 ignored)
 cargo test --test advanced_suite    # Category theory, proofs, CAD, IGA & quantum (64 tests)
 cargo test --test core_suite        # ExprGraph, intervals, numbers & formatters (43 tests)
 cargo test --test ecosystem_suite   # Python kernel, LSP, Jupyter, CLI, C ABI & the umbrella facade and macros (36 tests)

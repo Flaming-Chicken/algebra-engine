@@ -162,7 +162,7 @@ RUSTDOCFLAGS="--html-in-header docs/katex-header.html" cargo doc --no-deps --wor
 
 ### 4.3 Documentation Quality Checklist
 
-> **Enforcement.** CI enforces zero rustdoc warnings and passing doctests. The other items are conventions: the workspace sets no `missing_docs` lint, so documentation coverage is not a gate. Tracked in [`docs/PLANNING.md`](docs/PLANNING.md).
+> **Enforcement.** CI enforces zero rustdoc warnings and passing doctests. The other items are conventions: the workspace sets no `missing_docs` lint, so documentation coverage is not a gate. Scheduled in [`docs/PLANNING.md`](docs/PLANNING.md) (milestone M2).
 
 Before submitting changes or advancing phases:
 - [ ] `cargo doc --no-deps --workspace` completes with **0 warnings** and **0 broken links**.

@@ -1,4 +1,4 @@
-//! Regression tests for defects tracked in `docs/PLANNING.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B5, B7, B10, B12).
+//! Regression tests for defects tracked in `docs/LEDGER.md` (ledger ids A1-A4, A6, B1-B4, B6, B8, B5, B7, B10, B12).
 //!
 //! Each test asserts the correct behaviour and was written to fail on the code it replaced.
 

@@ -3,6 +3,20 @@
 All notable changes to `algebra-engine` (URAE) are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning.
 
+## [Unreleased]
+
+### Added and fixed
+
+- Documentation reorganised into a master plan (`docs/PLANNING.md`), a design (`docs/DESIGN.md`) and a defect ledger (`docs/LEDGER.md`), with `docs/specs/` and `docs/audits/` for specifications and historical evidence; a documentation map (`docs/README.md`); the ledger's colliding ids renamed (`R1`–`R13`); relative links throughout; the test counts refreshed.
+- Integration: `P(x) * (a x + b)^e` for a polynomial `P` and a non-integer rational `e` (`x * sqrt(x + 1)`, `x / sqrt(x + 1)`, `x^2 * (x + 1)^(3/2)`, ...) by exact substitution; it used to be an error.
+- Fixed: `Ai`, `Y_n`, `K_n`, `J_n` for large arguments, `ζ`, `B(a, b)`, `ln Γ`, `erf` and `erfc` returned wrong values (`Ai(1)`, `Y0(1)`, `K0(1)`, `ζ(0.5)`, `J0(40) = -1.5e8`, `B(200, 200) = NaN`); they are now accurate to about 1e-12 and checked against tables and identities.
+- Criterion benchmark suites for `algebra-core`, `algebra-engine`, `algebra-advanced` and `urae`, a rewritten `auto-promoters` benchmark and a `[profile.bench]` with thin LTO; fourteen strengthened test files.
+- `big_prime_factors` factors semiprimes up to 127 bits with a Montgomery `u128` Pollard rho (an 89-bit product: 7.5 s to 0.6 s in a debug build; 97-bit products now finish) and splits prime squares exactly.
+- `mcts::{LearnedPolicy, PolicyFeatures}`, `MctsPolicyHead::compute_policy_with`, `MctsSearchEngine::{with_policy, train_policy, search_with_root_stats}`: a trainable linear policy that starts equal to the heuristic and is trained from the engine's own search statistics; JSON persistence.
+- `zeilberger_proof::{prove_recurrence, check_certificate, Poly2, SymbolicTerm}`: proves a Zeilberger recurrence for all `n` by rebuilding the certificate as a rational function of `n` and checking the telescoping identity symbolically.
+- `CadEngine::decompose` supports three variables (exact trivariate resultants, McCallum projection twice, exact lifting); four or more are still an error.
+- `CadFeaBridge::screw_to_fea` also meshes a screw with a key socket as a solid (the socket is a void in the mesh).
+
 ## [0.6.0] - 2026-11-18
 
 ### Added
@@ -46,19 +60,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 - Cartan operation `HodgeStarMetric`: Hodge star for a diagonal metric given as expressions.
 - `SymbolicForm::hodge_star_metric`: Hodge star for a general symmetric metric with symbolic entries.
 - Cartan operation `HodgeStarMatrix`: Hodge star for a general symmetric metric matrix given as expressions.
-- Integration: `P(x) * (a x + b)^e` for a polynomial `P` and a non-integer rational `e` (`x * sqrt(x + 1)`, `x / sqrt(x + 1)`, `x^2 * (x + 1)^(3/2)`, ...) by exact substitution; it used to be an error.
-- Fixed: `Ai`, `Y_n`, `K_n`, `J_n` for large arguments, `ζ`, `B(a, b)`, `ln Γ`, `erf` and `erfc` returned wrong values (`Ai(1)`, `Y0(1)`, `K0(1)`, `ζ(0.5)`, `J0(40) = -1.5e8`, `B(200, 200) = NaN`); they are now accurate to about 1e-12 and checked against tables and identities.
-- Criterion benchmark suites for `algebra-core`, `algebra-engine`, `algebra-advanced` and `urae`, a rewritten `auto-promoters` benchmark and a `[profile.bench]` with thin LTO; fourteen strengthened test files.
-- `big_prime_factors` factors semiprimes up to 127 bits with a Montgomery `u128` Pollard rho (an 89-bit product: 7.5 s to 0.6 s in a debug build; 97-bit products now finish) and splits prime squares exactly.
-- `mcts::{LearnedPolicy, PolicyFeatures}`, `MctsPolicyHead::compute_policy_with`, `MctsSearchEngine::{with_policy, train_policy, search_with_root_stats}`: a trainable linear policy that starts equal to the heuristic and is trained from the engine's own search statistics; JSON persistence.
-- `zeilberger_proof::{prove_recurrence, check_certificate, Poly2, SymbolicTerm}`: proves a Zeilberger recurrence for all `n` by rebuilding the certificate as a rational function of `n` and checking the telescoping identity symbolically.
 - `zeilberger::{zeilberger, telescoping_at}`: creative telescoping by specialisation and interpolation (recurrences for binomial, squared-binomial and Delannoy sums, verified beyond the fitted range; not an all-n proof).
 - Fixed: the hard-coded Zeilberger certificates for the binomial and Vandermonde sums were wrong (sign; plus an extra factor for Vandermonde); a vacuous test (`valid || order == 1`) had hidden it. Both are now verified exactly.
 - Fixed: `SpinorHelicity::mandelstam_s` had the wrong sign and returned 0 for momenta along -z (spinor construction singular there); two always-true test assertions that hid this and an untested uncertainty path were replaced.
 - Fixed: `CadEngine::decompose` is now sound for one and two variables (exact McCallum projection, Sturm root isolation); it used to cut the base line at the roots of the polynomials with the other variables set to 0. Three or more variables, repeated factors and common factors are errors.
 - Fixed: `lim (1+x)^(1/x)` at a finite point (and every `1^oo` form) was NaN; constant folding in the limit engine could overflow `i64` (a panic for a high-order Taylor series of `sqrt(1+x)`).
-- `CadEngine::decompose` supports three variables (exact trivariate resultants, McCallum projection twice, exact lifting); four or more are still an error.
-- `CadFeaBridge::screw_to_fea` meshes a screw without a key socket as a solid of linear tetrahedra (radius steps become thin cones); a socketed screw is a solid with the key socket as a void in the mesh.
+- `CadFeaBridge::screw_to_fea` meshes a screw without a key socket as a solid of linear tetrahedra (radius steps become thin cones); a socketed screw keeps the surface mesh.
 - Fixed: inverse trig/hyperbolic function names are canonicalised (`arctan` is `atan`, ...), so `d/dx arctan(x)` is evaluated; the arctan integral of a perfect-square constant is simplified (`1/2 atan(1/2 x)` for `1/(x^2 + 4)`). Expressions typed with the long names are now displayed with the short ones.
 - `cartan_symbolic::SymbolicForm`: differential forms with symbolic coefficients (exterior derivative, wedge, interior product, Lie derivative).
 - `CsrMatrix` (CSR storage, matvec, Jacobi-preconditioned conjugate gradients with a componentwise backward-error stop); the FEA solver uses it above 400 unknowns.

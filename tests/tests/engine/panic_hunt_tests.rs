@@ -304,3 +304,84 @@ fn the_nesting_guard_does_not_reject_long_flat_expressions() {
     let nested = "((((sin(cos(exp(x^2)))))))";
     assert!(ExprParser::new(&graph).parse(nested).is_ok());
 }
+
+/// Whole commands through the session: every command word against random expressions. A stack overflow aborts the
+/// process, so this test also fails by crashing; the case is printed before it runs (with `--nocapture`).
+#[test]
+fn random_commands_never_panic() {
+    const COMMANDS: &[&str] = &[
+        "simplify",
+        "expand",
+        "factor",
+        "solve",
+        "diff",
+        "integrate",
+        "limit",
+        "series",
+        "taylor",
+        "partial_fractions",
+        "apart",
+        "det",
+        "inv",
+        "rank",
+        "transpose",
+        "is_prime",
+        "prime_factors",
+        "totient",
+        "sigma",
+        "divisors",
+        "mobius",
+        "gcd",
+        "lcm",
+        "ode",
+        "dsolve",
+        "float",
+        "eval",
+        "latex",
+        "collect",
+        "together",
+        "cancel",
+        "horner",
+    ];
+    let mut rng = Lcg(31337);
+    let mut cases = Vec::new();
+    for _ in 0..400 {
+        let command = COMMANDS[rng.below(COMMANDS.len())];
+        let body = random_expr(&mut rng, 3);
+        cases.push(if rng.below(2) == 0 {
+            format!("{command} {body}")
+        } else {
+            format!("{command}({body})")
+        });
+    }
+    let verbose = std::env::var("HUNT_VERBOSE").is_ok();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let mut panics = Vec::new();
+    let mut slow: Vec<String> = Vec::new();
+    for case in &cases {
+        if verbose {
+            eprintln!("CASE {case}");
+        }
+        let started = std::time::Instant::now();
+        let case_owned = case.clone();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let mut session = algebra_engine::session::UraeSession::new();
+            let _ = session.execute_line(&case_owned);
+        }));
+        if started.elapsed().as_secs_f64() > 20.0 {
+            slow.push(format!("{:.0}s {case}", started.elapsed().as_secs_f64()));
+        }
+        if result.is_err() {
+            panics.push(case.clone());
+        }
+    }
+    std::panic::set_hook(previous);
+    assert!(
+        panics.is_empty(),
+        "{} of {} commands panicked; first few: {:?}",
+        panics.len(),
+        cases.len(),
+        &panics[..panics.len().min(10)]
+    );
+}

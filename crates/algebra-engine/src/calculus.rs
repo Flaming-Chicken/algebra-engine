@@ -1466,7 +1466,26 @@ pub(crate) fn taylor_coeffs_vec(
     let mut factorial = num_bigint::BigInt::from(1u8);
     let zero = graph.integer(0);
 
+    // Time budget. Each order costs several times the one before when the derivatives swell, so an order that
+    // took long predicts that the next one will take much longer: stop instead of running for minutes. (Debug
+    // builds are about ten times slower.)
+    let slowdown = if cfg!(debug_assertions) { 10.0 } else { 1.0 };
+    let series_started = std::time::Instant::now();
+    let mut last_order_started = series_started;
     for n in 0..=order {
+        let now = std::time::Instant::now();
+        let last_took = now.duration_since(last_order_started).as_secs_f64();
+        last_order_started = now;
+        if n > 1
+            && (last_took > 0.8 * slowdown
+                || series_started.elapsed().as_secs_f64() > 4.0 * slowdown)
+        {
+            SERIES_BUDGET_EXCEEDED.with(|f| f.set(true));
+            while coeffs.len() <= order {
+                coeffs.push(zero);
+            }
+            return coeffs;
+        }
         if n > 0 {
             factorial *= n;
         }
@@ -1498,9 +1517,43 @@ pub(crate) fn taylor_coeffs_vec(
         }
         if n < order {
             current_deriv = graph.diff(current_deriv, wrt);
+            // Expression swell: derivatives of `x^x`, nested compositions, ... grow exponentially, and the
+            // method then takes minutes. Give up, flag it for the caller, and pad with zeros.
+            if distinct_nodes_exceed(graph, current_deriv, SERIES_NODE_BUDGET) {
+                SERIES_BUDGET_EXCEEDED.with(|f| f.set(true));
+                while coeffs.len() <= order {
+                    coeffs.push(zero);
+                }
+                return coeffs;
+            }
         }
     }
     coeffs
+}
+
+/// The largest derivative expression (in distinct nodes) the differentiation method will work with.
+const SERIES_NODE_BUDGET: usize = 30_000;
+
+thread_local! {
+    /// Set by [`taylor_coeffs_vec`] when it gave up because of expression swell, so a caller that can report an
+    /// error (the series command) does so instead of returning a truncated series.
+    pub(crate) static SERIES_BUDGET_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the expression has more than `limit` distinct nodes (counting stops at the limit).
+fn distinct_nodes_exceed(graph: &ExprGraph, root: ExprId, limit: usize) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if seen.len() > limit {
+            return true;
+        }
+        stack.extend(graph.get(id).children());
+    }
+    false
 }
 
 fn taylor_div_coeffs(

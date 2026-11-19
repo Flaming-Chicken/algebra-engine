@@ -5,7 +5,7 @@
 //! **Holonomic D-finite Functions**, and **Linear Recurrence Solvers**.
 
 use crate::calculus::SymbolicCalculus;
-use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, SymbolId};
+use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, SymbolId};
 
 /// Series expansion and reversion algorithms extension trait.
 pub trait SymbolicSeries {
@@ -129,7 +129,20 @@ impl SymbolicSeries for ExprGraph {
         regular_order: u32,
     ) -> AlgebraResult<ExprId> {
         if pole_order == 0 {
-            return Ok(self.taylor_series(expr, wrt, point, regular_order));
+            crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.set(false));
+            let series = self.taylor_series(expr, wrt, point, regular_order);
+            if crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.replace(false)) {
+                return Err(AlgebraError::EvaluationError(format!(
+                    "series: the derivatives of this expression grow too fast for order {regular_order} (the differentiation method is exponential here); try a lower order"
+                )));
+            }
+            if has_singular_term(self, series) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (terms such as ln(0) or 1/0 appear), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
+            return Ok(series);
         }
 
         let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
@@ -293,4 +306,31 @@ impl RecurrenceSolver {
             ))),
         }
     }
+}
+
+/// Whether the expression contains a division by the literal zero or `ln(0)`: a sign that a Taylor coefficient was
+/// computed at a singular point.
+fn has_singular_term(graph: &ExprGraph, root: ExprId) -> bool {
+    let zero = graph.integer(0);
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Div(_, d) if *d == zero => return true,
+            ExprKind::Function { name, args }
+                if args.len() == 1
+                    && args[0] == zero
+                    && matches!(graph.symbols.resolve(*name).as_deref(), Some("ln" | "log")) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        stack.extend(node.children());
+    }
+    false
 }

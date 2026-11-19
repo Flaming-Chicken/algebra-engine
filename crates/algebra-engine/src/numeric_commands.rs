@@ -581,6 +581,79 @@ fn statistics(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericO
             sqrt_text(&(sum_squares(&values) / Q::from_integer((n - 1).into())))
         }
         "pstddev" => sqrt_text(&(sum_squares(&values) / Q::from_integer(n.into()))),
+        "percentile" | "quantile" => {
+            return percentile_command(graph, name, args);
+        }
+        "quartiles" => {
+            let mut sorted = values.clone();
+            sorted.sort();
+            let at = |p: i64| interpolate_sorted(&sorted, &Q::new(p.into(), 100.into()));
+            format!(
+                "Q1 = {}, Q2 (median) = {}, Q3 = {}, IQR = {}",
+                q_text(&at(25)),
+                q_text(&at(50)),
+                q_text(&at(75)),
+                q_text(&(at(75) - at(25)))
+            )
+        }
+        "iqr" => {
+            let mut sorted = values.clone();
+            sorted.sort();
+            q_text(
+                &(interpolate_sorted(&sorted, &Q::new(3.into(), 4.into()))
+                    - interpolate_sorted(&sorted, &Q::new(1.into(), 4.into()))),
+            )
+        }
+        "skewness" | "kurtosis" => {
+            let m = mean_of(&values);
+            let count = Q::from_integer(n.into());
+            let moment = |power: u32| {
+                values.iter().fold(Q::zero(), |s, v| {
+                    let d = v - &m;
+                    let mut p = Q::one();
+                    for _ in 0..power {
+                        p *= &d;
+                    }
+                    s + p
+                }) / &count
+            };
+            let m2 = moment(2);
+            if m2.is_zero() {
+                return Err(format!("the {name} is undefined for constant data"));
+            }
+            if name == "skewness" {
+                // g1 = m3 / m2^(3/2): rational when m3^2 / m2^3 is a rational square.
+                let m3 = moment(3);
+                let squared = (&m3 * &m3) / (&m2 * &m2 * &m2);
+                let value = decimal(&m3) / decimal(&m2).powf(1.5);
+                let (sn, sd) = (squared.numer().sqrt(), squared.denom().sqrt());
+                if &sn * &sn == *squared.numer() && &sd * &sd == *squared.denom() {
+                    let r = Q::new(sn, sd);
+                    with_decimal(&if m3 < Q::zero() { -r } else { r })
+                } else {
+                    format!("{value}")
+                }
+            } else {
+                // Excess kurtosis m4 / m2^2 - 3 (rational).
+                with_decimal(&(moment(4) / (&m2 * &m2) - Q::from_integer(3.into())))
+            }
+        }
+        "zscore" => {
+            if n < 2 {
+                return Err("z-scores need at least two values".into());
+            }
+            let m = mean_of(&values);
+            let variance = sum_squares(&values) / Q::from_integer(n.into());
+            let deviation = decimal(&variance).sqrt();
+            let scores: Vec<String> = values
+                .iter()
+                .map(|v| {
+                    let z = decimal(&(v - &m)) / deviation;
+                    format!("{z:.6}")
+                })
+                .collect();
+            format!("[{}] (population standard deviation)", scores.join(", "))
+        }
         "range" => {
             q_text(&(values.iter().max().ok_or("empty")? - values.iter().min().ok_or("empty")?))
         }
@@ -1134,12 +1207,70 @@ fn integer_text_commands(
     Ok(NumericOutput::Text(text))
 }
 
+/// The `p`-th quantile (`0 <= p <= 1`) of sorted data by linear interpolation between order statistics (the usual
+/// "type 7" definition).
+fn interpolate_sorted(sorted: &[Q], p: &Q) -> Q {
+    let n = sorted.len();
+    if n == 1 {
+        return sorted[0].clone();
+    }
+    let position = p * Q::from_integer(((n - 1) as i64).into());
+    let lower = position
+        .floor()
+        .to_integer()
+        .to_usize()
+        .unwrap_or(0)
+        .min(n - 1);
+    let upper = (lower + 1).min(n - 1);
+    let fraction = &position - Q::from_integer((lower as i64).into());
+    &sorted[lower] + (&sorted[upper] - &sorted[lower]) * fraction
+}
+
+/// `percentile [data], p` (`p` in 0..100) and `quantile [data], q` (`q` in 0..1).
+fn percentile_command(
+    graph: &ExprGraph,
+    name: &str,
+    args: &[String],
+) -> Result<NumericOutput, String> {
+    let args = split_args(args);
+    let [data_text, level] = args.as_slice() else {
+        return Err(format!("{name} [data], p"));
+    };
+    let mut sorted: Vec<Q> = list_items(data_text)
+        .iter()
+        .map(|i| exact(graph, i))
+        .collect::<Result<_, _>>()?;
+    sorted.sort();
+    let level = exact(graph, level)?;
+    let q = if name == "percentile" {
+        level.clone() / Q::from_integer(100.into())
+    } else {
+        level.clone()
+    };
+    if q < Q::zero() || q > Q::one() {
+        return Err(
+            "the level must be between 0 and 100 for a percentile (0 and 1 for a quantile)".into(),
+        );
+    }
+    let value = interpolate_sorted(&sorted, &q);
+    let shown = if value.is_integer() {
+        q_text(&value)
+    } else {
+        format!("{} ≈ {}", q_text(&value), decimal(&value))
+    };
+    Ok(NumericOutput::Text(format!(
+        "{name} {} = {shown}",
+        q_text(&level)
+    )))
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "gradient" | "hessian" | "jacobian" | "divergence" | "curl" | "laplacian" | "cross"
         | "dot" | "norm" => crate::vectorcalc::run(graph, name, args),
         "product" => product(graph, args),
+        "percentile" | "quantile" => percentile_command(graph, name, args),
         "dec2bin" | "bin2dec" | "dec2hex" | "hex" | "hex2dec" | "dec2oct" | "oct" | "oct2dec"
         | "subsets" | "powerset" | "power_set" | "permutations_list" | "cycle_type"
         | "next_permutation" | "pell" | "diophantine" => integer_text_commands(graph, name, args),
@@ -1155,7 +1286,8 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
         "interpolate" | "lagrange" => interpolate(graph, args),
         "fit" | "polyfit" => fit(graph, args),
         "mean" | "average" | "median" | "variance" | "var" | "pvariance" | "stddev" | "std"
-        | "sd" | "pstddev" | "min" | "max" | "mode" | "range" => statistics(graph, name, args),
+        | "sd" | "pstddev" | "min" | "max" | "mode" | "range" | "quartiles" | "iqr"
+        | "skewness" | "kurtosis" | "zscore" => statistics(graph, name, args),
         "divmod" | "floordiv" | "digits" | "egcd" | "crt" | "continued_fraction"
         | "convergents" => {
             let mut parsed: Vec<Vec<Q>> = Vec::new();
@@ -1200,6 +1332,13 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "percentile" => "percentile",
+        "quantile" => "quantile",
+        "quartiles" => "quartiles",
+        "iqr" => "iqr",
+        "skewness" => "skewness",
+        "kurtosis" => "kurtosis",
+        "zscore" => "zscore",
         "dec2bin" => "dec2bin",
         "bin2dec" => "bin2dec",
         "dec2hex" | "hex" => "dec2hex",

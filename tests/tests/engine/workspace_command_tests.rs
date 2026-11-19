@@ -1123,3 +1123,87 @@ fn probability_and_geometry_formulas() {
     assert_eq!(run("rad2deg(pi)"), "180");
     assert_eq!(run("circle_area(r)"), "π · r^2");
 }
+
+#[test]
+fn order_statistics_moments_and_point_geometry() {
+    // Type-7 quantiles, central moments, against direct f64 computation on several data sets.
+    let sets: [&[f64]; 4] = [
+        &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        &[7.0, 1.0, 9.0, 3.0, 3.0, 12.0, 20.0],
+        &[2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0],
+        &[10.0, 20.0, 30.0],
+    ];
+    let number = |out: &str| -> f64 {
+        let tail = out
+            .rsplit_once("≈")
+            .map(|(_, t)| t)
+            .unwrap_or_else(|| out.rsplit_once('=').unwrap().1);
+        tail.trim().parse::<f64>().unwrap_or_else(|_| {
+            let (a, b) = tail.trim().split_once('/').unwrap();
+            a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap()
+        })
+    };
+    for data in sets {
+        let text = format!(
+            "[{}]",
+            data.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let mut sorted = data.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let quantile = |q: f64| {
+            let pos = q * (sorted.len() - 1) as f64;
+            let (lo, hi) = (pos.floor() as usize, pos.ceil() as usize);
+            sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo as f64)
+        };
+        for p in [10.0, 25.0, 50.0, 75.0, 90.0] {
+            let got = number(&run(&format!("percentile {text}, {p}")));
+            assert!(
+                (got - quantile(p / 100.0)).abs() < 1e-9,
+                "percentile {p} of {text}: {got}"
+            );
+        }
+        let n = data.len() as f64;
+        let mean = data.iter().sum::<f64>() / n;
+        let moment = |k: i32| data.iter().map(|v| (v - mean).powi(k)).sum::<f64>() / n;
+        let (m2, m3, m4) = (moment(2), moment(3), moment(4));
+        assert!(
+            (number(&run(&format!("skewness {text}"))) - m3 / m2.powf(1.5)).abs() < 1e-9,
+            "skewness {text}"
+        );
+        assert!(
+            (number(&run(&format!("kurtosis {text}"))) - (m4 / (m2 * m2) - 3.0)).abs() < 1e-9,
+            "kurtosis {text}"
+        );
+    }
+    assert_eq!(
+        run("quartiles [1,2,3,4,5,6]"),
+        "quartiles = Q1 = 9/4, Q2 (median) = 7/2, Q3 = 19/4, IQR = 5/2"
+    );
+    // Points written as tuples or lists.
+    assert_eq!(run("distance((0,0),(3,4))"), "5");
+    assert_eq!(run("distance([1,2,3],[4,6,3])"), "5");
+    assert_eq!(run("distance((1,1,1),(2,3,3))"), "3");
+    assert_eq!(run("midpoint((0,0),(2,4))"), "[ 1, 2 ]");
+    assert_eq!(run("slope((1,2),(3,8))"), "3");
+    assert_eq!(run("angle([1,0],[0,1])"), "π / 2");
+    // The triangle's area by the shoelace formula, for lattice triangles.
+    for (a, b, c) in [
+        ((0i64, 0i64), (4i64, 0i64), (0i64, 3i64)),
+        ((1, 1), (5, 2), (3, 7)),
+        ((-2, 3), (4, -1), (0, 0)),
+    ] {
+        let shoelace =
+            ((a.0 * (b.1 - c.1) + b.0 * (c.1 - a.1) + c.0 * (a.1 - b.1)) as f64).abs() / 2.0;
+        let out = run(&format!(
+            "triangle_area(({},{}),({},{}),({},{}))",
+            a.0, a.1, b.0, b.1, c.0, c.1
+        ));
+        assert!(
+            (value(&out, &[]) - shoelace).abs() < 1e-12,
+            "{out} vs {shoelace}"
+        );
+    }
+}

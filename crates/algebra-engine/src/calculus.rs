@@ -1457,6 +1457,10 @@ pub(crate) fn taylor_coeffs_vec(
     point: ExprId,
     order: usize,
 ) -> Vec<ExprId> {
+    // Fast path: exact series arithmetic, when the expression and the point allow it.
+    if let Some(fast) = crate::series_fast::taylor_coeffs_fast(graph, expr, wrt, point, order) {
+        return fast;
+    }
     let mut coeffs = Vec::with_capacity(order + 1);
     let mut current_deriv = expr;
     let mut factorial = num_bigint::BigInt::from(1u8);

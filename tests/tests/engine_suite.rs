@@ -24,6 +24,8 @@ mod poly_factor_tests;
 mod polynomial_system_branching_tests;
 #[path = "engine/radical_integrals_tests.rs"]
 mod radical_integrals_tests;
+#[path = "engine/series_fast_tests.rs"]
+mod series_fast_tests;
 #[path = "engine/simplify_conditions_tests.rs"]
 mod simplify_conditions_tests;
 #[path = "engine/solve_known_roots_tests.rs"]

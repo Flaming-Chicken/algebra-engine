@@ -65,6 +65,7 @@ pub mod risch;
 mod risch_exptrig;
 mod risch_more;
 pub mod series;
+mod series_fast;
 pub mod session;
 pub mod sets;
 pub mod simplify;

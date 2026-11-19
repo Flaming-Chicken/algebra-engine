@@ -22,10 +22,13 @@ impl CoxDeBoor {
         if p == 0 {
             let left = knots[i];
             let right = knots[i + 1];
-            // Handle rightmost endpoint closed boundary condition
-            if (left <= u && u < right)
-                || (u >= right && i + 1 == knots.len() - 1 && (u - right).abs() < 1e-12)
-            {
+            // The last non-empty span is closed at its right end, so the basis is a partition of unity at
+            // `u_max` too. With a clamped knot vector that span is not the last index (the end knot is
+            // repeated), so test for "right end of a non-empty span at the largest knot".
+            let u_max = knots[knots.len() - 1];
+            let closes_domain =
+                left < right && (right - u_max).abs() < 1e-12 && (u - u_max).abs() < 1e-12;
+            if (left <= u && u < right) || closes_domain {
                 1.0
             } else {
                 0.0

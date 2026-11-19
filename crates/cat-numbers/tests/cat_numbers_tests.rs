@@ -160,3 +160,47 @@ fn test_butler_portugal_rank_8_symmetric_and_antisymmetric() {
     assert_eq!(res_odd.sign, -1);
     assert_eq!(res_odd.indices, vec![0, 1, 2, 3, 4, 5, 6, 7]);
 }
+
+#[test]
+fn shirshov_factorization_uses_the_longest_proper_lyndon_suffix() {
+    use cat_numbers::lyndon::LyndonWord;
+    let word = |letters: &[u8]| LyndonWord(letters.iter().copied().collect());
+    // aabb = a . abb (the old loop took the shortest suffix and gave aab . b).
+    let (u, v) = word(&[0, 0, 1, 1])
+        .shirshov_factorization()
+        .expect("factorises");
+    assert_eq!((u, v), (word(&[0]), word(&[0, 1, 1])));
+    // Every Lyndon word over three letters up to length 7: u v = w, u and v Lyndon, u < v, and no longer
+    // proper suffix of w is Lyndon.
+    let mut count = 0;
+    for len in 2..=7usize {
+        let total = 3usize.pow(len as u32);
+        for code in 0..total {
+            let letters: Vec<u8> = (0..len)
+                .map(|k| ((code / 3usize.pow(k as u32)) % 3) as u8)
+                .collect();
+            if !LyndonWord::is_lyndon(&letters) {
+                continue;
+            }
+            count += 1;
+            let (u, v) = word(&letters)
+                .shirshov_factorization()
+                .expect("a Lyndon word of length >= 2 factorises");
+            let mut joined = u.0.to_vec();
+            joined.extend_from_slice(&v.0);
+            assert_eq!(joined, letters);
+            assert!(
+                LyndonWord::is_lyndon(&u.0) && LyndonWord::is_lyndon(&v.0),
+                "{letters:?}"
+            );
+            assert!(u < v, "{letters:?}");
+            for start in 1..(letters.len() - v.len()) {
+                assert!(
+                    !LyndonWord::is_lyndon(&letters[start..]),
+                    "{letters:?}: a longer Lyndon suffix exists"
+                );
+            }
+        }
+    }
+    assert!(count > 100, "enumerated {count} Lyndon words");
+}

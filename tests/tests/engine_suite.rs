@@ -8,6 +8,8 @@ mod analysis_tests;
 mod factoring_speed_tests;
 #[path = "engine/limits_series_audit_tests.rs"]
 mod limits_series_audit_tests;
+#[path = "engine/m1_wrong_answer_tests.rs"]
+mod m1_wrong_answer_tests;
 #[path = "engine/radical_integrals_tests.rs"]
 mod radical_integrals_tests;
 #[path = "engine/solve_known_roots_tests.rs"]

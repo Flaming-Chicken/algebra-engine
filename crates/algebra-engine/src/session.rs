@@ -385,6 +385,19 @@ impl UraeSession {
         let resolved = self.resolve_nested_commands(trimmed);
         let trimmed = resolved.as_deref().unwrap_or(trimmed);
 
+        // Matrix arithmetic typed as plain input (`A + B`, `2*A`, `A * v`, `det(inverse(A))`, `identity(3)`).
+        if (trimmed.contains('[')
+            || ["identity(", "eye(", "zeros(", "ones("]
+                .iter()
+                .any(|f| trimmed.starts_with(f)))
+            && let Some(outcome) = crate::matexpr::evaluate(&self.graph, trimmed)
+        {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // A finite set expression (`2 in {1, 2}`, `{1,2} union {3}`) before the `x in Domain` declaration syntax.
         if trimmed.contains('{')
             && let Some(text) = crate::set_expr::evaluate(trimmed)

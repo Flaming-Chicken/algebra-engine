@@ -130,7 +130,14 @@ impl SymbolicSeries for ExprGraph {
     ) -> AlgebraResult<ExprId> {
         if pole_order == 0 {
             crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.set(false));
+            crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.set(false));
             let series = self.taylor_series(expr, wrt, point, regular_order);
+            if crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.replace(false)) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (a coefficient is singular, such as 0^0, ln(0) or 1/0), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
             if crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.replace(false)) {
                 return Err(AlgebraError::EvaluationError(format!(
                     "series: the derivatives of this expression grow too fast for order {regular_order} (the differentiation method is exponential here); try a lower order"

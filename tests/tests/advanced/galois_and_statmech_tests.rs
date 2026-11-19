@@ -36,3 +36,39 @@ fn test_statistical_mechanics() {
     let be = bose_einstein(2.0, 1.0, 1.0).unwrap();
     assert!(be > 0.0);
 }
+
+fn z(c: &[i64]) -> Vec<num_bigint::BigInt> {
+    c.iter().map(|&x| num_bigint::BigInt::from(x)).collect()
+}
+
+#[test]
+fn galois_groups_of_known_polynomials() {
+    use GaloisGroupType::*;
+    use algebra_advanced::galois::galois_group_over_q as gal;
+    // Quadratics and products of quadratics.
+    assert_eq!(gal(&z(&[-2, 0, 1])).unwrap(), Cyclic(2)); // x^2 - 2
+    assert_eq!(gal(&z(&[-4, 0, 1])).unwrap(), Identity); // x^2 - 4 splits over Q
+    assert_eq!(gal(&z(&[6, 0, -5, 0, 1])).unwrap(), KleinFour); // (x^2-2)(x^2-3)
+    assert_eq!(gal(&z(&[-1, -1, 1])).unwrap(), Cyclic(2)); // x^2 - x - 1 (golden ratio)
+    // Cubics: disc square gives C3, otherwise S3.
+    assert_eq!(gal(&z(&[-2, 0, 0, 1])).unwrap(), Symmetric(3)); // x^3 - 2
+    assert_eq!(gal(&z(&[1, -3, 0, 1])).unwrap(), Cyclic(3)); // x^3 - 3x + 1, disc 81
+    assert_eq!(gal(&z(&[-1, -1, 0, 1])).unwrap(), Symmetric(3)); // x^3 - x - 1, disc -23
+    assert_eq!(gal(&z(&[2, -2, 0, 1])).unwrap(), Symmetric(3)); // x^3 - 2x + 2 (Eisenstein)
+    // Reducible cubic: (x - 1)(x^2 - 2) has group C2.
+    assert_eq!(gal(&z(&[2, -2, -1, 1])).unwrap(), Cyclic(2));
+    // Quartics: one example of each possible group.
+    assert_eq!(gal(&z(&[-1, -1, 0, 0, 1])).unwrap(), Symmetric(4)); // x^4 - x - 1
+    assert_eq!(gal(&z(&[12, 8, 0, 0, 1])).unwrap(), Alternating(4)); // x^4 + 8x + 12
+    assert_eq!(gal(&z(&[-2, 0, 0, 0, 1])).unwrap(), Dihedral(4)); // x^4 - 2
+    assert_eq!(gal(&z(&[2, 0, 4, 0, 1])).unwrap(), Cyclic(4)); // x^4 + 4x^2 + 2
+    assert_eq!(gal(&z(&[1, 0, 0, 0, 1])).unwrap(), KleinFour); // x^4 + 1 (Q(zeta_8))
+    assert_eq!(gal(&z(&[1, 0, -10, 0, 1])).unwrap(), KleinFour); // min poly of sqrt2 + sqrt3
+    // Non-monic input has the same group as its monic model.
+    assert_eq!(gal(&z(&[-3, 0, 0, 2])).unwrap(), Symmetric(3)); // 2x^3 - 3 ~ x^3 - 12
+    assert_eq!(gal(&z(&[-2, 0, 0, 2])).unwrap(), Cyclic(2)); // 2(x - 1)(x^2 + x + 1)
+    // The trivial and quadratic extension constructors.
+    assert_eq!(FieldExtension::quadratic(4).degree, 1);
+    assert_eq!(FieldExtension::quadratic(1).galois_group, Some(Identity));
+    assert_eq!(FieldExtension::quadratic(-3).degree, 2);
+}

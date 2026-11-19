@@ -10,6 +10,8 @@ mod factoring_speed_tests;
 mod limits_series_audit_tests;
 #[path = "engine/m1_wrong_answer_tests.rs"]
 mod m1_wrong_answer_tests;
+#[path = "engine/poly_factor_tests.rs"]
+mod poly_factor_tests;
 #[path = "engine/polynomial_system_branching_tests.rs"]
 mod polynomial_system_branching_tests;
 #[path = "engine/radical_integrals_tests.rs"]

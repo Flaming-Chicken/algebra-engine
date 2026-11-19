@@ -737,7 +737,7 @@ impl Fixed {
         let h = self.hurwitz(&s, x)?;
         let factorial: BigInt = (1..=m as u64).map(BigInt::from).product();
         let value = h * factorial;
-        Ok(if m % 2 == 0 { -value } else { value })
+        Ok(if m.is_multiple_of(2) { -value } else { value })
     }
 
     /// `B(a, b) = Gamma(a) Gamma(b) / Gamma(a + b)`.

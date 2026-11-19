@@ -1514,6 +1514,14 @@ fn pre_simplify_algebraic_with_assumptions(
                 if is_one_id(g, se) {
                     return sb;
                 }
+                // e^x is exp(x), so that the rules for exp (and exp(i pi) = -1) apply to both spellings.
+                let base_is_e = matches!(
+                    g.get(sb).kind,
+                    ExprKind::Number(algebra_core::Number::Constant(algebra_core::Constant::E))
+                ) || matches!(g.get(sb).kind, ExprKind::Symbol(s) if g.symbols.resolve(s).as_deref() == Some("e"));
+                if base_is_e {
+                    return rec(g, g.function("exp", [se]), assumptions);
+                }
                 // (x^2)^(1/2) under assumptions
                 if as_rat(g, se) == Some(BigRational::new(1.into(), 2.into()))
                     && let ExprKind::Pow(b_in, e_in) = g.get(sb).kind

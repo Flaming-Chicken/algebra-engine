@@ -320,6 +320,12 @@ fn convert(input: &str) -> String {
                     }
                     "sum" | "prod" => {
                         let command = if name == "sum" { "sum" } else { "product" };
+                        let (summand, tail) = split_scope(body.trim());
+                        let tail = if tail.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", latex(&tail))
+                        };
                         if let Some((variable, start)) = lower.split_once('=') {
                             let end = if upper.is_empty() {
                                 "oo".to_string()
@@ -327,13 +333,13 @@ fn convert(input: &str) -> String {
                                 strip(&upper)
                             };
                             out.push_str(&format!(
-                                "{command}({}, {}, {}, {end})",
-                                latex(body.trim()),
+                                "{command}({}, {}, {}, {end}){tail}",
+                                latex(&summand),
                                 strip(variable),
                                 strip(start)
                             ));
                         } else {
-                            out.push_str(&format!("{command}({})", latex(body.trim())));
+                            out.push_str(&format!("{command}({}){tail}", latex(&summand)));
                         }
                     }
                     _ => {
@@ -697,4 +703,32 @@ pub fn latex(input: &str) -> String {
         return converted[1..converted.len() - 1].to_string();
     }
     converted
+}
+
+/// Split `k^2 - 1` into the summand `k^2` and the tail ` - 1`: a sum, product or limit applies to the next term only,
+/// which ends at a `+` or `-` outside brackets.
+fn split_scope(body: &str) -> (String, String) {
+    let chars: Vec<char> = body.chars().collect();
+    let mut depth = 0i32;
+    let mut seen = false;
+    let mut previous = ' ';
+    for (i, &c) in chars.iter().enumerate() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0
+            && (c == '+' || c == '-')
+            && seen
+            && !matches!(previous, '*' | '/' | '^' | '(' | ',' | '=' | '+' | '-')
+        {
+            return (chars[..i].iter().collect(), chars[i..].iter().collect());
+        }
+        if !c.is_whitespace() {
+            seen = true;
+            previous = c;
+        }
+    }
+    (body.to_string(), String::new())
 }

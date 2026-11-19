@@ -53,7 +53,7 @@ fn limits_at_infinity_with_a_variable_exponent() {
         ("lim (1/x)^x as x->oo", "0"),
         // The existing 1^∞ path is untouched.
         ("lim (1 + 1/x)^x as x->oo", "e"),
-        ("lim (1 + 2/x)^x as x->oo", "e^2"),
+        ("lim (1 + 2/x)^x as x->oo", "exp(2)"),
     ];
     for (cmd, expected) in cases {
         assert_eq!(value(cmd), expected, "{cmd}");

@@ -147,7 +147,11 @@ pub fn run_repl() {
             if res.is_error {
                 eprintln!("Error: {}\n", res.error_msg.unwrap_or(res.output_text));
             } else {
-                println!("= {}\n", res.output_text);
+                println!("= {}", res.output_text);
+                if let Some(conditions) = res.metadata.get("conditions") {
+                    println!("  (valid where {conditions})");
+                }
+                println!();
             }
         }
     }

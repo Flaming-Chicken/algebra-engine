@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Changed: the `simplify` command now says where the result is valid when it dropped a restriction (`x/x` gives `1` with `valid where x ≠ 0`): in the CLI REPL, in the JSON response (`conditions`) and as the notebook's domain info.
 - Added: `Simplifier::simplify_with_conditions` and `Expr::simplify_with_conditions` report the points a simplification excludes (`x / x` is `1` for `x ≠ 0`; `exp(ln x)` is `x` for `x > 0`; `tan(x) cos(x)` is `sin(x)` for `cos(x) ≠ 0`).
 - Fixed: input nested a hundred levels deep (`sin(sin(...))`, `x^(x^(...))`) overflowed the stack and aborted the process; the parser and the simplifier now refuse nesting beyond 64 levels with an error.
 - Added: a deterministic panic hunt (`panic_hunt_tests`) over the parser, simplifier, differentiation and integration; the production panic count is recounted with the compiler (three documented overload panics).

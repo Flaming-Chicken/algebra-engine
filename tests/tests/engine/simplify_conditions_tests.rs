@@ -59,3 +59,18 @@ fn unconditional_identities_and_kept_restrictions_report_nothing() {
         assert!(ex.is_empty(), "{input}: {ex:?}");
     }
 }
+
+#[test]
+fn the_session_result_carries_the_conditions_of_a_simplify_command() {
+    let mut session = algebra_engine::session::UraeSession::new();
+    let cancelled = session.execute_line("simplify x/x");
+    assert!(!cancelled.is_error, "{cancelled:?}");
+    assert_eq!(cancelled.output_text, "1");
+    assert_eq!(
+        cancelled.metadata.get("conditions").map(String::as_str),
+        Some("x ≠ 0")
+    );
+    // An unconditional identity carries no conditions.
+    let plain = session.execute_line("simplify sin(x)^2 + cos(x)^2");
+    assert!(!plain.metadata.contains_key("conditions"), "{plain:?}");
+}

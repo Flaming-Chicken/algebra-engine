@@ -209,12 +209,17 @@ impl Simplifier {
         root: ExprId,
     ) -> SimplifyResult<ConditionedResult> {
         let expr = Self::simplify(graph, root)?;
-        let before = atoms(graph, root);
-        let after = atoms(graph, expr);
-        let excluded = before
+        let excluded = Self::excluded_points(graph, root, expr);
+        Ok(ConditionedResult { expr, excluded })
+    }
+
+    /// The restrictions of `original` that `result` no longer carries (whatever transformation produced `result`).
+    pub fn excluded_points(graph: &ExprGraph, original: ExprId, result: ExprId) -> Vec<Condition> {
+        let before = atoms(graph, original);
+        let after = atoms(graph, result);
+        before
             .into_iter()
             .filter(|b| !after.iter().any(|a| a.implies(b)))
-            .collect();
-        Ok(ConditionedResult { expr, excluded })
+            .collect()
     }
 }

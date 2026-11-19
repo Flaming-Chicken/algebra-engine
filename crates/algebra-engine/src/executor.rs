@@ -481,6 +481,19 @@ impl OperationExecutor {
                     let mut res = OperationResult::success(unicode.clone(), latex, unicode.clone());
                     res.root_expr = Some(transformed_id);
                     res.simplified_unicode = Some(unicode);
+                    // The transformation may have dropped restrictions of the input (`x / x` is `1` only for
+                    // `x != 0`); say so instead of presenting the result as unconditional.
+                    let excluded = Simplifier::excluded_points(graph, expr_id, transformed_id);
+                    if !excluded.is_empty() {
+                        let text: Vec<String> =
+                            excluded.iter().map(|c| c.describe(graph)).collect();
+                        res.metadata
+                            .insert("conditions".to_string(), text.join("; "));
+                        if res.domain_info.is_none() {
+                            // Shown by the notebook next to the result.
+                            res.domain_info = Some(format!("valid where {}", text.join("; ")));
+                        }
+                    }
                     #[cfg(any(test, feature = "shadow-verify"))]
                     if let Ok(legacy) = cat_bridge::LegacyAstTree::from_graph(transformed_id, graph)
                     {

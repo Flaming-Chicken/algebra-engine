@@ -94,6 +94,9 @@ pub struct UraeJsonResponse {
     /// Enumerated Riemann sheet / multivalued branch values (for `branches` / `branch_cut` queries).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_values: Option<Vec<String>>,
+    /// Restrictions of the input that the result no longer carries (`x / x` is `1` for `x ≠ 0`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditions: Option<Vec<String>>,
     pub error_msg: Option<String>,
 }
 
@@ -223,6 +226,10 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
             };
             return UraeJsonResponse {
                 success: true,
+                conditions: exec_res
+                    .metadata
+                    .get("conditions")
+                    .map(|c| c.split("; ").map(str::to_string).collect()),
                 input_raw: raw_input.to_string(),
                 output_latex: exec_res.output_latex,
                 output_unicode: exec_res.output_text,
@@ -250,6 +257,7 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         } else {
             return UraeJsonResponse {
                 success: false,
+                conditions: None,
                 input_raw: raw_input.to_string(),
                 output_latex: String::new(),
                 output_unicode: String::new(),
@@ -282,6 +290,7 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
         Err(err) => {
             return UraeJsonResponse {
                 success: false,
+                conditions: None,
                 input_raw: raw_input.to_string(),
                 output_latex: String::new(),
                 output_unicode: String::new(),
@@ -367,6 +376,7 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
     if let Some(err) = integral_error {
         return UraeJsonResponse {
             success: false,
+            conditions: None,
             input_raw: raw_input.to_string(),
             output_latex: latex_out,
             output_unicode: unicode_out,
@@ -507,6 +517,7 @@ pub fn process_request(graph: &ExprGraph, req: &UraeJsonRequest) -> UraeJsonResp
 
     UraeJsonResponse {
         success: true,
+        conditions: None,
         input_raw: raw_input.to_string(),
         output_latex: latex_out,
         output_unicode: unicode_out,

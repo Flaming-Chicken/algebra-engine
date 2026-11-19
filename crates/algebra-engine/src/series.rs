@@ -129,6 +129,12 @@ impl SymbolicSeries for ExprGraph {
         regular_order: u32,
     ) -> AlgebraResult<ExprId> {
         if pole_order == 0 {
+            if has_vanishing_base_with_variable_exponent(self, expr, wrt, point) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (a power whose base is zero there has an exponent that depends on the variable, as in x^x at 0), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
             crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.set(false));
             crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.set(false));
             let series = self.taylor_series(expr, wrt, point, regular_order);
@@ -340,4 +346,41 @@ fn has_singular_term(graph: &ExprGraph, root: ExprId) -> bool {
         stack.extend(node.children());
     }
     false
+}
+
+/// True if some power `b^e` inside `expr` has an exponent depending on `wrt` while its base is zero at `point`
+/// (`x^x` at 0, `sin(x)^x` at 0, `(x - 1)^x` at 1): the function has no Taylor series there, and the derivative
+/// method would otherwise read `0^0` as 1 and return a wrong answer.
+fn has_vanishing_base_with_variable_exponent(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    point: ExprId,
+) -> bool {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Pow(base, exponent) => {
+            if graph.has_symbol(exponent, wrt) {
+                let at_point = graph.substitute(base, wrt, point);
+                let value = crate::limits::LimitEngine::simplify_constants(graph, at_point);
+                let value = crate::simplify::Simplifier::simplify(graph, value).unwrap_or(value);
+                if value == graph.integer(0) {
+                    return true;
+                }
+            }
+            has_vanishing_base_with_variable_exponent(graph, base, wrt, point)
+                || has_vanishing_base_with_variable_exponent(graph, exponent, wrt, point)
+        }
+        ExprKind::Add(ts) | ExprKind::Mul(ts) => ts
+            .iter()
+            .any(|&t| has_vanishing_base_with_variable_exponent(graph, t, wrt, point)),
+        ExprKind::Sub(a, b) | ExprKind::Div(a, b) => {
+            has_vanishing_base_with_variable_exponent(graph, a, wrt, point)
+                || has_vanishing_base_with_variable_exponent(graph, b, wrt, point)
+        }
+        ExprKind::Neg(a) => has_vanishing_base_with_variable_exponent(graph, a, wrt, point),
+        ExprKind::Function { args, .. } => args
+            .iter()
+            .any(|&a| has_vanishing_base_with_variable_exponent(graph, a, wrt, point)),
+        _ => false,
+    }
 }

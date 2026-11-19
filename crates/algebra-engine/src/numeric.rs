@@ -1664,8 +1664,12 @@ fn eval_unary_fn(
         ("log_gamma" | "lngamma" | "lgamma", BigValue::Real(r)) => Ok(BigValue::Real(
             crate::bigfloat::special_f64("lgamma", *r).unwrap_or_else(|| eval_log_gamma(*r)),
         )),
-        ("digamma" | "psi", BigValue::Real(r)) => Ok(BigValue::Real(eval_digamma(*r))),
-        ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(eval_zeta(*r))),
+        ("digamma" | "psi", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("digamma", *r).unwrap_or_else(|| eval_digamma(*r)),
+        )),
+        ("zeta", BigValue::Real(r)) => Ok(BigValue::Real(
+            crate::bigfloat::special_f64("zeta", *r).unwrap_or_else(|| eval_zeta(*r)),
+        )),
         ("erf", BigValue::Real(r)) => Ok(BigValue::Real(
             crate::bigfloat::special_f64("erf", *r).unwrap_or_else(|| eval_erf(*r)),
         )),

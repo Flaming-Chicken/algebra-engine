@@ -93,3 +93,19 @@ fn z_transforms_match_the_defining_series() {
             .is_error
     );
 }
+
+#[test]
+fn series_refuses_functions_that_are_not_analytic_at_the_point() {
+    // x^(x^x) at 0 once returned `0`, reading 0^0 as 1 in the derivative method.
+    for q in [
+        "series(x^x^x, x, 0, 6)",
+        "series(x^x, x, 0, 4)",
+        "series(sin(x)^x, x, 0, 4)",
+        "series((x - 1)^x, x, 1, 3)",
+    ] {
+        assert!(UraeSession::new().execute_line(q).is_error, "{q}");
+    }
+    // A base that is not zero at the point is fine: (1 + x)^x = 1 + x^2 - x^3/2 + ...
+    let out = run("series((1 + x)^x, x, 0, 3)");
+    assert_eq!(out, "x^2 - 1/2 · x^3 + 1");
+}

@@ -85,3 +85,20 @@ fn identities_at_high_precision() {
     assert!(run("N(gamma(1/3), 20)").starts_with("2.6789385347077476337"));
     assert!(run("N(erf(1), 20)").starts_with("0.84270079294971486934"));
 }
+
+#[test]
+fn f64_zeta_and_digamma_are_correctly_rounded() {
+    // Published: zeta(3) = 1.2020569031595942854..., psi(1) = -0.5772156649015328606...
+    let value = |q: &str| -> f64 {
+        let out = UraeSession::new().execute_line(q).output_text;
+        out.split('≈')
+            .next_back()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{out}"))
+    };
+    assert_eq!(value("N(zeta(3))"), 1.202_056_903_159_594_3);
+    assert_eq!(value("N(digamma(1))"), -0.577_215_664_901_532_9);
+    assert_eq!(value("N(zeta(1.5))"), 2.612_375_348_685_488);
+}

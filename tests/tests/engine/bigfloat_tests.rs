@@ -89,8 +89,8 @@ fn digits_are_correctly_rounded_and_formatted() {
 #[test]
 fn what_cannot_be_evaluated_is_an_error_not_a_guess() {
     // A function with no arbitrary-precision implementation falls back to the f64 path, which does not claim 40
-    // digits (Bessel functions are not implemented at arbitrary precision).
-    let r = UraeSession::new().execute_line("N(besselj(0, 1), 40)");
+    // digits (Bessel functions of the second kind are not implemented at arbitrary precision).
+    let r = UraeSession::new().execute_line("N(bessely(0, 1), 40)");
     assert!(
         r.output_text.len() < 25,
         "should not claim 40 digits: {}",
@@ -98,4 +98,53 @@ fn what_cannot_be_evaluated_is_an_error_not_a_guess() {
     );
     // Gamma is, now: 40 digits of Gamma(1/2) = sqrt(pi).
     assert!(n("gamma(1/2)", 40).starts_with("1.77245385090551602729816748334114518279"));
+}
+
+#[test]
+fn zeta_digamma_beta_and_bessel_match_published_digits_and_identities() {
+    // Apery's constant and zeta(5), published digits.
+    assert_eq!(
+        n("zeta(3)", 45),
+        "1.20205690315959428539973816151144999076498629"
+    );
+    assert_eq!(
+        n("zeta(5)", 40),
+        "1.036927755143369926331365486457034168057"
+    );
+    // psi(1) = -gamma (Euler-Mascheroni): 0.5772156649015328606065120900824024310421593359...
+    assert_eq!(
+        n("digamma(1)", 45),
+        "-0.577215664901532860606512090082402431042159336"
+    );
+    // psi(1/2) = -gamma - 2 ln 2 and the recurrence psi(x + 1) = psi(x) + 1/x, to 55 of 60 digits.
+    assert!(below(
+        &n(
+            "digamma(1/2) + 0.5772156649015328606065120900824024310421593359399235988057 + 2*ln(2)",
+            60
+        ),
+        55
+    ));
+    assert!(below(&n("digamma(7/3) - digamma(4/3) - 3/4", 60), 55));
+    // Reflection at a negative argument: psi(1 - x) - psi(x) = pi cot(pi x).
+    assert!(below(
+        &n("digamma(1 - 2/5) - digamma(2/5) - pi/tan(2*pi/5)", 50),
+        45
+    ));
+    // Beta: B(2, 3) = 1/12, B(1/2, 1/2) = pi, and B(a, b) = B(b, a).
+    assert!(below(&n("beta(2, 3) - 1/12", 50), 45));
+    assert!(below(&n("beta(1/2, 1/2) - pi", 50), 45));
+    assert!(below(&n("beta(3/7, 5/3) - beta(5/3, 3/7)", 50), 45));
+    // Bessel J: published values, and the recurrence J_(n-1)(x) + J_(n+1)(x) = (2n / x) J_n(x).
+    assert!(n("besselj(0, 1)", 20).starts_with("0.7651976865579665514"));
+    assert!(n("besselj(1, 1)", 20).starts_with("0.4400505857449335159"));
+    assert!(n("besselj(0, 10)", 20).starts_with("-0.245935764451348335"));
+    for (order, x) in [(1, "1"), (2, "5/2"), (4, "12"), (3, "30")] {
+        let expr = format!(
+            "besselj({}, {x}) + besselj({}, {x}) - {}/({x}) * besselj({order}, {x})",
+            order - 1,
+            order + 1,
+            2 * order
+        );
+        assert!(below(&n(&expr, 50), 40), "{expr}");
+    }
 }

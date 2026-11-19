@@ -44,6 +44,7 @@ pub mod hyperop;
 pub mod iga;
 pub mod indeterminate;
 pub mod inequality;
+pub mod input_text;
 pub mod interconnect;
 pub mod intlist;
 pub mod lagrange;

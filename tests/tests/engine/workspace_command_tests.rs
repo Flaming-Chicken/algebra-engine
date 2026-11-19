@@ -1393,3 +1393,57 @@ fn continuous_distributions_match_closed_forms_and_tables() {
         "{integral}"
     );
 }
+
+#[test]
+fn latex_and_english_input_mean_what_the_plain_input_means() {
+    // Each LaTeX or English phrase gives exactly the result of the plain command it stands for.
+    let pairs: [(&str, &str); 28] = [
+        (r"\frac{1}{2} + \frac{1}{3}", "1/2 + 1/3"),
+        (r"\int_0^1 x^2 dx", "integrate(x^2, x, 0, 1)"),
+        (r"\int x^2 dx", "integrate(x^2, x)"),
+        (r"\int_{0}^{\pi} \sin(x) dx", "integrate(sin(x), x, 0, pi)"),
+        (r"\sum_{k=1}^{10} k", "sum(k, k, 1, 10)"),
+        (r"\sum_{k=1}^{\infty} \frac{1}{k^2}", "sum(1/k^2, k, 1, oo)"),
+        (r"\prod_{k=1}^{5} k", "product(k, k, 1, 5)"),
+        (r"\lim_{x \to 0} \frac{\sin x}{x}", "limit(sin(x)/x, x, 0)"),
+        (r"\lim_{x \to 0^+} \frac{1}{x}", "limit(1/x, x, 0, +)"),
+        (r"\sqrt{16}", "sqrt(16)"),
+        (r"\sqrt[3]{27}", "root(27, 3)"),
+        (r"\frac{d}{dx} x^3", "diff(x^3, x)"),
+        (r"\frac{d^2}{dx^2} x^4", "diff(x^4, x, 2)"),
+        (r"\sin^2 x + \cos^2 x", "sin(x)^2 + cos(x)^2"),
+        (r"\binom{5}{2}", "binomial(5, 2)"),
+        (r"\log_2 8", "log(8, 2)"),
+        (r"\ln e", "ln(e)"),
+        (r"\pi r^2", "pi*r^2"),
+        (
+            r"\det \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}",
+            "det([[1,2],[3,4]])",
+        ),
+        ("what is 2+2", "2+2"),
+        ("calculate 3*4", "3*4"),
+        ("2 plus 3", "2 + 3"),
+        ("10 divided by 4", "10 / 4"),
+        ("square root of 16", "sqrt(16)"),
+        ("factorial of 5", "(5)!"),
+        ("3 squared", "3^2"),
+        ("2 to the power 10", "2^10"),
+        ("20 percent of 150", "(20)/100*(150)"),
+    ];
+    for (phrase, plain) in pairs {
+        assert_eq!(run(phrase), run(plain), "{phrase} vs {plain}");
+    }
+    // The exact values, so that both sides are not equally wrong.
+    assert_eq!(run(r"\frac{1}{2} + \frac{1}{3}"), "5/6");
+    assert_eq!(run(r"\int_0^1 x^2 dx"), "1/3 (w.r.t x along [0, 1])");
+    assert_eq!(run(r"\sum_{k=1}^{10} k"), "55");
+    assert_eq!(run(r"\binom{5}{2}"), "10");
+    assert_eq!(run(r"\log_2 8"), "3");
+    assert_eq!(run("what is 2+2"), "4");
+    assert_eq!(run("square root of 16"), "4");
+    assert_eq!(run("20 percent of 150"), "30");
+    // Case is kept: a symbol named X is not turned into x.
+    assert_eq!(run("X plus X"), "2 · X");
+    // `e^{i\pi}` was read through a backslash operator (`mldivide`).
+    assert!(!run(r"e^{i\pi}").contains("mldivide"));
+}

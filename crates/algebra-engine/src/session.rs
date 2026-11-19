@@ -380,6 +380,13 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // LaTeX (an integral written with a backslash int, a backslash frac derivative) and plain English (`what is 2 plus 3`) are rewritten first.
+        if let Some(plain) = crate::input_text::normalise(trimmed)
+            && plain != trimmed
+        {
+            return self.execute_line(&plain);
+        }
+
         // Commands inside the arguments of another command (`factor(expand((x+1)^3 - 1))`,
         // `integrate(simplify(...), x)`) are evaluated first and replaced by their results.
         let resolved = self.resolve_nested_commands(trimmed);

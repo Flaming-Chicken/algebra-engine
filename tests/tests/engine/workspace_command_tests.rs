@@ -995,3 +995,131 @@ fn matrix_arithmetic_agrees_with_direct_computation() {
             .is_error
     );
 }
+
+#[test]
+fn infinite_sums_agree_with_partial_sums() {
+    // The oracle: the partial sum to N (with the average of two consecutive ones for alternating series).
+    type Term = fn(f64) -> f64;
+    let cases: [(&str, i64, Term, bool); 8] = [
+        ("1/(k*(k+1))", 1, |k| 1.0 / (k * (k + 1.0)), false),
+        ("1/(k*(k+2))", 1, |k| 1.0 / (k * (k + 2.0)), false),
+        ("1/(k^2-1)", 2, |k| 1.0 / (k * k - 1.0), false),
+        (
+            "1/((k)*(k+1)*(k+2))",
+            1,
+            |k| 1.0 / (k * (k + 1.0) * (k + 2.0)),
+            false,
+        ),
+        (
+            "(-1)^(k+1)/k",
+            1,
+            |k| (if k as i64 % 2 == 0 { -1.0 } else { 1.0 }) / k,
+            true,
+        ),
+        (
+            "(-1)^k/(2*k+1)",
+            0,
+            |k| (if k as i64 % 2 == 0 { 1.0 } else { -1.0 }) / (2.0 * k + 1.0),
+            true,
+        ),
+        ("1/(2*k-1)^2", 1, |k| 1.0 / ((2.0 * k - 1.0).powi(2)), false),
+        (
+            "1/factorial(k)",
+            0,
+            |k| {
+                if k > 170.0 {
+                    0.0
+                } else {
+                    1.0 / (1..=(k as u64)).map(|i| i as f64).product::<f64>()
+                }
+            },
+            false,
+        ),
+    ];
+    for (summand, from, term, alternating) in cases {
+        let out = run(&format!("sum({summand}, k, {from}, oo)"));
+        let closed = value(&out.replace('π', "pi"), &[]);
+        let n = 200_000;
+        let mut partial = 0.0;
+        let mut previous = 0.0;
+        for k in from..from + n {
+            previous = partial;
+            partial += term(k as f64);
+        }
+        let estimate = if alternating {
+            (partial + previous) / 2.0
+        } else {
+            partial
+        };
+        let tolerance = if alternating { 1e-9 } else { 2e-5 };
+        assert!(
+            (closed - estimate).abs() < tolerance,
+            "sum({summand}) = {out}: {closed} vs {estimate}"
+        );
+    }
+    assert_eq!(run("sum(x^k/factorial(k), k, 0, oo)"), "exp(x)");
+    assert_eq!(run("sum(1/(k*(k+1)), k, 1, oo)"), "1");
+    // Divergent series are errors, not values.
+    assert!(
+        UraeSession::new()
+            .execute_line("sum(1/k, k, 1, oo)")
+            .is_error
+    );
+}
+
+#[test]
+fn probability_and_geometry_formulas() {
+    // Published values of the standard normal distribution, to 1e-12.
+    for (x, expected) in [
+        (0.0, 0.5),
+        (1.0, 0.841_344_746_068_542_9),
+        (1.96, 0.975_002_104_851_779_5),
+        (-1.0, 0.158_655_253_931_457_05),
+    ] {
+        let out = run(&format!("N(normal_cdf({x}))"));
+        assert!(
+            (value(&format!("normal_cdf({x})"), &[]) - expected).abs() < 1e-12,
+            "{out}"
+        );
+    }
+    // The pdf integrates to the cdf (an independent numerical integral).
+    let integral = run("nintegrate(normal_pdf(t), t, -9, 1.3)");
+    let digits: String = integral
+        .split('≈')
+        .nth(1)
+        .unwrap()
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    assert!((digits.parse::<f64>().unwrap() - value("normal_cdf(1.3)", &[])).abs() < 1e-9);
+    // Binomial and Poisson masses sum to one; the binomial mean is n p.
+    let n = 12;
+    let masses: Vec<f64> = (0..=n)
+        .map(|k| value(&format!("binomial_pmf({n}, 3/10, {k})"), &[]))
+        .collect();
+    assert!((masses.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    assert!(
+        (masses
+            .iter()
+            .enumerate()
+            .map(|(k, m)| k as f64 * m)
+            .sum::<f64>()
+            - 3.6)
+            .abs()
+            < 1e-12
+    );
+    let poisson: f64 = (0..80)
+        .map(|k| value(&format!("poisson_pmf({k}, 4)"), &[]))
+        .sum();
+    assert!((poisson - 1.0).abs() < 1e-12);
+    assert_eq!(run("binomial_pmf(5, 1/2, 2)"), "5/16");
+    assert_eq!(run("poisson_pmf(3, 2)"), "4/3 · exp(-2)");
+    // Geometry.
+    assert_eq!(run("circle_area(3)"), "9 · π");
+    assert_eq!(run("sphere_volume(3)"), "36 · π");
+    assert_eq!(run("hypot(3,4)"), "5");
+    assert_eq!(run("deg2rad(180)"), "π");
+    assert_eq!(run("rad2deg(pi)"), "180");
+    assert_eq!(run("circle_area(r)"), "π · r^2");
+}

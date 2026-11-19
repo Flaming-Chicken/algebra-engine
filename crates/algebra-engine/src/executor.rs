@@ -3614,6 +3614,14 @@ fn execute_symbolic_sum(
         ));
     }
 
+    // Infinite sums with a closed form: telescoping rational functions, `x^k / k!`, classical series.
+    if is_inf_expr(up_id)
+        && let Some(a) = as_int(low_id)
+        && let Some(value) = crate::series_sums::infinite_sum(graph, expr_id, var_sym, a)
+    {
+        return Ok(value);
+    }
+
     Err(format!(
         "Symbolic sum closed form unavailable for '{}' from {} to {}",
         expression, lower, upper

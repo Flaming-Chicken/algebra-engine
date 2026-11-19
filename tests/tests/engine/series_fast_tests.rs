@@ -104,3 +104,36 @@ fn series_with_a_symbolic_constant_term_still_match_the_function() {
         );
     }
 }
+
+#[test]
+fn expression_swell_and_singular_points_are_reported_instead_of_hanging_or_nonsense() {
+    // `-atan(-x^x)` took 281 s (debug) and `taylor(x^x)` 27 s, and the latter returned terms such as `ln(0)` and
+    // `1/0`: x^x = exp(x ln x) is not analytic at 0, so it has no Taylor series there.
+    let start = Instant::now();
+    for q in ["series(-atan(-x^x))", "taylor(x^x)"] {
+        let r = UraeSession::new().execute_line(q);
+        assert!(r.is_error, "{q} must be refused, got {}", r.output_text);
+        assert!(
+            r.output_text.contains("grow too fast") || r.output_text.contains("not analytic"),
+            "{q}: {}",
+            r.output_text
+        );
+    }
+    assert!(
+        start.elapsed().as_secs_f64() < 60.0,
+        "took {:?}",
+        start.elapsed()
+    );
+    // x^x IS analytic at 1: x^x = 1 + (x-1) + (x-1)^2 + ...
+    let at_one = series("series(x^x, x, 1, 3)");
+    assert!(
+        at_one.contains("x") && !at_one.contains("ln(0)"),
+        "{at_one}"
+    );
+    // Ordinary expressions are unaffected.
+    assert!(
+        !UraeSession::new()
+            .execute_line("series(sin(cos(x)), x, 0, 8)")
+            .is_error
+    );
+}

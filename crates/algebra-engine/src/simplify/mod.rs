@@ -1247,6 +1247,35 @@ fn pre_simplify_algebraic_with_assumptions(
                     };
                     return rec(g, combined, assumptions);
                 }
+                // exp(a) * exp(b) -> exp(a + b), so that exp(x) * exp(-x) is 1.
+                let exp_argument = |g: &ExprGraph, f: ExprId| -> Option<ExprId> {
+                    if let ExprKind::Function { name, args } = &g.get(f).kind
+                        && args.len() == 1
+                        && g.symbols.resolve(*name).as_deref() == Some("exp")
+                    {
+                        return Some(args[0]);
+                    }
+                    None
+                };
+                let exp_args: Vec<ExprId> =
+                    rest.iter().filter_map(|&f| exp_argument(g, f)).collect();
+                if exp_args.len() >= 2 {
+                    let mut rebuilt: Vec<ExprId> = rest
+                        .iter()
+                        .copied()
+                        .filter(|&f| exp_argument(g, f).is_none())
+                        .collect();
+                    if !coeff.is_one() {
+                        rebuilt.insert(0, crate::poly::expr_from_rational(g, &coeff));
+                    }
+                    rebuilt.push(g.function("exp", [g.add(exp_args)]));
+                    let combined = if rebuilt.len() == 1 {
+                        rebuilt[0]
+                    } else {
+                        g.mul(rebuilt)
+                    };
+                    return rec(g, combined, assumptions);
+                }
                 // Repeated bases with numeric exponents: x * x -> x^2, x^2 * x^3 -> x^5,
                 // x^(1/2) * x^(1/2) -> x. Only rewritten when a base actually repeats, so
                 // products without repeats keep their order.
@@ -1586,6 +1615,12 @@ fn pre_simplify_algebraic_with_assumptions(
                             return g.integer(0);
                         }
                         "cos" | "cosh" | "exp" if is_zero_id(g, a) => return g.integer(1),
+                        // abs(-x) = abs(x), and the odd/even symmetries of the hyperbolic and inverse functions.
+                        "abs" if matches!(g.get(a).kind, ExprKind::Neg(_)) => {
+                            if let ExprKind::Neg(inner) = g.get(a).kind {
+                                return rec(g, g.function("abs", [inner]), assumptions);
+                            }
+                        }
                         "acos" | "arccos" => {
                             let pi = g.constant(algebra_core::Constant::Pi);
                             if is_one_id(g, a) {

@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: homogeneous linear systems of ODEs with constant coefficients, `dsolve([x' = y, y' = -x])` and with initial conditions `dsolve([x' = 2*x + y, y' = x + 2*y], x(0) = 1, y(0) = 0)`; it was a parse error.
 - Fixed: `diff(x^2*y^3, x, y)` printed `2 · x · y^3` (the second variable was dropped); mixed partial derivatives now work (`diff(f, x, y)`, `diff(f, x, 2, y)`, `partial(f, x, y)`, `∂^2/∂x∂y f`, `d^2/dxdy f`). Added one-sided limits as a sentence: `lim x->0+ 1/x`, `lim x->0- f`, `limit(f, x, 0^+)`.
 - Added: `npv(rate, [flows])`, `irr([flows])`, `cagr(start, end, years)` and `doubling_time(rate)`.
 - Added: `inverse_laplace` / `ilaplace` of rational functions (`ilaplace(1/(s^2+1), s, t)` is `sin(t)`); exact finance functions `compound_interest` (`future_value`), `present_value`, `simple_interest`, `pmt`, `loan_payment`, `annuity`, `percent_change`. A rational with a long denominator typed with decimals now also prints its value (`1000*(1+0.05)^10` is `... ≈ 1628.894626777442`).

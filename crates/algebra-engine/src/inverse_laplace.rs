@@ -89,10 +89,14 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         args.get(1).cloned().unwrap_or_else(|| "s".into()),
         args.get(2).cloned().unwrap_or_else(|| "t".into()),
     );
-    Some(invert(session, &args[0], &s_name, &t_name))
+    Some(
+        invert(session, &args[0], &s_name, &t_name)
+            .map(|value| format!("L^-1{{{}}}({t_name}) = {value}", args[0])),
+    )
 }
 
-fn invert(
+/// The inverse Laplace transform of the rational function `f_text` of `s_name`, as an expression in `t_name`.
+pub fn invert(
     session: &mut UraeSession,
     f_text: &str,
     s_name: &str,
@@ -205,18 +209,27 @@ fn invert(
                     let (r, p) = (qi.coeffs[0].clone(), qi.coeffs[1].clone());
                     let half = Q::new(BigInt::from(1), BigInt::from(2));
                     let w_squared = &r - &p * &p * Q::new(BigInt::from(1), BigInt::from(4));
-                    if !w_squared.is_positive() {
-                        return Err("a quadratic factor with real roots should have split".into());
-                    }
                     let sin_coefficient = (&c0 - &c1 * &p * &half).to_string();
+                    // A real irreducible quadratic (roots -p/2 +- sqrt(-w^2)) inverts to hyperbolic functions.
+                    let hyperbolic = !w_squared.is_positive();
+                    let magnitude = if hyperbolic {
+                        -w_squared.clone()
+                    } else {
+                        w_squared.clone()
+                    };
                     // sqrt(p / q) = sqrt(p q) / q keeps the radicand an integer (sqrt(3/4) is sqrt(3) / 2).
                     let w = format!(
                         "(sqrt({})/{})",
-                        w_squared.numer() * w_squared.denom(),
-                        w_squared.denom()
+                        magnitude.numer() * magnitude.denom(),
+                        magnitude.denom()
                     );
+                    let (cosine, sine) = if hyperbolic {
+                        ("cosh", "sinh")
+                    } else {
+                        ("cos", "sin")
+                    };
                     terms.push(format!(
-                        "exp({}*{t_name})*({}*cos({w}*{t_name}) + ({})/{w}*sin({w}*{t_name}))",
+                        "exp({}*{t_name})*({}*{cosine}({w}*{t_name}) + ({})/{w}*{sine}({w}*{t_name}))",
                         q(&(-&p * &half)),
                         q(&c1),
                         sin_coefficient
@@ -231,8 +244,7 @@ fn invert(
         }
     }
     if terms.is_empty() {
-        return Ok(format!("L^-1{{{f_text}}}({t_name}) = 0"));
+        return Ok("0".into());
     }
-    let value = session.eval(&terms.join(" + "))?;
-    Ok(format!("L^-1{{{f_text}}}({t_name}) = {value}"))
+    session.eval(&terms.join(" + "))
 }

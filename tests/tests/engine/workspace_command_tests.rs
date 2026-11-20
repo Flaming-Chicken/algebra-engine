@@ -3845,3 +3845,108 @@ fn mixed_partial_derivatives_and_one_sided_limit_shorthand() {
     assert!(run("lim x->0- 1/x").ends_with("= -∞"));
     assert!(run("lim x->0+ abs(x)/x").ends_with("= 1"));
 }
+
+#[test]
+fn linear_ode_systems_satisfy_their_equations_and_initial_conditions() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    let mut state = 0x0DDB_A11C_AFE5_EED5u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i64
+    };
+    let names = ["x", "y", "z"];
+    let mut solved = 0;
+    for size in [2usize, 2, 2, 2, 2, 2, 3, 3, 3, 3] {
+        let a: Vec<Vec<i64>> = (0..size)
+            .map(|_| (0..size).map(|_| next(5) - 2).collect())
+            .collect();
+        let initial: Vec<i64> = (0..size).map(|_| next(7) - 3).collect();
+        let equations: Vec<String> = (0..size)
+            .map(|i| {
+                let rhs: Vec<String> = (0..size)
+                    .map(|j| format!("({})*{}", a[i][j], names[j]))
+                    .collect();
+                format!("{}' = {}", names[i], rhs.join(" + "))
+            })
+            .collect();
+        let conditions: Vec<String> = (0..size)
+            .map(|i| format!("{}(0) = {}", names[i], initial[i]))
+            .collect();
+        let result = UraeSession::new().execute_line(&format!(
+            "dsolve([{}], {})",
+            equations.join(", "),
+            conditions.join(", ")
+        ));
+        if result.is_error {
+            // An irreducible factor of degree 3 or more is reported, not guessed.
+            assert!(
+                result.output_text.contains("not supported")
+                    || result
+                        .error_msg
+                        .clone()
+                        .unwrap_or_default()
+                        .contains("not supported"),
+                "{equations:?}: {}",
+                result.output_text
+            );
+            continue;
+        }
+        solved += 1;
+        let parts: Vec<String> = result.output_text.split(", ").map(str::to_string).collect();
+        // Each part is "x(t) = expression"; commas inside an expression do not occur.
+        assert_eq!(parts.len(), size, "{}", result.output_text);
+        let functions: Vec<String> = parts
+            .iter()
+            .map(|p| p.split_once(" = ").unwrap().1.to_string())
+            .collect();
+        let at = |i: usize, t: f64| number(run(&format!("subs(({}), t, {t:?})", functions[i])));
+        for (i, value) in initial.iter().enumerate() {
+            assert!(
+                (at(i, 0.0) - *value as f64).abs() < 1e-9,
+                "{equations:?}: {}(0) = {} expected {value}",
+                names[i],
+                at(i, 0.0)
+            );
+        }
+        for t in [0.3f64, 0.8] {
+            let h = 1e-5;
+            for i in 0..size {
+                let derivative = (at(i, t + h) - at(i, t - h)) / (2.0 * h);
+                let right: f64 = (0..size).map(|j| a[i][j] as f64 * at(j, t)).sum();
+                assert!(
+                    (derivative - right).abs() < 1e-5 * (1.0 + right.abs()),
+                    "{equations:?} at t = {t}: {}' = {derivative}, A v = {right}",
+                    names[i]
+                );
+            }
+        }
+    }
+    assert!(solved >= 6, "only {solved} systems were solved");
+    // Known closed forms and refusals.
+    assert_eq!(
+        run("dsolve([x' = y, y' = -x], x(0) = 1, y(0) = 0)"),
+        "x(t) = cos(t), y(t) = -sin(t)"
+    );
+    assert_eq!(
+        run("dsolve([x' = x, y' = 2*y])"),
+        "x(t) = C1 · exp(t), y(t) = C2 · exp(2 · t)"
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("dsolve([x' = x + 1, y' = y])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("dsolve([x' = x*y, y' = y])")
+            .is_error
+    );
+}

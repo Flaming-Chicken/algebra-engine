@@ -94,6 +94,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         "inverse Laplace transforms (inverse_laplace, ilaplace)",
         crate::inverse_laplace::run,
     ),
+    (
+        "linear systems of ODEs (dsolve([x' = y, y' = -x]))",
+        crate::ode_system::run,
+    ),
 ];
 
 /// Centralized stateful execution engine session for URAE.

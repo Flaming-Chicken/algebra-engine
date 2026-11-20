@@ -374,6 +374,19 @@ impl UraeSession {
     /// Parse and execute a single line of input against this session, updating state.
     pub fn execute_line(&mut self, input: &str) -> OperationResult {
         let mut result = self.execute_line_inner(input);
+        // `2 x`, `a x^2 + b x + c`: a parse failure is retried with a space between two factors read as a product.
+        if result.is_error
+            && result
+                .error_msg
+                .as_deref()
+                .is_some_and(|m| m.contains("Parse failed"))
+            && let Some(starred) = implicit_product_spaces(input.trim())
+        {
+            let retry = self.execute_line_inner(&starred);
+            if !retry.is_error {
+                result = retry;
+            }
+        }
         if !result.is_error {
             self.append_float_for_decimal_input(input.trim(), &mut result);
         }
@@ -1436,4 +1449,119 @@ fn expand_fn_calls(input: &str, fn_name: &str, params: &[String], body: &str) ->
 
     result.push_str(&input[cursor..]);
     result
+}
+
+/// `input` with a `*` in place of each space that separates two factors (`a x^2 + b x` is `a*x^2 + b*x`), or `None`
+/// when there is no such space. English connecting words are never treated as factors.
+fn implicit_product_spaces(input: &str) -> Option<String> {
+    const WORDS: [&str; 22] = [
+        "to",
+        "in",
+        "as",
+        "of",
+        "and",
+        "or",
+        "mod",
+        "union",
+        "intersect",
+        "intersection",
+        "minus",
+        "subject",
+        "such",
+        "that",
+        "where",
+        "if",
+        "for",
+        "with",
+        "at",
+        "by",
+        "from",
+        "is",
+    ];
+    // A bare function name (`sin x cos x`) would be read as a symbol: leave such input alone.
+    const FUNCTIONS: [&str; 24] = [
+        "sin",
+        "cos",
+        "tan",
+        "sec",
+        "csc",
+        "cot",
+        "asin",
+        "acos",
+        "atan",
+        "sinh",
+        "cosh",
+        "tanh",
+        "ln",
+        "log",
+        "exp",
+        "sqrt",
+        "abs",
+        "floor",
+        "ceil",
+        "gamma",
+        "erf",
+        "det",
+        "inverse",
+        "transpose",
+    ];
+    let chars: Vec<char> = input.chars().collect();
+    let mut k = 0;
+    while k < chars.len() {
+        if chars[k].is_alphabetic() {
+            let end = chars[k..]
+                .iter()
+                .position(|c| !c.is_alphabetic())
+                .map_or(chars.len(), |p| k + p);
+            let word: String = chars[k..end].iter().collect();
+            let next = chars[end..].iter().find(|c| **c != ' ');
+            if FUNCTIONS.contains(&word.as_str()) && next != Some(&'(') {
+                return None;
+            }
+            k = end;
+        } else {
+            k += 1;
+        }
+    }
+    let word_before = |end: usize| -> String {
+        let start = chars[..end]
+            .iter()
+            .rposition(|c| !c.is_alphabetic())
+            .map_or(0, |p| p + 1);
+        chars[start..end].iter().collect()
+    };
+    let word_after = |start: usize| -> String {
+        chars[start..]
+            .iter()
+            .take_while(|c| c.is_alphabetic())
+            .collect()
+    };
+    let (mut out, mut i, mut changed) = (String::new(), 0usize, false);
+    while i < chars.len() {
+        if chars[i] == ' ' {
+            let mut j = i;
+            while j < chars.len() && chars[j] == ' ' {
+                j += 1;
+            }
+            if i > 0 && j < chars.len() {
+                let (p, n) = (chars[i - 1], chars[j]);
+                let left = p.is_alphanumeric() || p == ')';
+                let right = n.is_alphanumeric() || n == '(';
+                if left
+                    && right
+                    && !(p.is_ascii_digit() && n.is_ascii_digit())
+                    && !WORDS.contains(&word_before(i).to_ascii_lowercase().as_str())
+                    && !WORDS.contains(&word_after(j).to_ascii_lowercase().as_str())
+                {
+                    out.push('*');
+                    changed = true;
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    changed.then_some(out)
 }

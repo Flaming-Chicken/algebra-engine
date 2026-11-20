@@ -602,6 +602,7 @@ impl OperationExecutor {
                             let mut sol_strs = Vec::new();
                             let mut sol_latex = Vec::new();
                             for &sol in &filtered {
+                                let sol = crate::special_exact::roots_as_sqrt(graph, sol);
                                 sol_strs.push(unicode_fmt.format(graph, sol).unwrap_or_default());
                                 sol_latex.push(latex_fmt.format(graph, sol).unwrap_or_default());
                             }

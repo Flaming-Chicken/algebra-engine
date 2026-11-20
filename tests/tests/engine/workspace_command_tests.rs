@@ -2341,3 +2341,39 @@ fn quantities_in_sentences_sum_and_convert() {
     // Bracket literals are not JSON requests.
     assert_eq!(run("[[1,2],[3,4]] * [[5,6],[7,8]]"), "[ 19, 22 ; 43, 50 ]");
 }
+
+#[test]
+fn spaced_products_and_radical_solutions() {
+    // A space between two factors is a product: each spelling gives exactly what the starred form gives.
+    for (spaced, starred) in [
+        ("2 x", "2*x"),
+        ("a x + b", "a*x + b"),
+        ("x y", "x*y"),
+        ("a x^2 + b x + c", "a*x^2 + b*x + c"),
+        ("3 x + 2 x", "3*x + 2*x"),
+        ("(x + 1) (x - 1)", "(x + 1)*(x - 1)"),
+        ("2 (3 + 4)", "2*(3 + 4)"),
+        ("x sin(x)", "x*sin(x)"),
+        (
+            "solve(a x^2 + b x + c = 0, x)",
+            "solve(a*x^2 + b*x + c = 0, x)",
+        ),
+    ] {
+        assert_eq!(run(spaced), run(starred), "{spaced} vs {starred}");
+    }
+    // Not guessed: a bare function name or two plain numbers stay errors.
+    assert!(UraeSession::new().execute_line("sin x cos x").is_error);
+    assert!(UraeSession::new().execute_line("1 2").is_error);
+    // Square roots in solutions print as radicals.
+    for n in [2i64, 3, 5, 6, 7, 10] {
+        assert_eq!(
+            run(&format!("solve(x^2 = {n})")),
+            format!("Solutions for x: [√({n}), -√({n})]")
+        );
+    }
+    let general = run("solve(a*x^2 + b*x + c = 0, x)");
+    assert!(
+        general.contains('√') && !general.contains("^(1/2)"),
+        "{general}"
+    );
+}

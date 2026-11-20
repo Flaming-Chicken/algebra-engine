@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: percentages (`15% of 80`, `80 + 15%`, `200 - 10%`, `15%`), `0.75 as fraction`, and exact `round(x, n)` to n decimal places (ties away from zero, so `round(2.675, 2)` is `2.68`; negative n rounds to tens, hundreds, ...).
 - Added: finite graphs. `spanning_trees(K4)`, `chromatic_polynomial(C5)`, `chromatic_number`, `degree_sequence`, `is_connected`, `components`, `is_bipartite`, `is_tree`, `shortest_path(G, a, b)` and `diameter`, on named graphs (`K4`, `C5`, `P4`, `S4`) or edge lists (`[[1,2],[2,3]]`).
 - Added: degrees as input (`sin(30°)`, `cos(60 degrees)`, `45 deg`), `degrees`/`radians`/`rad2deg`/`deg2rad`, `celsius_to_fahrenheit` and the other temperature conversions. Fixed: a negated denominator in a solution (`-1 / (-(1/a + 1/b))`) now prints with the sign moved to the numerator.
 - Added: propositional-logic commands `truth_table(F)`, `tautology(F)`, `satisfiable(F)`, `contradiction(F)`, `equivalent(F, G)`, `count_models(F)`; set notation `|{1,2,3}|`, `cardinality({...})`, `{1,2} x {3,4}` and `cartesian_product(A, B)`.

@@ -2977,3 +2977,62 @@ fn graph_commands_match_closed_forms_and_brute_force() {
     assert_eq!(run("diameter(C8)"), "4");
     assert_eq!(run("diameter(P6)"), "5");
 }
+
+#[test]
+fn percentages_and_rounding_are_exact() {
+    let ratio = |text: &str| -> (i128, i128) {
+        match text.trim().split_once('/') {
+            Some((a, b)) => (a.parse().unwrap(), b.parse().unwrap()),
+            None => (text.trim().parse().unwrap(), 1),
+        }
+    };
+    let equal = |text: &str, n: i128, d: i128| {
+        let (a, b) = ratio(text);
+        assert_eq!(a * d, n * b, "{text} vs {n}/{d}");
+    };
+    // p% of m = p m / 100, m + p% = m (100 + p) / 100, m - p% = m (100 - p) / 100.
+    for p in [5i128, 15, 20, 33, 100, 150] {
+        for m in [80i128, 200, 7, 1250] {
+            equal(&run(&format!("{p}% of {m}")), p * m, 100);
+            equal(&run(&format!("what is {p}% of {m}")), p * m, 100);
+            equal(&run(&format!("{m} + {p}%")), m * (100 + p), 100);
+            equal(&run(&format!("{m} - {p}%")), m * (100 - p), 100);
+        }
+        equal(&run(&format!("{p}%")), p, 100);
+    }
+    assert_eq!(run("0.75 as fraction"), "3/4");
+    assert_eq!(run("17 % 5"), "2");
+    // round(x, n) against exact integer arithmetic: half away from zero at n decimals, x = a / 1000.
+    for a in [
+        -9999i128, -2675, -2500, -5, -1, 0, 1, 5, 14, 15, 2675, 3141, 9995,
+    ] {
+        for digits in 0..=3u32 {
+            let scale = 10i128.pow(3 - digits.min(3));
+            // a / 1000 rounded to `digits` decimals: round(a / scale) * scale / 1000.
+            let q = a.abs() / scale + if (a.abs() % scale) * 2 >= scale { 1 } else { 0 };
+            let rounded = q * a.signum();
+            let value = format!(
+                "{}{}.{:03}",
+                if a < 0 { "-" } else { "" },
+                a.abs() / 1000,
+                a.abs() % 1000
+            );
+            let out = run(&format!("round({value}, {digits})"));
+            let expected = rounded * scale; // in thousandths
+            let shown: i128 = {
+                let negative = out.starts_with('-');
+                let body = out.trim_start_matches('-');
+                let (whole, fraction) = body.split_once('.').unwrap_or((body, ""));
+                let padded = format!("{fraction:0<3}");
+                let thousandths =
+                    whole.parse::<i128>().unwrap() * 1000 + padded.parse::<i128>().unwrap();
+                if negative { -thousandths } else { thousandths }
+            };
+            assert_eq!(shown, expected, "round({value}, {digits}) = {out}");
+        }
+    }
+    assert_eq!(run("round(3.14159, 2)"), "3.14");
+    assert_eq!(run("round(2.675, 2)"), "2.68");
+    assert_eq!(run("round(1234, -2)"), "1200");
+    assert_eq!(run("round(7/3, 3)"), "2.333");
+}

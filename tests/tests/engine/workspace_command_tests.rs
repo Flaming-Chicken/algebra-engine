@@ -3254,3 +3254,124 @@ fn list_utilities_match_direct_computation() {
     assert_eq!(run("range([1, 2, 10])"), "range = 9");
     assert_eq!(run("mean(2, 4, 6)"), "mean = 4");
 }
+
+#[test]
+fn matrix_variables_keep_their_value_across_lines() {
+    // "[ 7, 10 ; 15, 22 ]" back to rows of exact (numerator, denominator) pairs.
+    fn rows(text: &str) -> Vec<Vec<(i128, i128)>> {
+        let inner = text.trim().trim_start_matches('[').trim_end_matches(']');
+        inner
+            .split(';')
+            .map(|row| {
+                row.split(',')
+                    .map(|cell| match cell.trim().split_once('/') {
+                        Some((a, b)) => (a.trim().parse().unwrap(), b.trim().parse().unwrap()),
+                        None => (cell.trim().parse().unwrap(), 1),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+    let mut state = 0x1234_5678_9ABC_DEF1u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % 9) as i128 - 4
+    };
+    for size in [2usize, 3] {
+        for _ in 0..6 {
+            let a: Vec<Vec<i128>> = (0..size)
+                .map(|_| (0..size).map(|_| next()).collect())
+                .collect();
+            let literal = format!(
+                "[{}]",
+                a.iter()
+                    .map(|r| format!(
+                        "[{}]",
+                        r.iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            let mut session = UraeSession::new();
+            let say = |s: &mut UraeSession, q: &str| -> String {
+                let r = s.execute_line(q);
+                assert!(!r.is_error, "{q}: {}", r.output_text);
+                r.output_text
+            };
+            say(&mut session, &format!("A = {literal}"));
+            // A * A against direct multiplication, stored as B and reused.
+            let square: Vec<Vec<i128>> = (0..size)
+                .map(|i| {
+                    (0..size)
+                        .map(|j| (0..size).map(|k| a[i][k] * a[k][j]).sum())
+                        .collect()
+                })
+                .collect();
+            let product = rows(&say(&mut session, "A*A"));
+            for i in 0..size {
+                for j in 0..size {
+                    assert_eq!(product[i][j], (square[i][j], 1), "A*A for {literal}");
+                }
+            }
+            say(&mut session, "B = A*A");
+            let sum = rows(&say(&mut session, "B + A"));
+            for i in 0..size {
+                for j in 0..size {
+                    assert_eq!(
+                        sum[i][j],
+                        (square[i][j] + a[i][j], 1),
+                        "B + A for {literal}"
+                    );
+                }
+            }
+            // Determinant against the cofactor expansion, and the inverse (when it exists) against A * A^-1 = I.
+            let det: i128 = if size == 2 {
+                a[0][0] * a[1][1] - a[0][1] * a[1][0]
+            } else {
+                a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+                    - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                    + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+            };
+            assert_eq!(
+                say(&mut session, "det(A)"),
+                det.to_string(),
+                "det of {literal}"
+            );
+            if det != 0 {
+                say(&mut session, "C = inverse(A)");
+                let identity = rows(&say(&mut session, "A*C"));
+                for i in 0..size {
+                    for j in 0..size {
+                        let (n, d) = identity[i][j];
+                        assert_eq!(
+                            n,
+                            if i == j { d } else { 0 },
+                            "A * inverse(A) for {literal}"
+                        );
+                    }
+                }
+            }
+            let transposed = rows(&say(&mut session, "transpose(A)"));
+            for i in 0..size {
+                for j in 0..size {
+                    assert_eq!(transposed[i][j], (a[j][i], 1));
+                }
+            }
+        }
+    }
+    // A matrix times a vector variable, and a name reused for a scalar.
+    let mut session = UraeSession::new();
+    session.execute_line("A = [[1,2],[3,4]]");
+    session.execute_line("v = [1,2]");
+    assert_eq!(session.execute_line("A*v").output_text, "[ 5 ; 11 ]");
+    assert_eq!(session.execute_line("A = 5").output_text, "A = 5");
+    assert_eq!(session.execute_line("A + 1").output_text, "6");
+    // A scalar variable named like nothing matrix-related is unaffected.
+    session.execute_line("x = 3");
+    assert_eq!(session.execute_line("x + 1").output_text, "4");
+}

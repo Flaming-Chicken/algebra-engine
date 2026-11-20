@@ -99,6 +99,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         crate::inverse_laplace::run,
     ),
     (
+        "inverse Z-transforms (inverse_ztransform)",
+        crate::inverse_laplace::run_z,
+    ),
+    (
         "linear systems of ODEs (dsolve([x' = y, y' = -x]))",
         crate::ode_system::run,
     ),

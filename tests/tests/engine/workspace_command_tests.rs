@@ -5974,3 +5974,104 @@ fn weighted_and_directed_graph_commands_match_brute_force() {
             .is_error
     );
 }
+
+#[test]
+fn inverse_z_transform_reproduces_the_series_of_x_of_z() {
+    // (numerator, denominator) as descending coefficients of z; the text form is built from them.
+    let cases: [(&[f64], &[f64]); 7] = [
+        (&[1.0, 0.0], &[1.0, -1.0]),
+        (&[1.0, 0.0], &[1.0, -3.0, 2.0]),
+        (&[1.0, 0.0, 0.0], &[1.0, -1.0 / 6.0, -1.0 / 6.0]),
+        (&[1.0, 0.0], &[1.0, -4.0, 4.0]),
+        (&[1.0, 0.0, 0.0], &[1.0, -3.0, 3.0, -1.0]),
+        (&[1.0, 1.0], &[1.0, -1.0, -6.0]),
+        (&[2.0, 1.0, 5.0], &[1.0, 0.0, -4.0]),
+    ];
+    let poly = |c: &[f64]| -> String {
+        let d = c.len() - 1;
+        c.iter()
+            .enumerate()
+            .map(|(i, v)| format!("({v:?})*z^{}", d - i))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    for (num, den) in cases {
+        // Exact decimals are needed for the engine: 1/6 is not, so scale the denominator to integers.
+        let scale = if den
+            .iter()
+            .any(|v| (v * 6.0 - (v * 6.0).round()).abs() < 1e-12 && (v - v.round()).abs() > 1e-12)
+        {
+            6.0
+        } else {
+            1.0
+        };
+        let (n_text, d_text) = (
+            poly(&num.iter().map(|v| v * scale).collect::<Vec<_>>()),
+            poly(&den.iter().map(|v| v * scale).collect::<Vec<_>>()),
+        );
+        let out = run(&format!("inverse_ztransform(({n_text})/({d_text}), z, k)"));
+        let closed = out.split("] = ").nth(1).unwrap().to_string();
+        // Split off the impulse terms "(c) delta[k-m]".
+        let (body, impulses): (String, Vec<(f64, i64)>) =
+            match closed.find(" delta[").or_else(|| closed.find("delta[")) {
+                Some(at) => {
+                    let start = closed[..at].rfind('(').unwrap();
+                    let mut list = Vec::new();
+                    for piece in closed[start..].split(" + ") {
+                        let (c, rest) = piece.split_once(") delta[k").unwrap();
+                        let c = c.trim_start_matches('(');
+                        let c: f64 = match c.split_once('/') {
+                            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                            None => c.parse().unwrap(),
+                        };
+                        let m: i64 = rest
+                            .trim_end_matches(']')
+                            .trim_start_matches('-')
+                            .parse()
+                            .unwrap_or(0);
+                        list.push((c, m));
+                    }
+                    (closed[..start].trim_end_matches(" + ").to_string(), list)
+                }
+                None => (closed.clone(), Vec::new()),
+            };
+        // Long division in 1/z.
+        let width = den.len();
+        let mut b = [0.0; 12];
+        for (i, v) in num.iter().enumerate() {
+            b[i + width - num.len()] = *v;
+        }
+        let mut x = [0.0f64; 10];
+        for n in 0..10 {
+            let mut acc = b[n];
+            for i in 1..width.min(n + 1) {
+                acc -= den[i] * x[n - i];
+            }
+            x[n] = acc / den[0];
+        }
+        for (n, expected) in x.iter().enumerate() {
+            let mut value = if body.trim().is_empty() || body == "0" && false {
+                0.0
+            } else {
+                run(&format!("evalf({})", body.replace('k', &format!("({n})"))))
+                    .trim()
+                    .parse()
+                    .unwrap_or_else(|_| panic!("{body}"))
+            };
+            for (c, m) in &impulses {
+                if *m == n as i64 {
+                    value += c;
+                }
+            }
+            assert!(
+                (value - expected).abs() < 1e-6 * (1.0 + expected.abs()),
+                "X = ({n_text})/({d_text}), n = {n}: {value} vs {expected}: {out}"
+            );
+        }
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("inverse_ztransform(z/(z^2+1), z, n)")
+            .is_error
+    );
+}

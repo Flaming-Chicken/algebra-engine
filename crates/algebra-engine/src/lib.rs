@@ -13,6 +13,7 @@ pub mod analysis;
 pub mod api;
 pub mod autodiff;
 pub mod bigfloat;
+pub mod binomial_roots;
 pub mod branch;
 pub mod cad;
 pub mod calculus;

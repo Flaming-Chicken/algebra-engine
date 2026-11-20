@@ -3036,3 +3036,87 @@ fn percentages_and_rounding_are_exact() {
     assert_eq!(run("round(1234, -2)"), "1200");
     assert_eq!(run("round(7/3, 3)"), "2.333");
 }
+
+#[test]
+fn binomial_equations_have_exact_roots_that_satisfy_them() {
+    // "a + bi", "bi" or "a" back to (re, im).
+    fn complex(text: &str) -> (f64, f64) {
+        let t = text.trim();
+        if let Some(body) = t.strip_suffix('i') {
+            if let Some(at) = body.rfind(" + ").or_else(|| body.rfind(" - ")) {
+                let re: f64 = body[..at].trim().parse().unwrap();
+                let im: f64 = body[at + 3..].trim().parse().unwrap();
+                return (re, if &body[at..at + 3] == " - " { -im } else { im });
+            }
+            return (0.0, body.trim().parse().unwrap());
+        }
+        (t.parse().unwrap(), 0.0)
+    }
+    // Top-level comma split of "Solutions for x: [a, b, c]".
+    fn roots_of(text: &str) -> Vec<String> {
+        let inner = &text[text.find('[').unwrap() + 1..text.rfind(']').unwrap()];
+        let (mut depth, mut current, mut out) = (0i32, String::new(), Vec::new());
+        for c in inner.chars() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            if c == ',' && depth == 0 {
+                out.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        out.push(current);
+        out.into_iter().map(|s| s.trim().to_string()).collect()
+    }
+    let cases: [(&str, u32, f64); 11] = [
+        ("x^8 = 1", 8, 1.0),
+        ("x^6 = 1", 6, 1.0),
+        ("x^4 = -1", 4, -1.0),
+        ("x^3 = 8", 3, 8.0),
+        ("x^4 = 16", 4, 16.0),
+        ("x^6 = 64", 6, 64.0),
+        ("x^4 + 4 = 0", 4, -4.0),
+        ("x^3 - 2 = 0", 3, 2.0),
+        ("2*x^4 = 32", 4, 16.0),
+        ("x^12 = 1", 12, 1.0),
+        ("x^24 = 1", 24, 1.0),
+    ];
+    for (equation, n, c) in cases {
+        let out = run(&format!("solve({equation})"));
+        let roots = roots_of(&out);
+        assert_eq!(roots.len(), n as usize, "{equation}: {out}");
+        let mut values: Vec<(f64, f64)> = Vec::new();
+        for root in &roots {
+            // The root numerically, then its n-th power against c.
+            let z = complex(&run(&format!("evalf({root})")));
+            let (mut re, mut im) = (1.0f64, 0.0f64);
+            for _ in 0..n {
+                (re, im) = (re * z.0 - im * z.1, re * z.1 + im * z.0);
+            }
+            assert!(
+                (re - c).abs() < 1e-9 && im.abs() < 1e-9,
+                "{equation}: ({root})^{n} = {re} + {im}i, expected {c}"
+            );
+            values.push(z);
+        }
+        // The roots are distinct.
+        for i in 0..values.len() {
+            for j in i + 1..values.len() {
+                let d = ((values[i].0 - values[j].0).powi(2) + (values[i].1 - values[j].1).powi(2))
+                    .sqrt();
+                assert!(d > 1e-6, "{equation}: repeated root {:?}", values[i]);
+            }
+        }
+        assert!(!out.contains("RootOf") && !out.contains("^(1/2)"), "{out}");
+    }
+    // `roots` agrees, exact values keep their closed form, and other degrees keep the general solver.
+    assert_eq!(run("roots(x^4 - 16)"), run("solve(x^4 = 16)"));
+    assert_eq!(
+        run("solve(x^4 = 16)"),
+        "Solutions for x: [2, 2 · i, -2, -2 · i]"
+    );
+    assert!(run("solve(x^5 = 1)").starts_with("Solutions for x: [1,"));
+}

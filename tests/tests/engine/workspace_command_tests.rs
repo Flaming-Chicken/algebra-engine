@@ -4121,3 +4121,109 @@ fn forced_linear_systems_satisfy_their_equations() {
             .is_error
     );
 }
+
+#[test]
+fn homogeneous_and_exact_first_order_equations_satisfy_themselves() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    // y' = F(x, y) as a closure, for the checks.
+    type Rhs = fn(f64, f64) -> f64;
+    // Homogeneous equations y' = F(y/x): the solution is explicit or an implicit relation psi(x, y) = ln x + C1.
+    let homogeneous: [(&str, Rhs); 4] = [
+        ("(x^2+y^2)/(x*y)", |x, y| (x * x + y * y) / (x * y)),
+        ("(y-x)/(y+x)", |x, y| (y - x) / (y + x)),
+        ("(x+y)/(x-y)", |x, y| (x + y) / (x - y)),
+        ("(x+y)/x", |x, y| (x + y) / x),
+    ];
+    for (rhs, f) in homogeneous {
+        let out = run(&format!("dsolve(y' = {rhs})"));
+        assert!(
+            !out.starts_with("Differential Equation Analysis"),
+            "{rhs}: {out}"
+        );
+        if let Some((relation, _)) = out.split_once("  (implicit") {
+            // psi(x, y) = ln x + C1: along a solution d(psi - ln x) = 0, so psi_x - 1/x + psi_y F = 0.
+            let psi = relation.split_once(" = ln(x) + C1").unwrap().0.to_string();
+            let at = |x: f64, y: f64| number(run(&format!("subs(({psi}), x = {x:?}, y = {y:?})")));
+            for (x, y) in [(1.5f64, 0.7f64), (2.3, -0.4), (0.8, 1.9)] {
+                let h = 1e-5;
+                let psi_x = (at(x + h, y) - at(x - h, y)) / (2.0 * h);
+                let psi_y = (at(x, y + h) - at(x, y - h)) / (2.0 * h);
+                let residual = psi_x - 1.0 / x + psi_y * f(x, y);
+                assert!(
+                    residual.abs() < 1e-5 * (1.0 + psi_y.abs() * f(x, y).abs()),
+                    "{rhs}: residual {residual} at ({x}, {y})\n{out}"
+                );
+            }
+        } else {
+            // y(x) = expression [or ...]: every branch differentiates to F(x, y(x)).
+            for branch in out.split("  or  ") {
+                let expression = branch.split_once(" = ").unwrap().1.to_string();
+                let y_at =
+                    |x: f64| number(run(&format!("subs(({expression}), x = {x:?}, C1 = 0.5)")));
+                for x in [1.6f64, 2.4, 3.1] {
+                    let h = 1e-5;
+                    let derivative = (y_at(x + h) - y_at(x - h)) / (2.0 * h);
+                    let expected = f(x, y_at(x));
+                    assert!(
+                        (derivative - expected).abs() < 1e-5 * (1.0 + expected.abs()),
+                        "{rhs}: y' = {derivative}, F = {expected} at {x}\n{out}"
+                    );
+                }
+            }
+        }
+    }
+    // Exact equations M + N y' = 0 give psi(x, y) = C1 with psi_x = M and psi_y = N.
+    type Pair = (&'static str, Rhs, Rhs);
+    let exact: [Pair; 4] = [
+        (
+            "(2*x*y + 1) + (x^2 + 2*y)*y' = 0",
+            |x, y| 2.0 * x * y + 1.0,
+            |x, y| x * x + 2.0 * y,
+        ),
+        (
+            "(3*x^2 + y) + (x + 2*y)*y' = 0",
+            |x, y| 3.0 * x * x + y,
+            |x, y| x + 2.0 * y,
+        ),
+        ("y'*y = x", |x, _| -x, |_, y| y),
+        (
+            "(y*cos(x) + 2*x) + (sin(x) + 3*y^2)*y' = 0",
+            |x, y| y * x.cos() + 2.0 * x,
+            |x, y| x.sin() + 3.0 * y * y,
+        ),
+    ];
+    for (equation, m, n) in exact {
+        let out = run(&format!("dsolve({equation})"));
+        assert!(
+            out.ends_with("(implicit solution of the exact equation)"),
+            "{equation}: {out}"
+        );
+        let psi = out.split_once(" = C1").unwrap().0.to_string();
+        let at = |x: f64, y: f64| number(run(&format!("subs(({psi}), x = {x:?}, y = {y:?})")));
+        for (x, y) in [(0.6f64, 0.9f64), (1.3, -0.5), (2.1, 1.4)] {
+            let h = 1e-5;
+            let psi_x = (at(x + h, y) - at(x - h, y)) / (2.0 * h);
+            let psi_y = (at(x, y + h) - at(x, y - h)) / (2.0 * h);
+            // psi is determined up to a constant and a common factor of 1 here: psi_x = M, psi_y = N.
+            assert!(
+                (psi_x - m(x, y)).abs() < 1e-5 * (1.0 + m(x, y).abs()),
+                "{equation}: psi_x = {psi_x}, M = {}",
+                m(x, y)
+            );
+            assert!(
+                (psi_y - n(x, y)).abs() < 1e-5 * (1.0 + n(x, y).abs()),
+                "{equation}: psi_y = {psi_y}, N = {}",
+                n(x, y)
+            );
+        }
+    }
+    // Equations the standard solver answers keep its answer.
+    assert_eq!(run("dsolve(y' = y)"), "y(x) = C1 · exp(x)");
+    assert_eq!(run("dsolve(y' = y/x + 1)"), "y(x) = x · (ln(x) + C1)");
+}

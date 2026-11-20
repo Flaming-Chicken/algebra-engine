@@ -2223,3 +2223,36 @@ fn substitution_spellings_replace_whole_words_simultaneously() {
         assert_eq!(run(&format!("subs(x^3 - 2*x + 5, x, {a})")), direct);
     }
 }
+
+#[test]
+fn decimal_input_gets_a_floating_point_value() {
+    let tail = |q: &str| -> f64 {
+        let out = run(q);
+        out.rsplit(" ≈ ")
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{q}: {out}"))
+    };
+    // The appended value agrees with the standard library.
+    for (q, v) in [
+        ("sin(0.5)", 0.5f64.sin()),
+        ("exp(1.5)", 1.5f64.exp()),
+        ("sqrt(2.5)", 2.5f64.sqrt()),
+        ("ln(2.0)", 2.0f64.ln()),
+        ("cos(0.25) + sin(0.25)", 0.25f64.cos() + 0.25f64.sin()),
+        ("atan(0.3)", 0.3f64.atan()),
+    ] {
+        assert!((tail(q) - v).abs() < 1e-12, "{q}");
+    }
+    // Normal cdf at 1.96 is the published 0.9750021048517795 (to 15 digits).
+    assert!((tail("normal_cdf(1.96)") - 0.975_002_104_851_779_5).abs() < 1e-12);
+    // Exact answers stay exact: a plain rational gets no tail, and integer inputs get none either.
+    assert_eq!(run("1.5 + 2"), "7/2");
+    assert_eq!(run("0.1 + 0.2"), "3/10");
+    assert_eq!(run("sin(0)"), "0");
+    assert!(!run("sin(1/2)").contains('≈'));
+    // Symbols are left alone.
+    assert!(!run("2.5*x").contains('≈'));
+}

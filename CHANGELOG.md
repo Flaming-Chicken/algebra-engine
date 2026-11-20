@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: a constant typed with a decimal (`sin(0.5)`, `ln(2.0)`, `normal_cdf(1.96)`) now also prints its floating-point value after the exact form (`sin(1/2) ≈ 0.479425538604203`).
 - Added: `fit`, `polyfit` and `linear_regression` take two lists (`fit([1,2,3],[2,4,6])`); `lcm` of polynomials; `subs`, `substitute`, `replace`, `evaluate` and `eval` substitution (`subs(x^2 + y, x = 2, y = 3)`).
 - Added: `nCr`, `nPr`, `prime_pi`, `tribonacci`, `compositions(n)` and `compositions(n, k)`; discrete function names are case-insensitive. They were echoed back unevaluated.
 - Added: constrained extrema by Lagrange multipliers (`maximize x*y subject to x + y = 10`, `minimize x^2 + y^2 subject to 3*x + 4*y = 10`), classified as local maximum or minimum; `extrema` and `critical_points` now work when the derivative cannot be factored exactly (`x^2*exp(-x)`).

@@ -5601,3 +5601,91 @@ fn multiple_regression_reduces_to_simple_regression_and_satisfies_the_normal_equ
             .is_error
     );
 }
+
+#[test]
+fn clairaut_equations_give_the_family_of_lines_and_a_valid_singular_envelope() {
+    let number = |expr: &str, name: &str, value: f64| -> f64 {
+        run(&format!(
+            "evalf({})",
+            expr.replace(name, &format!("({value:?})"))
+        ))
+        .trim()
+        .parse()
+        .unwrap_or_else(|_| panic!("{expr}"))
+    };
+    type Residual = fn(f64, f64, f64) -> f64;
+    let cases: [(&str, Residual, f64); 6] = [
+        ("y = x*y' + (y')^2", |x, y, p| y - x * p - p * p, 0.7),
+        ("y = x*y' + 1/y'", |x, y, p| y - x * p - 1.0 / p, 0.8),
+        ("y = x*y' + sin(y')", |x, y, p| y - x * p - p.sin(), 0.6),
+        (
+            "2*y = 2*x*y' + (y')^3",
+            |x, y, p| 2.0 * y - 2.0 * x * p - p.powi(3),
+            0.9,
+        ),
+        ("y = x*y' - ln(y')", |x, y, p| y - x * p + p.ln(), 1.3),
+        ("y = x*y' + exp(y')", |x, y, p| y - x * p - p.exp(), 0.4),
+    ];
+    for (equation, residual, parameter) in cases {
+        let out = run(&format!("dsolve({equation})"));
+        let general = out
+            .split("y = C1*x + (")
+            .nth(1)
+            .unwrap()
+            .split(")  (")
+            .next()
+            .unwrap()
+            .to_string();
+        let singular_x = out
+            .split("singular solution x = ")
+            .nth(1)
+            .unwrap()
+            .split(", y = ")
+            .next()
+            .unwrap()
+            .to_string();
+        let singular_y = out
+            .split(", y = ")
+            .last()
+            .unwrap()
+            .split(", parameter")
+            .next()
+            .unwrap()
+            .to_string();
+        // Each line y = C x + f(C) solves the equation (y' = C).
+        for (c, x) in [
+            (parameter, 0.5),
+            (parameter + 0.3, -1.1),
+            (parameter * 1.5, 2.0),
+        ] {
+            let y = c * x + number(&general, "C1", c);
+            assert!(
+                residual(x, y, c).abs() < 1e-9,
+                "{equation}: line with C = {c}: {out}"
+            );
+        }
+        // The envelope is a solution: on it dy/dx = p, i.e. dy/dp = p dx/dp, and it satisfies the equation.
+        let h = 1e-5;
+        let dx = (number(&singular_x, "dydx", parameter + h)
+            - number(&singular_x, "dydx", parameter - h))
+            / (2.0 * h);
+        let dy = (number(&singular_y, "dydx", parameter + h)
+            - number(&singular_y, "dydx", parameter - h))
+            / (2.0 * h);
+        assert!(
+            (dy - parameter * dx).abs() < 1e-6,
+            "{equation}: dy = {dy}, p dx = {}: {out}",
+            parameter * dx
+        );
+        let (x, y) = (
+            number(&singular_x, "dydx", parameter),
+            number(&singular_y, "dydx", parameter),
+        );
+        assert!(
+            residual(x, y, parameter).abs() < 1e-9,
+            "{equation}: envelope point: {out}"
+        );
+    }
+    // Not Clairaut: the coefficient of x differs from y'.
+    assert!(!run("dsolve(y = 2*x*y' + (y')^2)").contains("Clairaut"));
+}

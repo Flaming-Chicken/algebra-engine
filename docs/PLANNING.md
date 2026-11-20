@@ -86,7 +86,7 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R77` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R90` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
@@ -98,21 +98,28 @@ spellings a new user types first. The open list, by field:
   quantiles, `poisson_cdf` in closed form, svd factors `U` and `V` (singular values exist).
 - **Numbers and algebra.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `4^(1/4)` to `sqrt(2)`, symbolic roots
   (`sqrt(x^2*y)`), `exp(x)/exp(y)`, `oo * 0`, `lcm` and `gcd` of multivariate polynomials, `acos(1/sqrt 2)` as a
-  plain expression, binomial roots for n = 5, 7, 9, 10, Galois groups of degree 5 and up, `groebner`, `jordan`, a
-  simplified `qr`.
+  plain expression, binomial roots for n = 5, 7, 9, 10, Galois groups of degree 5 and up, `groebner`, `jordan`, `schur`,
+  `hessenberg`, `sqrtm`, a simplified `qr`. Done (`R82`): pseudoinverse, least squares, Gram-Schmidt, adjugate, `expm`,
+  `cond` and the matrix predicates on rational matrices.
 - **Solving.** General solutions of trigonometric equations (`+ 2 pi k`), numerical values beside a `RootOf`,
   inequalities with a nonlinear objective (KKT), integer and quadratic programs, `extrema` of several variables.
 - **ODEs, transforms and recurrences.** Done: first-order separable, linear, Bernoulli, homogeneous, exact and
   integrating-factor equations; constant-coefficient and Euler second-order equations; homogeneous and forced linear
-  systems by the inverse Laplace transform. Missing: Riccati and Clairaut equations, other integrating factors, an
+  systems by the inverse Laplace transform; Clairaut equations (lines and singular envelope). Missing: Riccati and
+  d'Alembert equations, other integrating factors, an
   explicit `tan` for `atan(y) = ...`, nonlinear systems, time-varying coefficients, forcing with a non-rational transform,
-  irreducible cubic factors in the inverse Laplace transform, the inverse Fourier and Z transforms, Z-transform of
+  irreducible cubic factors in the inverse Laplace transform, the inverse Fourier transform, complex poles and left-sided sequences in the inverse Z transform (real poles are done), Z-transform of
   `sin`/`cos`, boundary value problems, systems for `rk4`, adaptive steps, variable-coefficient and nonlinear
   recurrences, exact `fft`.
-- **Statistics, probability and finance.** `t_test`, `confidence_interval`, `geometric_cdf`, sentence forms such as
+- **Statistics, probability and finance.** Done: the inference commands (`t_test`, `chi2_test`, `anova`, `fisher_exact`,
+  correlation, `kendall`, `mann_whitney`, `wilcoxon`, `kruskal`), `regress`, `mregress`, `logit` and `predict`. Missing:
+  likelihood-ratio tests, Poisson and other generalised linear models, weighted regression, residual diagnostics,
+  `geometric_cdf`, sentence forms such as
   `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables; amortisation with extra payments,
   `xirr` with dates, bond pricing.
-- **Discrete, logic and sets.** Directed and weighted graphs, planarity, isomorphism, matchings and flows, `pascal_row`,
+- **Discrete, logic and sets.** Done: weighted and directed graphs (shortest paths, spanning trees, flows,
+  components, topological order), Euler and Hamilton paths, maximum matching. Missing: weighted matching, planarity,
+  isomorphism, `pascal_row`,
   `partitions_list`, normal forms and simplification of formulas, quantifiers, `~a` and `base_convert` in arbitrary
   bases, `multiset_permutations`.
 - **Input forms.** Quantified formulas, LaTeX tables, `align` and `\text{}` in formulas, English with several clauses

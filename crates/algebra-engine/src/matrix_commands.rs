@@ -336,6 +336,9 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "matrix_exp",
         "expm",
         "eig",
+        "mregress",
+        "multiple_regression",
+        "ols",
     ];
     if !known.contains(&name.as_str()) {
         return None;
@@ -354,6 +357,7 @@ fn evaluate(
     let (rows, cols) = (a.len(), a[0].len());
     let square = rows == cols;
     match name {
+        "mregress" | "multiple_regression" | "ols" => multiple_regression(session, a, args),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -557,4 +561,91 @@ fn evaluate(
             session.eval(&format!("eigenvectors({})", literal(a)))
         }
     }
+}
+
+/// `mregress(X, y)`: ordinary least squares with an intercept; the rows of `X` are observations, its columns the predictors.
+fn multiple_regression(
+    session: &mut UraeSession,
+    x: &Matrix,
+    args: &[String],
+) -> Result<String, String> {
+    let y = parse(session, args.get(1).ok_or("mregress(X, y)")?)
+        .ok_or("y must be a list of numbers")?;
+    let (n, k) = (x.len(), x[0].len());
+    if y.len() != n || y[0].len() != 1 {
+        return Err("y needs one value per row of X".into());
+    }
+    if n < k + 2 {
+        return Err(format!("need more than {} observations", k + 1));
+    }
+    let design: Matrix = x
+        .iter()
+        .map(|row| {
+            std::iter::once(Q::from_integer(1.into()))
+                .chain(row.iter().cloned())
+                .collect()
+        })
+        .collect();
+    let dt = transpose(&design);
+    let gram = multiply(&dt, &design).ok_or("shape mismatch")?;
+    let inv = inverse(&gram).ok_or("the predictors are linearly dependent")?;
+    let beta =
+        multiply(&inv, &multiply(&dt, &y).ok_or("shape mismatch")?).ok_or("shape mismatch")?;
+    let fitted = multiply(&design, &beta).ok_or("shape mismatch")?;
+    let f = |q: &Q| q.to_f64().unwrap_or(f64::NAN);
+    let mean_y = y.iter().map(|r| f(&r[0])).sum::<f64>() / n as f64;
+    let sse: Q = (0..n).fold(Q::from_integer(0.into()), |acc, i| {
+        let e = &y[i][0] - &fitted[i][0];
+        acc + &e * &e
+    });
+    let sst: f64 = y.iter().map(|r| (f(&r[0]) - mean_y).powi(2)).sum();
+    let df = (n - k - 1) as f64;
+    let sigma2 = f(&sse) / df;
+    let num = |v: f64| {
+        let t = format!("{v:.6}");
+        t.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    let names: Vec<String> = std::iter::once("intercept".to_string())
+        .chain((1..=k).map(|i| format!("x{i}")))
+        .collect();
+    let parts: Vec<String> = (0..=k)
+        .map(|i| {
+            let se = (sigma2 * f(&inv[i][i])).sqrt();
+            if se == 0.0 {
+                return format!("{} = {} (exact fit)", names[i], show_q(&beta[i][0]));
+            }
+            let t = f(&beta[i][0]) / se;
+            let upper = crate::distributions_f64::eval("t_cdf", &[t.abs(), df]).unwrap_or(f64::NAN);
+            format!(
+                "{} = {} (se {}, t = {}, p = {})",
+                names[i],
+                show_q(&beta[i][0]),
+                num(se),
+                num(t),
+                num((2.0 * (1.0 - upper)).clamp(0.0, 1.0))
+            )
+        })
+        .collect();
+    let r2 = if sst == 0.0 { 1.0 } else { 1.0 - f(&sse) / sst };
+    let adjusted = 1.0 - (1.0 - r2) * (n as f64 - 1.0) / df;
+    let fstat = if f(&sse) == 0.0 {
+        f64::INFINITY
+    } else {
+        (sst - f(&sse)) / k as f64 / sigma2
+    };
+    let fp = if fstat.is_finite() {
+        1.0 - crate::distributions_f64::eval("f_cdf", &[fstat, k as f64, df]).unwrap_or(f64::NAN)
+    } else {
+        0.0
+    };
+    Ok(format!(
+        "{}; R^2 = {}, adjusted R^2 = {}, F = {} on ({}, {}) df, p = {}",
+        parts.join("; "),
+        num(r2),
+        num(adjusted),
+        num(fstat),
+        k,
+        df,
+        num(fp.clamp(0.0, 1.0))
+    ))
 }

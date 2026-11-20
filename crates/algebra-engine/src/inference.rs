@@ -129,6 +129,9 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "correlation_test" | "pearson_test" | "pearson" => "pearson",
         "spearman" | "spearman_test" | "spearmanr" => "spearman",
         "mann_whitney" | "mannwhitney" | "mann_whitney_u" | "wilcoxon_rank_sum" => "mann_whitney",
+        "regression_test" | "regress" | "linregress" | "regression_inference" => "regress",
+        "wilcoxon" | "wilcoxon_signed_rank" | "wilcoxon_test" => "wilcoxon",
+        "kruskal" | "kruskal_wallis" | "kruskal_wallis_test" => "kruskal",
         _ => return None,
     };
     let mut args = split_top(&t[open + 1..t.len() - 1]);
@@ -143,6 +146,9 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             return Some(correlation(session, &args, command == "spearman", alt));
         }
         "mann_whitney" => return Some(mann_whitney(session, &args)),
+        "regress" => return Some(regress(session, &args)),
+        "wilcoxon" => return Some(wilcoxon(session, &args)),
+        "kruskal" => return Some(kruskal(session, &args)),
         _ => {}
     }
     let first = list(session, args.first()?)?;
@@ -680,5 +686,198 @@ fn mann_whitney(session: &mut UraeSession, args: &[String]) -> Result<String, St
         show(&u),
         number(z),
         number(normal_p(z, Alternative::Two))
+    ))
+}
+
+/// `regress(x, y)`: the least-squares line with its inference (standard errors, t statistics, p-values, R^2 and 95% intervals).
+fn regress(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let x = list(session, args.first().ok_or("regress(x, y)")?).ok_or("x must be a list")?;
+    let y = list(session, args.get(1).ok_or("regress(x, y)")?).ok_or("y must be a list")?;
+    if x.len() != y.len() || x.len() < 3 {
+        return Err("x and y need the same length, at least 3".into());
+    }
+    let n = Q::from_integer(BigInt::from(x.len()));
+    let (mean_x, mean_y) = (
+        x.iter().fold(Q::zero(), |s, v| s + v) / &n,
+        y.iter().fold(Q::zero(), |s, v| s + v) / &n,
+    );
+    let sxx = x
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_x) * (v - &mean_x));
+    let syy = y
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_y) * (v - &mean_y));
+    let sxy = x
+        .iter()
+        .zip(&y)
+        .fold(Q::zero(), |s, (a, b)| s + (a - &mean_x) * (b - &mean_y));
+    if sxx.is_zero() {
+        return Err("x is constant: the slope is undefined".into());
+    }
+    let slope = &sxy / &sxx;
+    let intercept = &mean_y - &slope * &mean_x;
+    let sse = &syy - &slope * &sxy;
+    let df = x.len() as f64 - 2.0;
+    let variance = &sse / (n.clone() - Q::from_integer(BigInt::from(2)));
+    let se_slope = (float(&variance) / float(&sxx)).sqrt();
+    let se_intercept =
+        (float(&variance) * (1.0 / float(&n) + float(&(&mean_x * &mean_x / &sxx)))).sqrt();
+    let r_squared = if syy.is_zero() {
+        Q::from_integer(BigInt::from(1))
+    } else {
+        &sxy * &sxy / (&sxx * &syy)
+    };
+    let critical = distribution("t_quantile", &[0.975, df]).ok_or("t quantile failed")?;
+    let describe = |name: &str, estimate: &Q, se: f64| -> String {
+        let value = float(estimate);
+        if se == 0.0 {
+            return format!("{name} = {} (exact fit)", show(estimate));
+        }
+        let t = value / se;
+        format!(
+            "{name} = {} (se {}, t = {}, p = {}, 95% CI ({}, {}))",
+            show(estimate),
+            number(se),
+            number(t),
+            number(p_of_t(t, df, Alternative::Two)),
+            number(value - critical * se),
+            number(value + critical * se)
+        )
+    };
+    Ok(format!(
+        "{}; {}; R^2 = {}, residual standard error {} on {} df",
+        describe("slope", &slope, se_slope),
+        describe("intercept", &intercept, se_intercept),
+        show(&r_squared),
+        number(float(&variance).sqrt()),
+        df
+    ))
+}
+
+/// `wilcoxon(a[, b])`: the signed-rank test of the differences (zeros dropped), exact over all sign assignments up to 30 pairs.
+fn wilcoxon(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let first = list(
+        session,
+        args.first()
+            .ok_or("wilcoxon(differences) or wilcoxon(a, b)")?,
+    )
+    .ok_or("the data must be a list")?;
+    let differences: Vec<Q> = match args.get(1) {
+        Some(second) => {
+            let other = list(session, second).ok_or("the second argument must be a list")?;
+            if other.len() != first.len() {
+                return Err("the two samples must have the same length".into());
+            }
+            first.iter().zip(&other).map(|(a, b)| a - b).collect()
+        }
+        None => first,
+    };
+    let nonzero: Vec<Q> = differences.into_iter().filter(|d| !d.is_zero()).collect();
+    if nonzero.is_empty() {
+        return Err("all the differences are zero".into());
+    }
+    let n = nonzero.len();
+    let absolute: Vec<Q> = nonzero.iter().map(|d| d.abs()).collect();
+    let ranks = average_ranks(&absolute);
+    let two = Q::from_integer(BigInt::from(2));
+    let doubled: Vec<usize> = ranks
+        .iter()
+        .map(|r| (r * &two).to_integer().to_usize().unwrap_or(0))
+        .collect();
+    let w_plus2: usize = nonzero
+        .iter()
+        .zip(&doubled)
+        .filter(|(d, _)| d.is_positive())
+        .map(|(_, r)| *r)
+        .sum();
+    let total2: usize = doubled.iter().sum();
+    let w_plus = Q::new(BigInt::from(w_plus2), BigInt::from(2));
+    if n > 30 {
+        let nf = n as f64;
+        let mean = nf * (nf + 1.0) / 4.0;
+        let sigma = (nf * (nf + 1.0) * (2.0 * nf + 1.0) / 24.0).sqrt();
+        let z = (float(&w_plus) - mean - 0.5 * (float(&w_plus) - mean).signum()) / sigma;
+        return Ok(format!(
+            "W+ = {}, n = {}, z = {}, p = {} (two-sided, normal approximation)",
+            show(&w_plus),
+            n,
+            number(z),
+            number(normal_p(z, Alternative::Two))
+        ));
+    }
+    // count[s]: the number of sign assignments whose positive ranks sum (doubled) to s.
+    let mut count = vec![BigInt::zero(); total2 + 1];
+    count[0] = BigInt::from(1);
+    for &v in &doubled {
+        for s in (0..=total2 - v).rev() {
+            if !count[s].is_zero() {
+                let add = count[s].clone();
+                count[s + v] += add;
+            }
+        }
+    }
+    let distance = |s: usize| -> i64 { (2 * s as i64 - total2 as i64).abs() };
+    let observed = distance(w_plus2);
+    let mut extreme = BigInt::zero();
+    for (s, c) in count.iter().enumerate() {
+        if distance(s) >= observed {
+            extreme += c;
+        }
+    }
+    let p = Q::new(extreme, BigInt::from(1) << n);
+    Ok(format!(
+        "W+ = {}, n = {}, p = {} = {} (two-sided, exact)",
+        show(&w_plus),
+        n,
+        number(float(&p)),
+        show(&p)
+    ))
+}
+
+/// `kruskal(a, b, c, ...)`: the Kruskal-Wallis H test with the tie correction and the chi-square p-value.
+fn kruskal(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let groups: Vec<Vec<Q>> = args
+        .iter()
+        .map(|a| list(session, a))
+        .collect::<Option<_>>()
+        .ok_or("kruskal takes lists of numbers, one per group")?;
+    if groups.len() < 2 || groups.iter().any(|g| g.is_empty()) {
+        return Err("kruskal needs at least two non-empty groups".into());
+    }
+    let pooled: Vec<Q> = groups.iter().flatten().cloned().collect();
+    let big_n = pooled.len() as f64;
+    let ranks = average_ranks(&pooled);
+    let mut offset = 0;
+    let mut sum = 0.0;
+    for g in &groups {
+        let rank_sum: f64 = ranks[offset..offset + g.len()].iter().map(float).sum();
+        sum += rank_sum * rank_sum / g.len() as f64;
+        offset += g.len();
+    }
+    let mut h = 12.0 / (big_n * (big_n + 1.0)) * sum - 3.0 * (big_n + 1.0);
+    // Tie correction: 1 - sum (t^3 - t) / (N^3 - N).
+    let mut sorted = pooled.clone();
+    sorted.sort();
+    let (mut ties, mut i) = (0.0, 0);
+    while i < sorted.len() {
+        let mut j = i;
+        while j + 1 < sorted.len() && sorted[j + 1] == sorted[i] {
+            j += 1;
+        }
+        let t = (j - i + 1) as f64;
+        ties += t * t * t - t;
+        i = j + 1;
+    }
+    let correction = 1.0 - ties / (big_n * big_n * big_n - big_n);
+    if correction <= 0.0 {
+        return Err("all the values are equal".into());
+    }
+    h /= correction;
+    let df = (groups.len() - 1) as f64;
+    Ok(format!(
+        "H = {}, df = {}, p = {}",
+        number(h),
+        df,
+        number(chi_square_p(h, df))
     ))
 }

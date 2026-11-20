@@ -4884,3 +4884,236 @@ fn fisher_correlation_and_rank_sum_tests_match_brute_force() {
             .is_error
     );
 }
+
+#[test]
+fn regression_inference_wilcoxon_and_kruskal_wallis_satisfy_their_identities() {
+    let value = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} not in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ')', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let list = |v: &[f64]| {
+        format!(
+            "[{}]",
+            v.iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let ranks_of = |v: &[f64]| -> Vec<f64> {
+        v.iter()
+            .map(|e| {
+                v.iter().filter(|o| **o < *e).count() as f64
+                    + (v.iter().filter(|o| **o == *e).count() as f64 + 1.0) / 2.0
+            })
+            .collect()
+    };
+    // Regression: the slope t statistic and p-value are those of the test of zero correlation; R^2 = r^2; the intercept and
+    // slope are the least-squares ones.
+    let datasets: [(&[f64], &[f64]); 3] = [
+        (&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 5.0, 4.0, 5.0]),
+        (
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            &[6.0, 5.0, 7.0, 3.0, 2.0, 2.0],
+        ),
+        (
+            &[0.5, 1.5, 2.5, 3.0, 4.5, 6.0, 7.5],
+            &[1.0, 2.2, 2.9, 4.1, 5.2, 7.4, 8.1],
+        ),
+    ];
+    for (x, y) in datasets {
+        let out = run(&format!("regress({}, {})", list(x), list(y)));
+        let correlation = run(&format!("correlation_test({}, {})", list(x), list(y)));
+        let slope_part = out.split(';').next().unwrap();
+        let (t, p) = (value(slope_part, "t ="), value(slope_part, "p ="));
+        assert!(
+            (t - value(&correlation, "t =")).abs() < 1e-4,
+            "{out} vs {correlation}"
+        );
+        assert!(
+            (p - value(&correlation, "p =")).abs() < 1e-5,
+            "{out} vs {correlation}"
+        );
+        let r = value(&correlation, "Pearson r =");
+        let r2_text = out
+            .split("R^2 = ")
+            .nth(1)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap();
+        let r2 = match r2_text.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => r2_text.parse().unwrap(),
+        };
+        assert!((r2 - r * r).abs() < 1e-5, "{out}");
+        let n = x.len() as f64;
+        let (mx, my) = (x.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
+        let sxx: f64 = x.iter().map(|a| (a - mx).powi(2)).sum();
+        let sxy: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
+        let slope = sxy / sxx;
+        let shown_slope = slope_part
+            .split(" = ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap();
+        let parsed = match shown_slope.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => shown_slope.parse().unwrap(),
+        };
+        assert!((parsed - slope).abs() < 1e-12, "{out}");
+        // The 95% interval is slope +- t* se with t* the 0.975 quantile of the t distribution.
+        let ci: Vec<f64> = slope_part
+            .split("95% CI (")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap()
+            .split(", ")
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let se = value(slope_part, "se ");
+        let critical: f64 = run(&format!("t_quantile(0.975, {})", n - 2.0))
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            ((ci[1] - ci[0]) / 2.0 / se - critical).abs() < 1e-3,
+            "{out}: t* = {critical}"
+        );
+        assert!((((ci[0] + ci[1]) / 2.0) - slope).abs() < 1e-5, "{out}");
+    }
+    assert!(run("regress([1,2,3],[2,4,6])").starts_with("slope = 2 (exact fit)"));
+    // Wilcoxon signed-rank: every sign assignment of the average ranks, by bitmask.
+    let samples: [&[f64]; 4] = [
+        &[1.5, -0.5, 2.0, 3.0, -1.0, 2.5],
+        &[0.5, -1.5, 2.0, 2.0, -3.0, 4.0, 1.0],
+        &[3.0, 3.0, -3.0, 1.0, 2.0, 0.0, 5.0, -1.0],
+        &[0.2, 0.4, 0.6, 0.8, 1.0],
+    ];
+    for d in samples {
+        let nonzero: Vec<f64> = d.iter().copied().filter(|v| *v != 0.0).collect();
+        let n = nonzero.len();
+        let ranks = ranks_of(&nonzero.iter().map(|v| v.abs()).collect::<Vec<_>>());
+        let total: f64 = ranks.iter().sum();
+        let w_plus = |mask: u32| -> f64 {
+            (0..n)
+                .filter(|i| mask >> i & 1 == 1)
+                .map(|i| ranks[i])
+                .sum()
+        };
+        let observed = w_plus(
+            (0..n)
+                .filter(|i| nonzero[*i] > 0.0)
+                .fold(0u32, |m, i| m | 1 << i),
+        );
+        let extreme = (0u32..(1 << n))
+            .filter(|m| (2.0 * w_plus(*m) - total).abs() >= (2.0 * observed - total).abs() - 1e-9)
+            .count() as u128;
+        let out = run(&format!("wilcoxon({})", list(d)));
+        let after = out
+            .split("p = ")
+            .nth(1)
+            .unwrap()
+            .split(" = ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap();
+        let (num, den) = match after.split_once('/') {
+            Some((a, b)) => (a.parse::<u128>().unwrap(), b.parse::<u128>().unwrap()),
+            None => (after.parse::<u128>().unwrap(), 1u128),
+        };
+        assert_eq!(
+            num * (1u128 << n),
+            extreme * den,
+            "wilcoxon({d:?}): {out}, expected {extreme}/{}",
+            1u128 << n
+        );
+        let shown = out
+            .split("W+ = ")
+            .nth(1)
+            .unwrap()
+            .split(',')
+            .next()
+            .unwrap();
+        let w = match shown.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => shown.parse().unwrap(),
+        };
+        assert!((w - observed).abs() < 1e-9, "{out}");
+    }
+    // Paired form equals the one-sample form on the differences.
+    assert_eq!(
+        run("wilcoxon([5,3,8,2],[4,5,6,3])"),
+        run("wilcoxon([1,-2,2,-1])")
+    );
+    // Kruskal-Wallis: H from the rank sums; with 3 groups (2 df) p = exp(-H / 2); the textbook data give H = 0.77143.
+    let groups: [&[f64]; 3] = [
+        &[2.9, 3.0, 2.5, 2.6, 3.2],
+        &[3.8, 2.7, 4.0, 2.4],
+        &[2.8, 3.4, 3.7, 2.2, 2.0],
+    ];
+    let pooled: Vec<f64> = groups.iter().flat_map(|g| g.iter().copied()).collect();
+    let ranks = ranks_of(&pooled);
+    let n = pooled.len() as f64;
+    let (mut offset, mut sum) = (0, 0.0);
+    for g in groups {
+        let rank_sum: f64 = ranks[offset..offset + g.len()].iter().sum();
+        sum += rank_sum * rank_sum / g.len() as f64;
+        offset += g.len();
+    }
+    let h = 12.0 / (n * (n + 1.0)) * sum - 3.0 * (n + 1.0);
+    let out = run(&format!(
+        "kruskal({}, {}, {})",
+        list(groups[0]),
+        list(groups[1]),
+        list(groups[2])
+    ));
+    assert!(
+        (value(&out, "H =") - h).abs() < 1e-5 && (value(&out, "H =") - 0.771429).abs() < 1e-5,
+        "{out}"
+    );
+    assert!(
+        (value(&out, "p =") - (-h / 2.0).exp()).abs() < 1e-5,
+        "{out}"
+    );
+    // Two groups without ties: H is the square of the normal-approximation z of the rank-sum test (no continuity correction).
+    let (a, b) = ([1.2, 3.4, 2.2, 5.1], [2.8, 4.4, 6.0, 7.1, 3.9]);
+    let h2 = value(&run(&format!("kruskal({}, {})", list(&a), list(&b))), "H =");
+    let pooled2: Vec<f64> = a.iter().chain(&b).copied().collect();
+    let ranks2 = ranks_of(&pooled2);
+    let (n1, n2) = (a.len() as f64, b.len() as f64);
+    let u = ranks2[..a.len()].iter().sum::<f64>() - n1 * (n1 + 1.0) / 2.0;
+    let z = (u - n1 * n2 / 2.0) / (n1 * n2 * (n1 + n2 + 1.0) / 12.0).sqrt();
+    assert!((h2 - z * z).abs() < 1e-4, "H = {h2}, z^2 = {}", z * z);
+    // Refusals.
+    assert!(
+        UraeSession::new()
+            .execute_line("wilcoxon([0,0,0])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("regress([1,1,1],[1,2,3])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("kruskal([1,1],[1,1])")
+            .is_error
+    );
+}

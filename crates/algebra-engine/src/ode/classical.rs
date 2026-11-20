@@ -192,6 +192,20 @@ pub(crate) enum Separable {
     Implicit { g: ExprId, f: ExprId },
 }
 
+/// The derivative `y'` of a first-order equation `ode = c(x, y) y' + r(x, y)` that is linear in `y'`: `-r / c`. The
+/// coefficient `c` is not assumed to be 1 (`y + (x^2 y - x) y' = 0` is `y' = -y / (x^2 y - x)`).
+fn solved_for_derivative(graph: &ExprGraph, ode: ExprId, d1: SymbolId) -> Option<ExprId> {
+    let coefficient = simplified(graph, graph.diff(ode, d1));
+    if graph.has_symbol(coefficient, d1) || coefficient == graph.integer(0) {
+        return None;
+    }
+    let remainder = simplified(graph, graph.substitute(ode, d1, graph.integer(0)));
+    Some(simplified(
+        graph,
+        graph.div(graph.neg(remainder), coefficient),
+    ))
+}
+
 /// `y' = f(x) g(y)`: the solution, if the right-hand side separates.
 pub(crate) fn solve_separable(
     graph: &ExprGraph,
@@ -201,9 +215,8 @@ pub(crate) fn solve_separable(
     x: SymbolId,
 ) -> Option<Separable> {
     use crate::solver::SymbolicSolver;
-    // ode = d1 - h(x, y): h = -ode at d1 = 0 (the equation must be linear in d1 with coefficient 1).
-    let at_zero = simplified(graph, graph.substitute(ode, d1, graph.integer(0)));
-    let h = simplified(graph, graph.neg(at_zero));
+    // ode = c(x, y) d1 + r(x, y) is solved for the derivative: h = -r / c.
+    let h = solved_for_derivative(graph, ode, d1)?;
     let mut factors = Vec::new();
     factors_of(graph, h, &mut factors);
     let (mut fx, mut gy) = (Vec::new(), Vec::new());
@@ -293,8 +306,7 @@ pub(crate) fn solve_bernoulli_form(
     y: SymbolId,
     x: SymbolId,
 ) -> Option<ExprId> {
-    let at_zero = graph.substitute(ode, d1, graph.integer(0));
-    let h = simplified(graph, graph.neg(at_zero));
+    let h = solved_for_derivative(graph, ode, d1)?;
     let terms: Vec<ExprId> = match &graph.get(h).kind {
         ExprKind::Add(ts) => ts.to_vec(),
         ExprKind::Sub(a, b) => vec![*a, graph.neg(*b)],

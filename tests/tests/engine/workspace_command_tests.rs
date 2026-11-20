@@ -4191,7 +4191,11 @@ fn homogeneous_and_exact_first_order_equations_satisfy_themselves() {
             |x, y| 3.0 * x * x + y,
             |x, y| x + 2.0 * y,
         ),
-        ("y'*y = x", |x, _| -x, |_, y| y),
+        (
+            "(2*x + y) + (x + 2*y)*y' = 0",
+            |x, y| 2.0 * x + y,
+            |x, y| x + 2.0 * y,
+        ),
         (
             "(y*cos(x) + 2*x) + (sin(x) + 3*y^2)*y' = 0",
             |x, y| y * x.cos() + 2.0 * x,
@@ -4223,6 +4227,75 @@ fn homogeneous_and_exact_first_order_equations_satisfy_themselves() {
             );
         }
     }
+    // Non-exact equations with an integrating factor: psi_x = mu M and psi_y = mu N, so psi_x N - psi_y M = 0.
+    let factored: [Pair; 3] = [
+        ("y + (x^2*y - x)*y' = 0", |_, y| y, |x, y| x * x * y - x),
+        (
+            "(x^2 + y^2 + x) + x*y*y' = 0",
+            |x, y| x * x + y * y + x,
+            |x, y| x * y,
+        ),
+        (
+            "(3*x*y + y^2) + (x^2 + x*y)*y' = 0",
+            |x, y| 3.0 * x * y + y * y,
+            |x, y| x * x + x * y,
+        ),
+    ];
+    for (equation, m, n) in factored {
+        let out = run(&format!("dsolve({equation})"));
+        if out.starts_with("y(x)") {
+            continue; // an explicit solution is checked by the homogeneous test above
+        }
+        assert!(
+            out.contains("integrating factor") || out.contains("exact"),
+            "{equation}: {out}"
+        );
+        let psi = out.split_once(" = C1").unwrap().0.to_string();
+        let at = |x: f64, y: f64| number(run(&format!("subs(({psi}), x = {x:?}, y = {y:?})")));
+        for (x, y) in [(0.7f64, 0.9f64), (1.4, -0.6), (2.2, 1.3)] {
+            let h = 1e-5;
+            let psi_x = (at(x + h, y) - at(x - h, y)) / (2.0 * h);
+            let psi_y = (at(x, y + h) - at(x, y - h)) / (2.0 * h);
+            let residual = psi_x * n(x, y) - psi_y * m(x, y);
+            assert!(
+                residual.abs() < 1e-5 * (1.0 + (psi_x * n(x, y)).abs()),
+                "{equation}: residual {residual} at ({x}, {y}): {out}"
+            );
+        }
+    }
+    // The coefficient of y' is not assumed to be 1: these were solved as if it were (2 y' = y gave exp(x)).
+    type Known = (&'static str, fn(f64) -> f64);
+    let known: [Known; 4] = [
+        ("2*y' = y", |x: f64| (x / 2.0).exp()),
+        ("(1+x^2)*y' = x*y", |x: f64| (1.0 + x * x).sqrt()),
+        ("x*y' = y", |x: f64| x),
+        ("3*y' + 6*y = 0", |x: f64| (-2.0 * x).exp()),
+    ];
+    for (equation, solution) in known {
+        let out = run(&format!("dsolve({equation})"));
+        let expression = out
+            .split("  or  ")
+            .next()
+            .unwrap()
+            .split_once(" = ")
+            .unwrap()
+            .1
+            .to_string();
+        let y_at = |x: f64| number(run(&format!("subs(({expression}), x = {x:?}, C1 = 1.0)")));
+        for x in [0.5f64, 1.2, 2.0] {
+            let ratio = y_at(x) / solution(x);
+            let other = y_at(x + 0.7) / solution(x + 0.7);
+            assert!(
+                (ratio - other).abs() < 1e-9 * (1.0 + ratio.abs()),
+                "{equation}: not a constant multiple of the true solution ({out})"
+            );
+        }
+    }
+    assert_eq!(run("dsolve(2*y' = y)"), "y(x) = C1 · exp(1/2 · x)");
+    // The simplifier folds exp(c ln u) into a power, and a negated negative coefficient prints without a double sign.
+    assert_eq!(run("exp(-2*ln(x))"), "x^(-2)");
+    assert_eq!(run("exp(ln(x)/2)"), "x^(1/2)");
+    assert_eq!(run("-(-1/2*x)"), "1/2 · x");
     // Equations the standard solver answers keep its answer.
     assert_eq!(run("dsolve(y' = y)"), "y(x) = C1 · exp(x)");
     assert_eq!(run("dsolve(y' = y/x + 1)"), "y(x) = x · (ln(x) + C1)");

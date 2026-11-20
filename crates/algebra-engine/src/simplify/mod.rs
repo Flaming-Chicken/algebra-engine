@@ -1747,6 +1747,48 @@ fn pre_simplify_algebraic_with_assumptions(
                             {
                                 return inner_a[0];
                             }
+                            // exp(c ln u) = u^c for a rational c, and exp(-ln u) = 1/u.
+                            let log_of = |id: ExprId| -> Option<ExprId> {
+                                if let ExprKind::Function {
+                                    name: inner_n,
+                                    args: inner_a,
+                                } = g.get(id).kind
+                                    && matches!(
+                                        g.symbols.resolve(inner_n).as_deref(),
+                                        Some("ln" | "log")
+                                    )
+                                    && inner_a.len() == 1
+                                {
+                                    Some(inner_a[0])
+                                } else {
+                                    None
+                                }
+                            };
+                            if let ExprKind::Neg(inner) = g.get(a).kind
+                                && let Some(u) = log_of(inner)
+                            {
+                                return g.pow(u, g.integer(-1));
+                            }
+                            if let ExprKind::Mul(factors) = g.get(a).kind.clone() {
+                                let mut coefficient = BigRational::one();
+                                let mut logs = Vec::new();
+                                let mut other = false;
+                                for &f in factors.iter() {
+                                    if let Some(q) = as_rat(g, f) {
+                                        coefficient *= q;
+                                    } else if let Some(u) = log_of(f) {
+                                        logs.push(u);
+                                    } else {
+                                        other = true;
+                                    }
+                                }
+                                if !other && logs.len() == 1 {
+                                    return g.pow(
+                                        logs[0],
+                                        crate::poly::expr_from_rational(g, &coefficient),
+                                    );
+                                }
+                            }
                         }
                         "abs" => {
                             if let Some(q) = as_rat(g, a) {

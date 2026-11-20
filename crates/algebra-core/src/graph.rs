@@ -371,6 +371,17 @@ impl ExprGraph {
                 _ => self.mul(flipped),
             };
         }
+        // -(r f g) with a negative rational coefficient r is (-r) f g (`-(-1/2 x)` is `1/2 x`).
+        if let ExprKind::Mul(factors) = &i_node.kind
+            && let Some(position) = factors.iter().position(|&f| {
+                matches!(self.get(f).kind, ExprKind::Number(Number::Rational(n, _)) if n < 0 && n != i64::MIN)
+            })
+            && let ExprKind::Number(Number::Rational(n, d)) = self.get(factors[position]).kind
+        {
+            let mut flipped: Vec<ExprId> = factors.iter().copied().collect();
+            flipped[position] = self.rational(-n, d);
+            return self.mul(flipped);
+        }
         self.intern(ExprNode::new(i_node.domain, ExprKind::Neg(inner)))
     }
 

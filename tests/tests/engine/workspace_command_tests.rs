@@ -2510,3 +2510,96 @@ fn discrete_probability_functions_match_their_definitions() {
             .is_error
     );
 }
+
+#[test]
+fn series_sums_and_triangle_formulas_match_their_definitions() {
+    let frac = |text: &str| -> f64 {
+        match text.trim().split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => text.trim().parse().unwrap(),
+        }
+    };
+    // arithmetic_sum(a, d, n) and geometric_sum(a, r, n) against term-by-term addition.
+    for (a, d, n) in [(1i64, 2i64, 10i64), (5, -3, 7), (0, 1, 100), (3, 0, 4)] {
+        let direct: i64 = (0..n).map(|k| a + k * d).sum();
+        assert_eq!(
+            run(&format!("arithmetic_sum({a}, {d}, {n})")),
+            direct.to_string()
+        );
+    }
+    for (a, r, n) in [(1i64, 2i64, 10u32), (3, 3, 5), (2, -2, 6), (5, 1, 4)] {
+        let direct: i64 = (0..n).map(|k| a * r.pow(k)).sum();
+        assert_eq!(
+            run(&format!("geometric_sum({a}, {r}, {n})")),
+            direct.to_string()
+        );
+    }
+    assert_eq!(run("geometric_sum(1, 1/2, 3)"), "7/4");
+    // Pythagorean triples: the hypotenuse is exact, and Heron's formula on a triple gives half the legs' product.
+    for (a, b, c) in [(3i64, 4i64, 5i64), (5, 12, 13), (8, 15, 17), (20, 21, 29)] {
+        assert_eq!(run(&format!("hypotenuse({a}, {b})")), c.to_string());
+        assert_eq!(
+            run(&format!("area_triangle({a}, {b}, {c})")),
+            (a * b / 2).to_string()
+        );
+    }
+    assert_eq!(run("hypotenuse(1, 1)"), "√(2)");
+    // Heron against the coordinate (shoelace) area for a triangle placed at the origin.
+    for (base, height) in [(4i64, 3i64), (6, 8), (10, 4)] {
+        let side = ((base * base + height * height) as f64).sqrt();
+        let heron = run(&format!(
+            "area_triangle({base}, {height}, sqrt({}))",
+            base * base + height * height
+        ));
+        let _ = side;
+        assert_eq!(
+            run(&format!("area_triangle((0,0),({base},0),(0,{height}))")),
+            (base * height / 2).to_string()
+        );
+        assert!(!heron.is_empty());
+    }
+    // angle_between against atan2 of the cross and dot products.
+    for (u, v) in [
+        ([1.0f64, 0.0], [0.0, 1.0]),
+        ([1.0, 1.0], [1.0, 0.0]),
+        ([2.0, 1.0], [-1.0, 3.0]),
+        ([1.0, 0.0], [-1.0, 0.0]),
+    ] {
+        let expected = (u[0] * v[1] - u[1] * v[0])
+            .abs()
+            .atan2(u[0] * v[0] + u[1] * v[1]);
+        let out = run(&format!(
+            "angle_between([{}, {}], [{}, {}])",
+            u[0], u[1], v[0], v[1]
+        ));
+        let got = if out.contains('π') {
+            let (num, den) = match out.split_once("π/") {
+                Some((n, d)) => (
+                    if n.is_empty() {
+                        1.0
+                    } else {
+                        n.trim_end_matches('*').parse().unwrap()
+                    },
+                    d.parse::<f64>().unwrap(),
+                ),
+                None => (
+                    if out.trim() == "π" {
+                        1.0
+                    } else {
+                        out.trim_end_matches("*π").parse().unwrap()
+                    },
+                    1.0,
+                ),
+            };
+            num * std::f64::consts::PI / den
+        } else {
+            frac(out.rsplit("≈ ").next().unwrap())
+        };
+        assert!(
+            (got - expected).abs() < 1e-9,
+            "angle_between({u:?}, {v:?}) = {out}, expected {expected}"
+        );
+    }
+    assert_eq!(run("angle_between([1, 0], [0, 1])"), "π/2");
+    assert_eq!(run("maclaurin(cos(x), 4)"), run("taylor(cos(x), x, 0, 4)"));
+}

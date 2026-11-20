@@ -208,6 +208,49 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             }
             return Some(session.eval(&text));
         }
+        "hypotenuse" | "heron" | "area_triangle" | "angle_between" | "maclaurin" => {
+            // Spellings that are fixed formulas of the plain commands.
+            let rewritten = match (name.as_str(), args.as_slice()) {
+                ("hypotenuse", [a, b]) => format!("sqrt(({a})^2 + ({b})^2)"),
+                ("heron" | "area_triangle", [a, b, c]) if a.trim_start().starts_with('(') => {
+                    format!("triangle_area({a}, {b}, {c})")
+                }
+                ("heron" | "area_triangle", [a, b, c]) => {
+                    let s = format!("(({a}) + ({b}) + ({c}))/2");
+                    format!("sqrt(({s})*(({s}) - ({a}))*(({s}) - ({b}))*(({s}) - ({c})))")
+                }
+                ("angle_between", [u, v]) => {
+                    let dot = match session.eval(&format!("dot({u}, {v})")) {
+                        Ok(d) => d,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let (nu, nv) = match (
+                        session.eval(&format!("norm({u})")),
+                        session.eval(&format!("norm({v})")),
+                    ) {
+                        (Ok(a), Ok(b)) => (a, b),
+                        (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
+                    };
+                    format!("acos(({dot})/(({nu})*({nv})))")
+                }
+                ("maclaurin", [f, order]) => format!("taylor({f}, x, 0, {order})"),
+                _ => return None,
+            };
+            if name == "angle_between" {
+                let exact = match session.eval(&rewritten) {
+                    Ok(e) => e,
+                    Err(e) => return Some(Err(e)),
+                };
+                // Recognise an exact multiple of pi from the numeric angle.
+                let theta = complex_value(session, &rewritten).ok()?.0;
+                let multiple = angle_text(theta);
+                if multiple.contains('π') || multiple == "0" {
+                    return Some(Ok(multiple));
+                }
+                return Some(Ok(format!("{exact} ≈ {}", clean(theta))));
+            }
+            return Some(session.eval(&rewritten));
+        }
         "lcm" => {
             // Integer lcm is handled elsewhere; this is the polynomial case, lcm = a b / gcd(a, b).
             if args.len() < 2 || args.iter().all(|a| a.trim().parse::<i128>().is_ok()) {

@@ -2807,3 +2807,173 @@ fn degrees_temperatures_and_signed_denominators() {
     assert!(!parallel.contains("-1 / (-"), "{parallel}");
     assert_eq!(parallel, "Solutions for R: [1 / (1 / a + 1 / b)]");
 }
+
+#[test]
+fn graph_commands_match_closed_forms_and_brute_force() {
+    // Evaluate "P(k) = k^4 - 4*k^3 + 6*k^2 - 3*k" at an integer.
+    fn evaluate(text: &str, k: i64) -> i64 {
+        let body = text.trim_start_matches("P(k) = ");
+        let mut total = 0i64;
+        let mut sign = 1i64;
+        for token in body.split_whitespace() {
+            match token {
+                "+" => sign = 1,
+                "-" => sign = -1,
+                term => {
+                    let (coefficient, power) = match term.split_once("*k^") {
+                        Some((c, p)) => (c.parse::<i64>().unwrap(), p.parse::<u32>().unwrap()),
+                        None => match term.split_once("*k") {
+                            Some((c, _)) => (c.parse().unwrap(), 1),
+                            None => match term.strip_prefix("k^") {
+                                Some(p) => (1, p.parse().unwrap()),
+                                None if term == "k" => (1, 1),
+                                None => (term.parse().unwrap(), 0),
+                            },
+                        },
+                    };
+                    total += sign * coefficient * k.pow(power);
+                    sign = 1;
+                }
+            }
+        }
+        total
+    }
+    let count: i64 = 0;
+    let _ = count;
+    // Cayley's formula n^(n-2), the cycle and the path.
+    for n in 2..=8u32 {
+        assert_eq!(
+            run(&format!("spanning_trees(K{n})")),
+            (n as u128).pow(n - 2).to_string(),
+            "K{n}"
+        );
+    }
+    for n in 3..=9 {
+        assert_eq!(run(&format!("spanning_trees(C{n})")), n.to_string());
+        assert_eq!(run(&format!("spanning_trees(P{n})")), "1");
+        assert_eq!(run(&format!("is_tree(P{n})")), "true");
+        assert_eq!(run(&format!("is_tree(C{n})")), "false");
+    }
+    // Chromatic polynomials: K_n is k (k-1) ... (k-n+1), C_n is (k-1)^n + (-1)^n (k-1), a tree on n vertices k (k-1)^(n-1).
+    for n in 3..=7i64 {
+        for k in 0..=6i64 {
+            let complete: i64 = (0..n).map(|i| k - i).product();
+            assert_eq!(
+                evaluate(&run(&format!("chromatic_polynomial(K{n})")), k),
+                complete,
+                "K{n} at {k}"
+            );
+            let cycle = (k - 1).pow(n as u32) + (-1i64).pow(n as u32) * (k - 1);
+            assert_eq!(
+                evaluate(&run(&format!("chromatic_polynomial(C{n})")), k),
+                cycle,
+                "C{n} at {k}"
+            );
+            let path = k * (k - 1).pow(n as u32 - 1);
+            assert_eq!(
+                evaluate(&run(&format!("chromatic_polynomial(P{n})")), k),
+                path,
+                "P{n} at {k}"
+            );
+        }
+    }
+    assert_eq!(run("chromatic_number(K5)"), "5");
+    assert_eq!(run("chromatic_number(C7)"), "3");
+    assert_eq!(run("chromatic_number(C8)"), "2");
+    assert_eq!(run("chromatic_polynomial(K3)"), "P(k) = k^3 - 3*k^2 + 2*k");
+    // Random graphs on 6 vertices: proper colourings and spanning trees by brute force.
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    let n = 6usize;
+    let pairs: Vec<(usize, usize)> = (0..n)
+        .flat_map(|a| (a + 1..n).map(move |b| (a, b)))
+        .collect();
+    for _ in 0..12 {
+        let edges: Vec<(usize, usize)> = pairs.iter().copied().filter(|_| next(100) < 45).collect();
+        if edges.is_empty() {
+            continue;
+        }
+        let literal = format!(
+            "[{}]",
+            edges
+                .iter()
+                .map(|(a, b)| format!("[{a}, {b}]"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // Vertices that appear in no edge do not exist in an edge-list graph: count only used vertices.
+        let mut used: Vec<usize> = edges.iter().flat_map(|(a, b)| [*a, *b]).collect();
+        used.sort_unstable();
+        used.dedup();
+        let m = used.len();
+        let index = |v: usize| used.iter().position(|x| *x == v).unwrap();
+        let local: Vec<(usize, usize)> =
+            edges.iter().map(|(a, b)| (index(*a), index(*b))).collect();
+        // Proper colourings with k colours.
+        let polynomial = run(&format!("chromatic_polynomial({literal})"));
+        for k in 1..=4i64 {
+            let mut proper = 0i64;
+            for code in 0..(k as usize).pow(m as u32) {
+                let colour = |v: usize| (code / (k as usize).pow(v as u32)) % k as usize;
+                if local.iter().all(|(a, b)| colour(*a) != colour(*b)) {
+                    proper += 1;
+                }
+            }
+            assert_eq!(evaluate(&polynomial, k), proper, "{literal} at k = {k}");
+        }
+        // Spanning trees: subsets of m - 1 edges that connect all m vertices.
+        let mut trees = 0u64;
+        for mask in 0u32..(1 << local.len()) {
+            if mask.count_ones() as usize != m - 1 {
+                continue;
+            }
+            let mut parent: Vec<usize> = (0..m).collect();
+            fn find(p: &mut Vec<usize>, x: usize) -> usize {
+                if p[x] != x {
+                    let r = find(p, p[x]);
+                    p[x] = r;
+                }
+                p[x]
+            }
+            let mut acyclic = true;
+            for (i, (a, b)) in local.iter().enumerate() {
+                if mask >> i & 1 == 1 {
+                    let (ra, rb) = (find(&mut parent, *a), find(&mut parent, *b));
+                    if ra == rb {
+                        acyclic = false;
+                        break;
+                    }
+                    parent[ra] = rb;
+                }
+            }
+            trees += acyclic as u64;
+        }
+        assert_eq!(
+            run(&format!("spanning_trees({literal})")),
+            trees.to_string(),
+            "{literal}"
+        );
+    }
+    // Basic structure.
+    assert_eq!(
+        run("degree_sequence([[1,2],[2,3],[3,1],[3,4]])"),
+        "[3, 2, 2, 1]"
+    );
+    assert_eq!(run("components([[1,2],[3,4]])"), "2");
+    assert_eq!(run("is_bipartite(C6)"), "true");
+    assert_eq!(run("is_bipartite(C7)"), "false");
+    assert_eq!(
+        run("shortest_path([[1,2],[2,3],[3,4],[1,4]], 1, 3)")
+            .split(':')
+            .next()
+            .unwrap(),
+        "length 2"
+    );
+    assert_eq!(run("diameter(C8)"), "4");
+    assert_eq!(run("diameter(P6)"), "5");
+}

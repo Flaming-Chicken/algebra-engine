@@ -447,6 +447,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `spanning_trees(K4)`, `chromatic_polynomial(C5)`, `shortest_path(G, a, b)`: finite graphs.
+        if let Some(outcome) = crate::graph_commands::run(trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // `truth_table(F)`, `tautology(F)`, `satisfiable(F)`, `equivalent(F, G)`: propositional logic.
         if let Some(outcome) = crate::logic_commands::run(trimmed) {
             return match outcome {

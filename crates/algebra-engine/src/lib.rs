@@ -23,6 +23,7 @@ pub mod cft;
 pub mod combinatorics;
 pub mod complex_exact;
 pub mod complex_funcs;
+pub mod constrained;
 pub mod control;
 pub mod curvature;
 pub mod diffalg;

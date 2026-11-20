@@ -1999,3 +1999,68 @@ fn fixed_step_ode_methods_converge_at_their_orders() {
             .is_error
     );
 }
+
+#[test]
+fn constrained_extrema_match_closed_forms() {
+    let number = |text: &str| -> f64 {
+        let v = text
+            .split(" = ")
+            .nth(1)
+            .unwrap()
+            .split(" at ")
+            .next()
+            .unwrap();
+        match v.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => v.parse().unwrap(),
+        }
+    };
+    // max x*y on x + y = s is s^2 / 4, at x = y = s / 2 (AM-GM).
+    for s in [4i64, 10, 7] {
+        let out = run(&format!("maximize x*y subject to x + y = {s}"));
+        assert!((number(&out) - (s * s) as f64 / 4.0).abs() < 1e-9, "{out}");
+        assert!(out.starts_with("local maximum"), "{out}");
+        // x*y has no minimum on the line: the stationary point is a maximum, so a minimum request is refused.
+        assert!(
+            UraeSession::new()
+                .execute_line(&format!("minimize x*y subject to x + y = {s}"))
+                .is_error
+        );
+    }
+    // min x^2 + y^2 on a x + b y = c is c^2 / (a^2 + b^2) (squared distance from the origin to the line).
+    for (a, b, c) in [(1i64, 1i64, 1i64), (3, 4, 10), (2, -1, 5)] {
+        let out = run(&format!(
+            "minimize x^2 + y^2 subject to {a}*x + {b}*y = {c}"
+        ));
+        let expected = (c * c) as f64 / (a * a + b * b) as f64;
+        assert!(
+            (number(&out) - expected).abs() < 1e-6,
+            "{out} vs {expected}"
+        );
+    }
+    // The extremes of x + y on the unit circle are +-sqrt(2); of x*y they are +-1/2; AM-GM for three variables.
+    let out = run("maximize x + y subject to x^2 + y^2 = 1");
+    assert!((number(&out) - 2f64.sqrt()).abs() < 1e-5, "{out}");
+    let out = run("minimize x + y subject to x^2 + y^2 = 1");
+    assert!((number(&out) + 2f64.sqrt()).abs() < 1e-5, "{out}");
+    assert!((number(&run("maximize x*y subject to x^2 + y^2 = 1")) - 0.5).abs() < 1e-5);
+    assert!((number(&run("maximize x*y*z subject to x + y + z = 3")) - 1.0).abs() < 1e-6);
+    // Inequality constraints with a nonlinear objective are not supported, and linear programs still work.
+    assert!(
+        UraeSession::new()
+            .execute_line("maximize x*y subject to x + y <= 4")
+            .is_error
+    );
+    assert_eq!(
+        run("maximize 3*x + 2*y subject to x + y <= 4, x + 3*y <= 6"),
+        "maximum value = 12 at x = 4, y = 0"
+    );
+    // extrema of a function the exact solver cannot factor: x^2 e^-x has a minimum at 0 and a maximum 4 e^-2 at 2.
+    let out = run("extrema(x^2*exp(-x))");
+    assert!(
+        out.contains("x = 0: local minimum") && out.contains("x = 2: local maximum"),
+        "{out}"
+    );
+    let top: f64 = out.rsplit("f = ").next().unwrap().trim().parse().unwrap();
+    assert!((top - 4.0 * (-2.0f64).exp()).abs() < 1e-9, "{out}");
+}

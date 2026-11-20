@@ -406,6 +406,14 @@ impl UraeSession {
 
         // `maximize 3x + 2y subject to x + y <= 4, ...`: exact linear programming.
         if let Some(outcome) = crate::simplex_exact::solve_text(&self.graph, trimmed) {
+            // Not a linear program (a nonlinear objective or constraint): try Lagrange multipliers.
+            let nonlinear = matches!(&outcome, Err(e) if e.contains("linear"));
+            if nonlinear && let Some(lagrange) = crate::constrained::run(self, trimmed) {
+                return match lagrange {
+                    Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                    Err(e) => OperationResult::error(e),
+                };
+            }
             return match outcome {
                 Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
                 Err(e) => OperationResult::error(e),

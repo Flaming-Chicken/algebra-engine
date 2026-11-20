@@ -86,20 +86,25 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R33` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R43` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
-- **Calculus and series.** Laurent series outside the power-series family (poles of `gamma`, `1/ln x`, expansions at
-  infinity); Gaussian integrals with a polynomial factor; integrals with non-linear arguments, `sqrt` of cubics and
-  irreducible quartic denominators; systems of inequalities; periodic inequalities.
-- **Special functions.** `zeta` for `s < 1` and complex `s`, Bessel `Y`, `I`, `K` and non-integer order, `polygamma`.
-- **Numbers.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `sqrt` of negative rationals with irrational parts, exact `sin(pi/5)`,
-  continued fractions of irrationals, `lcm` of polynomials.
-- **Transforms and ODEs.** Z-transform of `sin(w n)`, boundary value problems, conditions for systems.
-- **Input forms.** Logic and set expressions as plain input, quantities with units in arithmetic, sympy-style
-  `Sum(f, (k, 1, n))` and `Integral(f, (x, a, b))`, `dec2bin`, `bin2dec`.
+- **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
+  `sqrt(x^2+1)/x`); integrals with non-linear arguments, `sqrt` of cubics and irreducible quartic denominators;
+  periodic inequalities; residues and poles.
+- **Special functions.** Bessel `Y`, `K` and non-integer order, `polygamma` at negative `x`, `f_quantile` and discrete
+  quantiles, svd factors `U` and `V` (singular values exist).
+- **Numbers.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `sqrt` of negative non-squares, symbolic roots (`sqrt(x^2*y)`),
+  `exp(x)/exp(y)`, `oo * 0`, `lcm` of polynomials, Galois groups of degree 5 and up.
+- **Transforms, ODEs and recurrences.** Z-transform of `sin`/`cos`, boundary value problems, variable-coefficient,
+  nonlinear and system recurrences, `fft`, `dft`, `convolve`.
+- **Optimisation and numerical methods** (next probe). Linear programs are exact (`R43`); missing: free variables,
+  integer programming, Lagrange multipliers, quadratic programs, duals, `critical_points`, `extrema`, `linprog`, and the
+  named methods `newton_method`, `bisection`, `secant`, `simpson`, `trapezoid`, `rk4`, `euler_method`; also `arg`,
+  `modulus`, `polar`.
+- **Input forms.** Quantified formulas, LaTeX tables, `align` and `	ext{}` in formulas, English with several clauses.
 - **Structure.** The two parser tables of command names (`parser.rs` and `numeric_commands.rs`) must stay in step; one
-  table would remove a class of mistakes.
+  table would remove a class of mistakes. The `missing_docs` backlog.
 
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit
 factors (an elliptic-curve method); the remainder of `R1` (arbitrary CAD surface meshes as solids).

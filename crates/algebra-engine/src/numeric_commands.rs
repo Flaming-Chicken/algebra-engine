@@ -178,6 +178,45 @@ fn nsolve(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
     )))
 }
 
+/// Composite Simpson, trapezoid or midpoint rule: `simpson(f, a, b, n)` or `simpson(f, x, a, b, n)`.
+fn composite_rule(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
+    let (f, rest) = function_and_numbers(graph, args)?;
+    if rest.len() != 3 {
+        return Err(format!(
+            "{name}(f, a, b, n): a function, two bounds and the number of subintervals"
+        ));
+    }
+    let (a, b) = (number(graph, &rest[0])?, number(graph, &rest[1])?);
+    let n = number(graph, &rest[2])?;
+    if n < 1.0 || n.fract() != 0.0 || n > 1e7 {
+        return Err("the number of subintervals must be a positive integer".into());
+    }
+    let n = n as usize;
+    let h = (b - a) / n as f64;
+    let value = match name {
+        "trapezoid" => {
+            h * ((f.at(a) + f.at(b)) / 2.0 + (1..n).map(|i| f.at(a + h * i as f64)).sum::<f64>())
+        }
+        "midpoint" => h * (0..n).map(|i| f.at(a + h * (i as f64 + 0.5))).sum::<f64>(),
+        _ => {
+            if !n.is_multiple_of(2) {
+                return Err("Simpson's rule needs an even number of subintervals".into());
+            }
+            let mut sum = f.at(a) + f.at(b);
+            for i in 1..n {
+                sum += f.at(a + h * i as f64) * if i % 2 == 1 { 4.0 } else { 2.0 };
+            }
+            sum * h / 3.0
+        }
+    };
+    if !value.is_finite() {
+        return Err("the function is not finite on the interval".into());
+    }
+    Ok(NumericOutput::Text(format!(
+        "{name} rule, n = {n}: {value}"
+    )))
+}
+
 fn newton(f: &Function, df: &Function, start: f64) -> Result<f64, String> {
     let mut x = start;
     for _ in 0..200 {
@@ -1297,6 +1336,7 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
         "lu" => lu(graph, args),
         "ztransform" => ztransform(graph, args),
         "nsolve" | "findroot" => nsolve(graph, args),
+        "simpson" | "trapezoid" | "midpoint" => composite_rule(graph, name, args),
         "nintegrate" | "nint" => nintegrate(graph, args),
         "minimize" => minimize(graph, args, false),
         "maximize" => minimize(graph, args, true),
@@ -1336,7 +1376,11 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
 /// The canonical name of a numerical command spelling.
 pub fn canonical_name(name: &str) -> Option<&'static str> {
     Some(match name.to_ascii_lowercase().as_str() {
-        "nsolve" | "findroot" | "find_root" => "nsolve",
+        "nsolve" | "findroot" | "find_root" | "newton_method" | "newton" | "secant"
+        | "bisection" | "bisect" | "regula_falsi" => "nsolve",
+        "simpson" | "simpsons" | "simpson_rule" => "simpson",
+        "trapezoid" | "trapezoidal" | "trapezium" | "trapezoid_rule" => "trapezoid",
+        "midpoint" | "midpoint_rule" => "midpoint",
         "nintegrate" | "nint" | "numeric_integrate" => "nintegrate",
         "minimize" | "argmin" => "minimize",
         "maximize" | "argmax" => "maximize",

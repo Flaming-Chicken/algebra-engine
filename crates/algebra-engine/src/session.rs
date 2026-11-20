@@ -380,6 +380,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `critical_points(f)` / `extrema(f)`: stationary points and their kind.
+        if let Some(outcome) = crate::stationary::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // `maximize 3x + 2y subject to x + y <= 4, ...`: exact linear programming.
         if let Some(outcome) = crate::simplex_exact::solve_text(&self.graph, trimmed) {
             return match outcome {

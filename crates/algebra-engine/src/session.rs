@@ -98,6 +98,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         "linear systems of ODEs (dsolve([x' = y, y' = -x]))",
         crate::ode_system::run,
     ),
+    (
+        "homogeneous and exact first-order ODEs (fallback after the standard solver)",
+        crate::ode_first_order::run,
+    ),
 ];
 
 /// Centralized stateful execution engine session for URAE.
@@ -125,6 +129,8 @@ pub struct UraeSession {
     pub matrix_vars: HashMap<String, String>,
     /// Set while an internal evaluation runs: results carry no appended floating-point value.
     plain_results: bool,
+    /// Set while the first-order ODE fallback asks the standard solver, so the hook does not ask itself.
+    pub(crate) in_first_order_fallback: bool,
     /// Most recent successfully computed AST node (used for `ans`).
     pub last_result_expr: Option<ExprId>,
     /// Most recent parseable mathematical result string (used for `ans`).
@@ -156,6 +162,7 @@ impl UraeSession {
             user_aliases: HashMap::new(),
             matrix_vars: HashMap::new(),
             plain_results: false,
+            in_first_order_fallback: false,
             last_result_expr: None,
             last_result_text: None,
             context: MathContext::default(),
@@ -635,10 +642,14 @@ impl UraeSession {
         let has_decimal = bytes
             .windows(3)
             .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2].is_ascii_digit());
-        if !has_decimal || input.contains('=') || input.contains('[') || input.contains('{') {
+        if !has_decimal || input.contains('[') || input.contains('{') {
             return;
         }
         let shown = result.output_unicode.trim();
+        // An equation or assignment (`x = 1.5`, `y(x) = ...`) is not a value.
+        if shown.contains('=') {
+            return;
+        }
         let plain_number = !shown.is_empty()
             && shown
                 .chars()

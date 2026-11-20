@@ -72,6 +72,7 @@ pub mod numbertheory;
 pub mod numeric;
 pub mod numeric_commands;
 pub mod ode;
+pub mod ode_first_order;
 pub mod ode_ic;
 pub mod ode_numeric;
 pub mod ode_system;

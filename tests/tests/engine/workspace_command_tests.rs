@@ -3428,3 +3428,131 @@ fn workspace_commands_list_show_clear_and_reset() {
     assert_eq!(say("who"), "No variables defined.");
     assert_eq!(say("c + 1"), "c + 1");
 }
+
+#[test]
+fn indexing_reads_and_writes_every_element() {
+    let mut state = 0xFEED_FACE_CAFE_BEEFu64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i64
+    };
+    for _ in 0..8 {
+        let (rows, cols) = (2 + next(3) as usize, 2 + next(3) as usize);
+        let mut grid: Vec<Vec<i64>> = (0..rows)
+            .map(|_| (0..cols).map(|_| next(41) - 20).collect())
+            .collect();
+        let literal = |g: &Vec<Vec<i64>>| {
+            format!(
+                "[{}]",
+                g.iter()
+                    .map(|r| format!(
+                        "[{}]",
+                        r.iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let mut s = UraeSession::new();
+        let say = |s: &mut UraeSession, q: &str| -> String {
+            let r = s.execute_line(q);
+            assert!(!r.is_error, "{q}: {}", r.output_text);
+            r.output_text
+        };
+        say(&mut s, &format!("A = {}", literal(&grid)));
+        // Every element by A[i,j], A[i][j] and negative indices.
+        for i in 0..rows {
+            for j in 0..cols {
+                assert_eq!(
+                    say(&mut s, &format!("A[{},{}]", i + 1, j + 1)),
+                    grid[i][j].to_string()
+                );
+                assert_eq!(
+                    say(&mut s, &format!("A[{}][{}]", i + 1, j + 1)),
+                    grid[i][j].to_string()
+                );
+                assert_eq!(
+                    say(
+                        &mut s,
+                        &format!("A[{},{}]", i as i64 - rows as i64, j as i64 - cols as i64)
+                    ),
+                    grid[i][j].to_string()
+                );
+            }
+        }
+        // Shape queries and the diagonal.
+        assert_eq!(say(&mut s, "size(A)"), format!("{rows} x {cols}"));
+        assert_eq!(say(&mut s, "rows(A)"), rows.to_string());
+        assert_eq!(say(&mut s, "ncols(A)"), cols.to_string());
+        let diagonal: Vec<String> = (0..rows.min(cols))
+            .map(|k| grid[k][k].to_string())
+            .collect();
+        let expected = if diagonal.len() == 1 {
+            diagonal[0].clone()
+        } else {
+            format!("[ {} ]", diagonal.join(", "))
+        };
+        assert_eq!(say(&mut s, "diag(A)"), expected);
+        // A row and a column slice.
+        let row0: Vec<String> = grid[0].iter().map(|x| x.to_string()).collect();
+        assert_eq!(say(&mut s, "row(A, 1)"), format!("[ {} ]", row0.join(", ")));
+        assert_eq!(say(&mut s, "A[1,:]"), format!("[ {} ]", row0.join(", ")));
+        let col0: Vec<String> = grid.iter().map(|r| r[0].to_string()).collect();
+        assert_eq!(say(&mut s, "A[:,1]"), format!("[ {} ]", col0.join(" ; ")));
+        // Element assignment, then the whole matrix and the element read back.
+        let (i, j, value) = (
+            next(rows as u64) as usize,
+            next(cols as u64) as usize,
+            next(100) - 50,
+        );
+        say(&mut s, &format!("A[{},{}] = {value}", i + 1, j + 1));
+        grid[i][j] = value;
+        assert_eq!(
+            say(&mut s, &format!("A[{},{}]", i + 1, j + 1)),
+            value.to_string()
+        );
+        let shown = grid
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .collect::<Vec<_>>()
+            .join(" ; ");
+        assert_eq!(say(&mut s, "A"), format!("[ {shown} ]"));
+        // The edited matrix feeds arithmetic: its trace is the sum of the diagonal.
+        let trace: i64 = (0..rows.min(cols)).map(|k| grid[k][k]).sum();
+        if rows == cols {
+            assert_eq!(say(&mut s, "trace(A)"), trace.to_string());
+        }
+        // Out of range and zero are errors, not wrapped values.
+        assert!(s.execute_line(&format!("A[{},1]", rows + 1)).is_error);
+        assert!(s.execute_line("A[0,1]").is_error);
+    }
+    // Lists: one index, negative from the end, assignment.
+    let mut s = UraeSession::new();
+    s.execute_line("v = [10,20,30]");
+    assert_eq!(s.execute_line("v[1]").output_text, "10");
+    assert_eq!(s.execute_line("v[-1]").output_text, "30");
+    assert_eq!(s.execute_line("[10,20,30][2]").output_text, "20");
+    assert!(s.execute_line("v[4]").is_error);
+    s.execute_line("v[2] = 99");
+    assert_eq!(s.execute_line("v").output_text, "[ 10, 99, 30 ]");
+    // A flat list is still turned into a diagonal matrix by diag.
+    assert_eq!(
+        s.execute_line("diag([1,2,3])").output_text,
+        "[ 1, 0, 0 ; 0, 2, 0 ; 0, 0, 3 ]"
+    );
+    // Symbolic cells.
+    s.execute_line("B = [[a,b],[c,d]]");
+    assert_eq!(s.execute_line("B[1,2]").output_text, "b");
+    s.execute_line("B[2,2] = x+1");
+    assert_eq!(s.execute_line("B").output_text, "[ a, b ; c, x + 1 ]");
+}

@@ -155,7 +155,7 @@ fn bernoulli(n: u64) -> Q {
     b[n].clone()
 }
 
-fn sieve(limit: usize) -> Vec<bool> {
+pub(crate) fn sieve(limit: usize) -> Vec<bool> {
     let mut composite = vec![false; limit + 1];
     composite[0] = true;
     if limit >= 1 {
@@ -335,6 +335,16 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
             // L(n) = 2 F(n+1) - F(n)
             integer_result(b * 2 - a)
         }
+        ("double_factorial" | "factorial2" | "semifactorial", [n]) => {
+            let n = n
+                .to_integer()
+                .to_i64()
+                .filter(|v| (-1..=200_000).contains(v))?;
+            if !n_is_int(&args[0]) {
+                return None;
+            }
+            integer_result((2..=n).rev().step_by(2).fold(BigInt::one(), |p, v| p * v))
+        }
         ("tribonacci", [n]) => {
             let n = as_u64(n, 100_000)?;
             let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());
@@ -490,7 +500,7 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
                 }
             }))
         }
-        ("digitsum", [n]) => {
+        ("digitsum" | "digit_sum" | "sum_of_digits", [n]) => {
             let n = as_integer(n)?.abs();
             integer_result(BigInt::from(
                 n.to_string()
@@ -520,4 +530,8 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
         }
         _ => None,
     }
+}
+
+fn n_is_int(q: &Q) -> bool {
+    q.is_integer()
 }

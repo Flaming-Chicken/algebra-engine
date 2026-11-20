@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: `10!!` was read as the factorial of 10! (a wrong answer); `n!!` is now the double factorial. Added `primes(n)` (also `primes_up_to`), `digit_sum` (also `sum_of_digits`) and `is_square`.
 - Fixed: `2 x`, `a x + b`, `x y` and `solve(a x^2 + b x + c = 0, x)` (a space between factors is a product, tried when the input does not parse otherwise); solutions print square roots as `√(2)` instead of `2^(1/2)`.
 - Fixed: `convert 3 kg + 500 g to g` dropped the second quantity (it printed 3000 g); sums and differences of quantities now convert correctly, also written as a sentence (`3 kg + 500 g to g`, `5 km to m`). Added `10 choose 3` and `|x|`. The command-line program no longer treats a line starting with `[` or `{` as JSON unless it is JSON, so bracket matrices and set literals print normally.
 - Added: calculus the way it is written: `d/dx x^3`, `d^2/dx^2 f`, `∂/∂x f`, `lim x->0 f`, `∫ x^2 dx`, `∫_0^1 x^2 dx`, `∑_{k=1}^{4} k`, `sqrt 16`, `sin x`, `nth_root(27, 3)`; `derivative(f, x, 2)` now gives the second derivative.

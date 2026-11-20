@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: `arg`, `modulus`, `polar`, `atan2` (exact multiples of pi), `convolve`, and `dft`/`fft`/`ifft` on constant lists. They were echoed back unevaluated.
 - Added: `critical_points(f)` and `extrema(f)` (exact stationary points, classified as local minimum or maximum), `simpson`, `trapezoid` and `midpoint` quadrature with `n` subintervals, and the root-finder spellings `newton_method`, `bisection`, `secant`. They were echoed back unevaluated.
 - Added: exact linear programming, `maximize 3x + 2y subject to x + y <= 4, x + 3y <= 6` (also `minimize`, `max`, `min`, `s.t.`, constraints with `<=`, `>=`, `=`; non-negative variables): a two-phase simplex method with Bland's rule over the rationals gives the optimal value and a vertex exactly (`minimum value = 14/5 at x = 8/5, y = 6/5`), or reports `infeasible` or `unbounded`. These were parse errors.
 - Added: `next_term 1, 4, 9, 16`, `find_pattern 1, 1, 2, 3, 5, 8`, `nth_term 2, 4, 6, 8`: the rule of a sequence from its first terms, and the next five terms. A polynomial in `n` is tried first (finite differences, with one confirming term), then a linear recurrence with constant coefficients of order at most 4 (Berlekamp-Massey over the rationals, one confirming term), with its closed form from `rsolve`; nothing is invented when no rule fits (the primes). Terms are numbered from 1.

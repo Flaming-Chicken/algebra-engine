@@ -22,6 +22,7 @@ pub mod cat_eval;
 pub mod cft;
 pub mod combinatorics;
 pub mod complex_exact;
+pub mod complex_funcs;
 pub mod control;
 pub mod curvature;
 pub mod diffalg;

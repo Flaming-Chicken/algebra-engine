@@ -1699,6 +1699,8 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "convergents" => "convergents",
         "primes" | "primes_up_to" | "prime_list" | "list_primes" => "primes",
         "is_square" | "issquare" | "is_perfect_square" => "is_square",
+        "expected_value" | "expectation" => "expected_value",
+        "variance_discrete" | "discrete_variance" => "variance_discrete",
         _ => return None,
     })
 }

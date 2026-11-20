@@ -345,6 +345,48 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
             }
             integer_result((2..=n).rev().step_by(2).fold(BigInt::one(), |p, v| p * v))
         }
+        ("binomial_cdf", [n, p, k]) => {
+            let n = as_u64(n, 5000)?;
+            if *p < Q::zero() || *p > Q::one() || !k.is_integer() {
+                return None;
+            }
+            let k = k.to_integer().to_i64()?;
+            if k < 0 {
+                return Some(Q::zero());
+            }
+            let k = (k as u64).min(n);
+            let q = Q::one() - p;
+            let power = |base: &Q, e: u64| (0..e).fold(Q::one(), |acc, _| acc * base);
+            Some((0..=k).fold(Q::zero(), |sum, i| {
+                sum + Q::from_integer(binomial(n, i)) * power(p, i) * power(&q, n - i)
+            }))
+        }
+        ("hypergeometric_pmf", [k, total, successes, draws]) => {
+            let (k, total, successes, draws) = (
+                as_u64(k, 100_000)?,
+                as_u64(total, 100_000)?,
+                as_u64(successes, 100_000)?,
+                as_u64(draws, 100_000)?,
+            );
+            if successes > total
+                || draws > total
+                || k > successes
+                || draws < k
+                || draws - k > total - successes
+            {
+                return Some(Q::zero());
+            }
+            Some(Q::new(
+                binomial(successes, k) * binomial(total - successes, draws - k),
+                binomial(total, draws),
+            ))
+        }
+        ("z_score" | "zscore", [x, mean, sd]) if !sd.is_zero() => Some((x - mean) / sd),
+        ("bayes", [prior, sensitivity, false_positive]) => {
+            let joint = prior * sensitivity;
+            let denominator = &joint + (Q::one() - prior) * false_positive;
+            (!denominator.is_zero()).then(|| joint / denominator)
+        }
         ("tribonacci", [n]) => {
             let n = as_u64(n, 100_000)?;
             let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());

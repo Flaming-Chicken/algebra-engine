@@ -139,6 +139,36 @@ pub fn run(
                 .collect();
             Ok(format!("primes({limit}) = [{}]", primes.join(", ")))
         }
+        "expected_value" | "variance_discrete" => {
+            let (values, probabilities) = (
+                args.first().ok_or("a list of values is needed")?,
+                args.get(1).ok_or("a list of probabilities is needed")?,
+            );
+            if values.len() != probabilities.len() || values.is_empty() {
+                return Err(
+                    "the values and the probabilities must be lists of the same length".into(),
+                );
+            }
+            let total = probabilities.iter().fold(Q::zero(), |s, p| s + p);
+            if total != Q::one() || probabilities.iter().any(|p| *p < Q::zero()) {
+                return Err(format!(
+                    "the probabilities must be non-negative and sum to 1 (they sum to {})",
+                    show(&total)
+                ));
+            }
+            let mean = values
+                .iter()
+                .zip(probabilities)
+                .fold(Q::zero(), |s, (x, p)| s + x * p);
+            if name == "expected_value" {
+                return Ok(format!("expected value = {}", show(&mean)));
+            }
+            let second = values
+                .iter()
+                .zip(probabilities)
+                .fold(Q::zero(), |s, (x, p)| s + x * x * p);
+            Ok(format!("variance = {}", show(&(second - &mean * &mean))))
+        }
         "is_square" => {
             let n = integer(&scalar(0)?, "is_square")?;
             let square = !n.is_negative() && {

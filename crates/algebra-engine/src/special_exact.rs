@@ -175,3 +175,38 @@ pub fn evaluate(graph: &ExprGraph, expr: ExprId) -> ExprId {
         _ => expr,
     }
 }
+
+/// `expr` with every power to the exponent 1/2 written as a `sqrt` call, so that it prints as a radical (`√(2)`)
+/// instead of `2^(1/2)`. Used for display only.
+pub fn roots_as_sqrt(graph: &ExprGraph, expr: ExprId) -> ExprId {
+    let half = Q::new(1.into(), 2.into());
+    match graph.get(expr).kind.clone() {
+        ExprKind::Pow(b, e) => {
+            let base = roots_as_sqrt(graph, b);
+            if rational_argument(graph, e).is_some_and(|q| q == half) {
+                graph.function("sqrt", vec![base])
+            } else {
+                graph.pow(base, roots_as_sqrt(graph, e))
+            }
+        }
+        ExprKind::Add(ts) => graph.add(
+            ts.iter()
+                .map(|&t| roots_as_sqrt(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Mul(fs) => graph.mul(
+            fs.iter()
+                .map(|&t| roots_as_sqrt(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Sub(a, b) => graph.sub(roots_as_sqrt(graph, a), roots_as_sqrt(graph, b)),
+        ExprKind::Div(a, b) => graph.div(roots_as_sqrt(graph, a), roots_as_sqrt(graph, b)),
+        ExprKind::Neg(a) => graph.neg(roots_as_sqrt(graph, a)),
+        ExprKind::Function { name, args } => {
+            let new_args: Vec<ExprId> = args.iter().map(|&a| roots_as_sqrt(graph, a)).collect();
+            let fname = graph.symbols.resolve(name).unwrap_or_default();
+            graph.function(&fname, new_args)
+        }
+        _ => expr,
+    }
+}

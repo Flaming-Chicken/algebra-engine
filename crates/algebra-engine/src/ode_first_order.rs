@@ -76,7 +76,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
     }
     let curvature = session.eval(&format!("diff(({derivative}), dydx)")).ok()?;
     if curvature.trim() != "0" {
-        return None;
+        return clairaut(session, &equation, &name);
     }
     let n = derivative;
     let symbols = symbols_of(session, &format!("({m}) + ({n})"))?;
@@ -189,4 +189,39 @@ fn homogeneous(session: &mut UraeSession, m: &str, n: &str, x: &str, y: &str) ->
     Some(format!(
         "{implicit} = ln({x}) + C1  (implicit solution: y cannot be isolated in closed form)"
     ))
+}
+
+/// Clairaut's equation `y = x y' + f(y')` (in any rearrangement): the lines `y = C x + f(C)` and the singular envelope
+/// `x = -f'(p)`, `y = p x + f(p)`.
+fn clairaut(session: &mut UraeSession, equation: &str, y: &str) -> Option<Result<String, String>> {
+    let k = session.eval(&format!("diff(({equation}), {y})")).ok()?;
+    let k = k.trim().to_string();
+    if k == "0" || !symbols_of(session, &k)?.is_empty() {
+        return None;
+    }
+    let symbols = symbols_of(session, equation)?;
+    let independent: Vec<&String> = symbols.iter().filter(|s| *s != y && *s != "dydx").collect();
+    let [x] = independent.as_slice() else {
+        return None;
+    };
+    let x = (*x).clone();
+    // E / k = y - x p - f(p), so f = y - x p - E / k must be free of x and y.
+    let f = session
+        .eval(&format!("simplify({y} - {x}*dydx - ({equation})/({k}))"))
+        .ok()?;
+    let used = symbols_of(session, &f)?;
+    if used.contains(&x) || used.contains(y) {
+        return None;
+    }
+    let general = session.eval(&format!("subs(({f}), dydx = C1)")).ok()?;
+    let singular_x = session
+        .eval(&format!("simplify(diff(-({f}), dydx))"))
+        .ok()?;
+    let singular_y = session
+        .eval(&format!("simplify(dydx*({singular_x}) + ({f}))"))
+        .ok()?;
+    let line = format!("{y} = C1*{x} + ({general})");
+    Some(Ok(format!(
+        "{line}  (Clairaut equation; singular solution {x} = {singular_x}, {y} = {singular_y}, parameter dydx)"
+    )))
 }

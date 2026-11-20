@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `dsolve` solves Clairaut equations `y = x y' + f(y')`: the family of lines and the singular envelope.
 - `mregress(X, y)` / `ols`: multiple linear regression with coefficient inference, R^2 and the F test.
 - `kendall(x, y)`: Kendall's tau-b with exact or tie-corrected normal p-value.
 - Linear algebra on rational matrices: `rowspace`, `columnspace`, `adjugate`, `cofactor`, `minor`, `hadamard`, `pinv`, `lstsq`, `gram_schmidt`, `orthonormalize`, `projection`, `frobenius_norm`, `cond`, `matrix_exp`/`expm`, `eig`, and the predicates `is_symmetric`, `is_orthogonal`, `is_positive_definite`.

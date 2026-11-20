@@ -2377,3 +2377,53 @@ fn spaced_products_and_radical_solutions() {
         "{general}"
     );
 }
+
+#[test]
+fn double_factorial_primes_and_digit_functions_match_definitions() {
+    let int = |q: &str| -> u128 { run(q).parse().unwrap() };
+    // n!! = n (n-2)!! with 0!! = 1!! = 1, and n!! (n-1)!! = n!. The old reading of `10!!` was (10!)!.
+    let mut double = vec![1u128, 1];
+    for n in 2..=25usize {
+        let v = n as u128 * double[n - 2];
+        double.push(v);
+    }
+    let mut factorial = 1u128;
+    for n in 0..=25usize {
+        if n > 0 {
+            factorial *= n as u128;
+        }
+        assert_eq!(int(&format!("{n}!!")), double[n], "{n}!!");
+        if n >= 1 {
+            assert_eq!(
+                double[n] * double[n - 1],
+                factorial,
+                "n!! (n-1)!! = n! at {n}"
+            );
+        }
+    }
+    assert_eq!(int("10!!"), 3840);
+    // primes(n) against trial division.
+    for limit in [2u32, 10, 30, 100, 200] {
+        let expected: Vec<String> = (2..=limit)
+            .filter(|n| (2..*n).take_while(|d| d * d <= *n).all(|d| n % d != 0))
+            .map(|n| n.to_string())
+            .collect();
+        assert_eq!(
+            run(&format!("primes({limit})")),
+            format!("primes({limit}) = [{}]", expected.join(", "))
+        );
+    }
+    // digit_sum against the decimal string, is_square against integer square roots.
+    for n in [0u64, 7, 99, 12345, 987_654_321, 1_000_000_007] {
+        let expected: u32 = n.to_string().chars().map(|c| c.to_digit(10).unwrap()).sum();
+        assert_eq!(run(&format!("digit_sum({n})")), expected.to_string());
+        assert_eq!(run(&format!("sum_of_digits({n})")), expected.to_string());
+    }
+    for n in 0u64..=200 {
+        let root = (n as f64).sqrt().round() as u64;
+        assert_eq!(
+            run(&format!("is_square({n})")),
+            format!("is_square({n}) = {}", root * root == n)
+        );
+    }
+}

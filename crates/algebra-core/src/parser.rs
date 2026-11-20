@@ -373,7 +373,10 @@ impl<'a> ExprParser<'a> {
         let (mut input, mut base) = self.parse_primary(input)?;
         loop {
             let after_ws = input.trim_start();
-            if after_ws.starts_with('!') && !after_ws.starts_with("!=") {
+            if let Some(rest) = after_ws.strip_prefix("!!") {
+                base = self.graph.function("double_factorial", [base]);
+                input = rest;
+            } else if after_ws.starts_with('!') && !after_ws.starts_with("!=") {
                 base = self.graph.function("factorial", [base]);
                 input = &after_ws[1..];
             } else {
@@ -1694,6 +1697,8 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "crt" | "chinese_remainder" => "crt",
         "continued_fraction" | "cfrac" | "contfrac" => "continued_fraction",
         "convergents" => "convergents",
+        "primes" | "primes_up_to" | "prime_list" | "list_primes" => "primes",
+        "is_square" | "issquare" | "is_perfect_square" => "is_square",
         _ => return None,
     })
 }

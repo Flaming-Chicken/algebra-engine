@@ -126,6 +126,27 @@ pub fn run(
                 (a / b).floor().to_integer()
             ))
         }
+        "primes" => {
+            let n = integer(&scalar(0)?, "primes")?;
+            let limit = n
+                .to_usize()
+                .filter(|l| *l <= 2_000_000)
+                .ok_or("primes(n) needs 0 <= n <= 2000000")?;
+            let composite = crate::discrete::sieve(limit);
+            let primes: Vec<String> = (2..=limit)
+                .filter(|&i| !composite[i])
+                .map(|i| i.to_string())
+                .collect();
+            Ok(format!("primes({limit}) = [{}]", primes.join(", ")))
+        }
+        "is_square" => {
+            let n = integer(&scalar(0)?, "is_square")?;
+            let square = !n.is_negative() && {
+                let r = n.sqrt();
+                &r * &r == n
+            };
+            Ok(format!("is_square({n}) = {square}"))
+        }
         "digits" => {
             let n = integer(&scalar(0)?, "digits")?;
             let base = if args.len() > 1 {

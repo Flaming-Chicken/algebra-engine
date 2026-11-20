@@ -1370,7 +1370,7 @@ pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutp
         | "sd" | "pstddev" | "min" | "max" | "mode" | "range" | "quartiles" | "iqr"
         | "skewness" | "kurtosis" | "zscore" => statistics(graph, name, args),
         "divmod" | "floordiv" | "digits" | "egcd" | "crt" | "continued_fraction"
-        | "convergents" => {
+        | "convergents" | "primes" | "is_square" => {
             let mut parsed: Vec<Vec<Q>> = Vec::new();
             for arg in args {
                 let text = arg.trim();
@@ -1464,6 +1464,8 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "crt" | "chinese_remainder" => "crt",
         "continued_fraction" | "cfrac" | "contfrac" => "continued_fraction",
         "convergents" => "convergents",
+        "primes" | "primes_up_to" | "prime_list" | "list_primes" => "primes",
+        "is_square" | "issquare" | "is_perfect_square" => "is_square",
         _ => return None,
     })
 }

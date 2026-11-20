@@ -3694,3 +3694,78 @@ fn inverse_laplace_recovers_the_time_function_and_finance_matches_formulas() {
     assert_eq!(run("0.1 + 0.2"), "3/10");
     assert!(run("1000*(1+0.05)^10").contains(" ≈ 1628.89462677744"));
 }
+
+#[test]
+fn npv_irr_cagr_and_doubling_time_are_self_consistent() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    // npv is the discounted sum of the flows, the first at time 0 (exact rationals against f64).
+    for (rate, flows) in [
+        (0.1f64, vec![-100.0, 50.0, 60.0]),
+        (0.05, vec![-1000.0, 300.0, 400.0, 500.0]),
+        (0.2, vec![10.0, 10.0, 10.0]),
+    ] {
+        let list = format!(
+            "[{}]",
+            flows
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let expected: f64 = flows
+            .iter()
+            .enumerate()
+            .map(|(k, f)| f / (1.0 + rate).powi(k as i32))
+            .sum();
+        let got = number(run(&format!("npv({rate:?}, {list})")));
+        assert!(
+            (got - expected).abs() < 1e-9,
+            "npv({rate}, {list}) = {got}, expected {expected}"
+        );
+    }
+    assert_eq!(run("npv(0.1, [-100, 50, 60])"), "-600/121");
+    assert_eq!(run("npv(0, [1, 2, 3])"), "6");
+    // The internal rate of return is the rate at which the npv vanishes.
+    for flows in [
+        "[-100, 50, 60]",
+        "[-1000, 300, 400, 500]",
+        "[-50, 20, 20, 20, 20]",
+        "[-10, 0, 0, 15]",
+    ] {
+        let rate = number(run(&format!("irr({flows})")));
+        assert!(rate > -0.99 && rate < 100.0);
+        let residual = number(run(&format!("npv({rate:?}, {flows})")));
+        assert!(
+            residual.abs() < 1e-8,
+            "irr({flows}) = {rate}, npv there = {residual}"
+        );
+    }
+    // Flows that never change sign have no internal rate of return.
+    assert!(UraeSession::new().execute_line("irr([100, 50])").is_error);
+    // cagr: (1 + cagr)^years = end / start; doubling time: (1 + r)^T = 2.
+    for (start, end, years) in [
+        (100.0f64, 200.0f64, 5.0f64),
+        (1000.0, 1500.0, 3.0),
+        (50.0, 40.0, 4.0),
+    ] {
+        let growth = number(run(&format!("cagr({start:?}, {end:?}, {years:?})")));
+        assert!(
+            ((1.0 + growth).powf(years) - end / start).abs() < 1e-12,
+            "cagr({start}, {end}, {years})"
+        );
+    }
+    for rate in [0.01f64, 0.07, 0.5, 2.0] {
+        let time = number(run(&format!("doubling_time({rate:?})")));
+        assert!(
+            ((1.0 + rate).powf(time) - 2.0).abs() < 1e-9,
+            "doubling_time({rate}) = {time}"
+        );
+    }
+    assert_eq!(run("doubling_time(1)"), "1");
+}

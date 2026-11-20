@@ -125,6 +125,12 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
     }
     if matches!(
         name.as_str(),
+        "min_cost_flow" | "mincostflow" | "minimum_cost_flow"
+    ) {
+        return Some(min_cost_flow(&t[open + 1..t.len() - 1]));
+    }
+    if matches!(
+        name.as_str(),
         "transportation" | "transport" | "transportation_problem"
     ) {
         return Some(transportation(&t[open + 1..t.len() - 1]));
@@ -245,5 +251,144 @@ fn transportation(body: &str) -> Result<String, String> {
         }
         Outcome::Infeasible => Err("infeasible: the total supply does not cover the demand".into()),
         Outcome::Unbounded => Err("unbounded".into()),
+    }
+}
+
+fn rational(text: &str) -> Option<Q> {
+    let t = text.trim();
+    match t.split_once('/') {
+        Some((a, b)) => {
+            let (a, b) = (
+                a.trim().parse::<num_bigint::BigInt>().ok()?,
+                b.trim().parse::<num_bigint::BigInt>().ok()?,
+            );
+            (!b.is_zero()).then(|| Q::new(a, b))
+        }
+        None => t.parse::<num_bigint::BigInt>().ok().map(Q::from_integer),
+    }
+}
+
+/// `min_cost_flow(arcs, balances)`: arcs `[from, to, capacity, cost]`, balances `[node, b]` with `b > 0` for a source of `b` units
+/// and `b < 0` for a sink; the cheapest flow meeting every balance within the arc capacities (an exact linear program).
+fn min_cost_flow(body: &str) -> Result<String, String> {
+    use crate::simplex_exact::{Outcome, Sense, maximise};
+    let parts = crate::graph_commands::split_top(body);
+    let [arc_text, balance_text] = parts.as_slice() else {
+        return Err("min_cost_flow(arcs, balances): arcs [[u, v, capacity, cost], ...], balances [[node, b], ...]".into());
+    };
+    let strip = |t: &str| {
+        let t = t.trim();
+        t.strip_prefix('[')
+            .and_then(|r| r.strip_suffix(']'))
+            .unwrap_or(t)
+            .to_string()
+    };
+    let mut names: Vec<String> = Vec::new();
+    let mut node = |label: &str| match names.iter().position(|n| n == label.trim()) {
+        Some(i) => i,
+        None => {
+            names.push(label.trim().to_string());
+            names.len() - 1
+        }
+    };
+    let mut arcs: Vec<(usize, usize, Q, Q)> = Vec::new();
+    for item in crate::graph_commands::split_top(&strip(arc_text)) {
+        let owned = strip(&item);
+        let cells: Vec<&str> = owned.split(',').map(str::trim).collect();
+        let [u, v, cap, cost] = cells.as_slice() else {
+            return Err(format!("{item} is not an arc [from, to, capacity, cost]"));
+        };
+        let (cap, cost) = (
+            rational(cap).ok_or("capacities must be numbers")?,
+            rational(cost).ok_or("costs must be numbers")?,
+        );
+        if cap < Q::zero() {
+            return Err("capacities must not be negative".into());
+        }
+        arcs.push((node(u), node(v), cap, cost));
+    }
+    let mut balances: Vec<(usize, Q)> = Vec::new();
+    for item in crate::graph_commands::split_top(&strip(balance_text)) {
+        let owned = strip(&item);
+        let cells: Vec<&str> = owned.split(',').map(str::trim).collect();
+        let [label, amount] = cells.as_slice() else {
+            return Err(format!("{item} is not a balance [node, amount]"));
+        };
+        balances.push((
+            node(label),
+            rational(amount).ok_or("balances must be numbers")?,
+        ));
+    }
+    let n = names.len();
+    let m = arcs.len();
+    let total: Q = balances.iter().fold(Q::zero(), |a, (_, b)| a + b);
+    if !total.is_zero() {
+        return Err("the balances must add up to zero (supplies equal demands)".into());
+    }
+    let one = Q::from_integer(1.into());
+    let mut rows: Vec<Vec<Q>> = Vec::new();
+    let mut senses = Vec::new();
+    let mut rhs = Vec::new();
+    for v in 0..n {
+        // outflow - inflow = balance of v
+        rows.push(
+            arcs.iter()
+                .map(|(a, b, _, _)| {
+                    if *a == v && *b == v {
+                        Q::zero()
+                    } else if *a == v {
+                        one.clone()
+                    } else if *b == v {
+                        -one.clone()
+                    } else {
+                        Q::zero()
+                    }
+                })
+                .collect(),
+        );
+        senses.push(Sense::Equal);
+        rhs.push(
+            balances
+                .iter()
+                .filter(|(x, _)| *x == v)
+                .fold(Q::zero(), |a, (_, b)| a + b),
+        );
+    }
+    for (k, (_, _, cap, _)) in arcs.iter().enumerate() {
+        rows.push(
+            (0..m)
+                .map(|j| if j == k { one.clone() } else { Q::zero() })
+                .collect(),
+        );
+        senses.push(Sense::LessEqual);
+        rhs.push(cap.clone());
+    }
+    let objective: Vec<Q> = arcs.iter().map(|(_, _, _, c)| -c.clone()).collect();
+    match maximise(&objective, &rows, &senses, &rhs) {
+        Outcome::Optimal { value, point } => {
+            let flows: Vec<String> = arcs
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| !point[*k].is_zero())
+                .map(|(k, (a, b, _, _))| {
+                    format!("{} on {}->{}", show(&point[k]), names[*a], names[*b])
+                })
+                .collect();
+            Ok(format!(
+                "minimum cost {}: {}",
+                show(&-value),
+                if flows.is_empty() {
+                    "no flow".to_string()
+                } else {
+                    flows.join(", ")
+                }
+            ))
+        }
+        Outcome::Infeasible => {
+            Err("infeasible: the capacities cannot carry the required flow".into())
+        }
+        Outcome::Unbounded => {
+            Err("unbounded: a negative-cost cycle with unlimited capacity".into())
+        }
     }
 }

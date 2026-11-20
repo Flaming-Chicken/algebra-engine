@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Graph paths and matchings: `is_eulerian`, `euler_path`, `hamiltonian_path`, `hamiltonian_cycle`, `max_matching`.
 - `inverse_ztransform(X, z, n)` for rational X(z) with real poles.
 - Weighted and directed graphs: `dijkstra`, `minimum_spanning_tree`, `max_flow` (with minimum cut), `topological_sort`, `strongly_connected_components`.
 - `dsolve` solves Clairaut equations `y = x y' + f(y')`: the family of lines and the singular envelope.

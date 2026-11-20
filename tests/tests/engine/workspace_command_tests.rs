@@ -6075,3 +6075,161 @@ fn inverse_z_transform_reproduces_the_series_of_x_of_z() {
             .is_error
     );
 }
+
+#[test]
+fn graph_paths_and_matchings_match_exhaustive_search() {
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    let parse_path = |text: &str, prefix: &str| -> Vec<usize> {
+        text.trim_start_matches(prefix)
+            .trim()
+            .split(" - ")
+            .map(|v| v[1..].parse().unwrap())
+            .collect()
+    };
+    for round in 0..40 {
+        let n = 4 + (round % 4);
+        let mut edges: Vec<(usize, usize)> = Vec::new();
+        for a in 0..n {
+            for b in a + 1..n {
+                if next(100) < 45 {
+                    edges.push((a, b));
+                }
+            }
+        }
+        if edges.len() < 2 {
+            continue;
+        }
+        let has = |a: usize, b: usize| edges.iter().any(|&(x, y)| (x, y) == (a.min(b), a.max(b)));
+        let text = format!(
+            "[{}]",
+            edges
+                .iter()
+                .map(|(a, b)| format!("[v{a},v{b}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let present: Vec<usize> = (0..n)
+            .filter(|v| edges.iter().any(|&(a, b)| a == *v || b == *v))
+            .collect();
+        let m = present.len();
+        // Hamiltonian path / cycle through the vertices that occur in the edge list.
+        let mut found_path = false;
+        let mut found_cycle = false;
+        let mut order: Vec<usize> = present.clone();
+        fn permute(k: usize, order: &mut Vec<usize>, visit: &mut dyn FnMut(&[usize])) {
+            if k == order.len() {
+                visit(order);
+                return;
+            }
+            for i in k..order.len() {
+                order.swap(k, i);
+                permute(k + 1, order, visit);
+                order.swap(k, i);
+            }
+        }
+        permute(0, &mut order, &mut |o: &[usize]| {
+            if o.windows(2).all(|w| has(w[0], w[1])) {
+                found_path = true;
+                if m >= 3 && has(o[m - 1], o[0]) {
+                    found_cycle = true;
+                }
+            }
+        });
+        let path = run(&format!("hamiltonian_path({text})"));
+        let cycle = run(&format!("hamiltonian_cycle({text})"));
+        assert_eq!(path != "none", found_path, "{text}: {path}");
+        assert_eq!(cycle != "none", found_cycle, "{text}: {cycle}");
+        if found_path {
+            let p = parse_path(&path, "");
+            assert!(
+                p.len() == m && p.windows(2).all(|w| has(w[0], w[1])),
+                "{text}: {path}"
+            );
+        }
+        if found_cycle {
+            let c = parse_path(&cycle, "");
+            assert!(
+                c.len() == m + 1 && c[0] == c[m] && c.windows(2).all(|w| has(w[0], w[1])),
+                "{text}: {cycle}"
+            );
+        }
+        // Maximum matching against every edge subset.
+        let mut best = 0;
+        for mask in 0u32..1 << edges.len() {
+            let mut used = 0u32;
+            let mut ok = true;
+            for (i, &(a, b)) in edges.iter().enumerate() {
+                if mask >> i & 1 == 1 {
+                    if used >> a & 1 == 1 || used >> b & 1 == 1 {
+                        ok = false;
+                        break;
+                    }
+                    used |= 1 << a | 1 << b;
+                }
+            }
+            if ok {
+                best = best.max(mask.count_ones() as usize);
+            }
+        }
+        let matching = run(&format!("max_matching({text})"));
+        assert_eq!(
+            matching
+                .split(':')
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap(),
+            best,
+            "{text}: {matching}"
+        );
+        // Euler: parity of the degrees and connectivity of the edges; the trail uses every edge once.
+        let degree = |v: usize| edges.iter().filter(|&&(a, b)| a == v || b == v).count();
+        let odd = present.iter().filter(|v| degree(**v) % 2 == 1).count();
+        let mut seen = vec![present[0]];
+        let mut grew = true;
+        while grew {
+            grew = false;
+            for &(a, b) in &edges {
+                if seen.contains(&a) != seen.contains(&b) {
+                    seen.push(a);
+                    seen.push(b);
+                    grew = true;
+                }
+            }
+        }
+        let connected = present.iter().all(|v| seen.contains(v));
+        let eulerian_trail = connected && (odd == 0 || odd == 2);
+        assert_eq!(
+            run(&format!("is_eulerian({text})")) == "true",
+            connected && odd == 0,
+            "{text}"
+        );
+        let trail = run(&format!("euler_path({text})"));
+        assert_eq!(trail != "none", eulerian_trail, "{text}: {trail}");
+        if eulerian_trail {
+            let walk = parse_path(trail.split(": ").nth(1).unwrap(), "");
+            assert_eq!(walk.len(), edges.len() + 1, "{text}: {trail}");
+            let mut left = edges.clone();
+            for w in walk.windows(2) {
+                let key = (w[0].min(w[1]), w[0].max(w[1]));
+                let at = left
+                    .iter()
+                    .position(|e| *e == key)
+                    .unwrap_or_else(|| panic!("{text}: {trail}"));
+                left.remove(at);
+            }
+            assert!(left.is_empty(), "{text}: {trail}");
+        }
+    }
+    assert_eq!(run("is_eulerian(K5)"), "true");
+    assert_eq!(run("is_eulerian(K4)"), "false");
+    assert!(run("hamiltonian_cycle(C6)").starts_with('1'));
+    assert_eq!(run("hamiltonian_cycle(P4)"), "none");
+    assert!(run("max_matching(K6)").starts_with("3:"));
+}

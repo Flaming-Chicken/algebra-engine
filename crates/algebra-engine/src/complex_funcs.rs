@@ -208,6 +208,27 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             }
             return Some(session.eval(&text));
         }
+        "degrees"
+        | "rad2deg"
+        | "radians"
+        | "deg2rad"
+        | "celsius_to_fahrenheit"
+        | "fahrenheit_to_celsius"
+        | "celsius_to_kelvin"
+        | "kelvin_to_celsius"
+        | "c_to_f"
+        | "f_to_c" => {
+            let [x] = args.as_slice() else { return None };
+            let rewritten = match name.as_str() {
+                "degrees" | "rad2deg" => format!("({x})*180/pi"),
+                "radians" | "deg2rad" => format!("({x})*pi/180"),
+                "celsius_to_fahrenheit" | "c_to_f" => format!("({x})*9/5 + 32"),
+                "fahrenheit_to_celsius" | "f_to_c" => format!("(({x}) - 32)*5/9"),
+                "celsius_to_kelvin" => format!("({x}) + 5463/20"),
+                _ => format!("({x}) - 5463/20"),
+            };
+            return Some(session.eval(&rewritten));
+        }
         "hypotenuse" | "heron" | "area_triangle" | "angle_between" | "maclaurin" => {
             // Spellings that are fixed formulas of the plain commands.
             let rewritten = match (name.as_str(), args.as_slice()) {

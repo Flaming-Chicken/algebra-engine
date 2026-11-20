@@ -2749,3 +2749,61 @@ fn logic_commands_match_brute_force_and_set_notation_works() {
     }
     assert_eq!(run("|x|"), run("abs(x)"));
 }
+
+#[test]
+fn degrees_temperatures_and_signed_denominators() {
+    let tail = |q: &str| -> f64 {
+        let out = run(q);
+        out.rsplit(" ≈ ")
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{q}: {out}"))
+    };
+    // Degree literals in three spellings against the standard library (an angle with a decimal gets a numeric tail).
+    for angle in [10.5f64, 22.5, 37.25, 100.5, 200.5] {
+        let r = angle.to_radians();
+        for spelling in [
+            format!("{angle}°"),
+            format!("{angle} deg"),
+            format!("{angle} degrees"),
+        ] {
+            assert!(
+                (tail(&format!("sin({spelling})")) - r.sin()).abs() < 1e-12,
+                "sin({spelling})"
+            );
+            assert!(
+                (tail(&format!("cos({spelling})")) - r.cos()).abs() < 1e-12,
+                "cos({spelling})"
+            );
+            assert!(
+                (tail(&format!("tan({spelling})")) - r.tan()).abs() < 1e-9,
+                "tan({spelling})"
+            );
+        }
+    }
+    // Exact special angles.
+    assert_eq!(run("sin(30°)"), "1/2");
+    assert_eq!(run("cos(60 degrees)"), "1/2");
+    assert_eq!(run("tan(45 deg)"), "1");
+    assert_eq!(run("sin(90°) + cos(0°)"), "2");
+    assert_eq!(run("deg2rad(90)"), "1/2 · pi");
+    assert_eq!(run("radians(180)"), run("pi"));
+    assert_eq!(run("degrees(pi)"), "180");
+    assert_eq!(run("rad2deg(pi/2)"), "90");
+    // Temperatures: known points and the round trip.
+    assert_eq!(run("celsius_to_fahrenheit(100)"), "212");
+    assert_eq!(run("celsius_to_fahrenheit(-40)"), "-40");
+    assert_eq!(run("fahrenheit_to_celsius(32)"), "0");
+    for c in [-273i64, -40, 0, 37, 100, 1000] {
+        let f = run(&format!("celsius_to_fahrenheit({c})"));
+        assert_eq!(run(&format!("fahrenheit_to_celsius({f})")), c.to_string());
+    }
+    // A name that merely starts like a unit is not an angle.
+    assert!(UraeSession::new().execute_line("x deg").is_error);
+    // x / -y prints as -x / y: the parallel-resistance solution is no longer `-1 / (-(...))`.
+    let parallel = run("solve(1/R = 1/a + 1/b, R)");
+    assert!(!parallel.contains("-1 / (-"), "{parallel}");
+    assert_eq!(parallel, "Solutions for R: [1 / (1 / a + 1 / b)]");
+}

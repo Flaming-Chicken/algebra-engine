@@ -66,6 +66,7 @@ pub mod numeric;
 pub mod numeric_commands;
 pub mod ode;
 pub mod ode_ic;
+pub mod ode_numeric;
 pub mod padic_hodge;
 pub mod pde;
 pub mod physics;

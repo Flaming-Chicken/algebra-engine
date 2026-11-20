@@ -1958,3 +1958,44 @@ fn residues_and_poles_match_closed_forms() {
     assert_eq!(run("abs(3+4i)"), "5");
     assert_eq!(run("abs(-3)"), "3");
 }
+
+#[test]
+fn fixed_step_ode_methods_converge_at_their_orders() {
+    let value = |text: String| -> f64 {
+        text.split(" ≈ ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // y' = y, y(0) = 1: Euler is exactly (1 + h)^n, and the error of each method falls like h^p.
+    assert!((value(run("euler_method(y, 0, 1, 1, 10)")) - 1.1f64.powi(10)).abs() < 1e-12);
+    let exact = std::f64::consts::E;
+    for (method, order) in [
+        ("euler_method", 1.0f64),
+        ("heun", 2.0),
+        ("midpoint_method", 2.0),
+        ("rk4", 4.0),
+    ] {
+        let error = |n: u32| (value(run(&format!("{method}(y, 0, 1, 1, {n})"))) - exact).abs();
+        let rate = (error(20) / error(40)).log2();
+        assert!(
+            (rate - order).abs() < 0.2,
+            "{method}: observed order {rate}, expected {order}"
+        );
+    }
+    // y' = x + y, y(0) = 1 has the solution 2 e^x - x - 1; the second spelling names the unknown function.
+    let solution = 2.0 * std::f64::consts::E - 2.0;
+    assert!((value(run("rk4(x + y, 0, 1, 1, 200)")) - solution).abs() < 1e-9);
+    assert!((value(run("rk4(y' = x + y, y(0) = 1, 1, 200)")) - solution).abs() < 1e-9);
+    // y' = -2 t y, y(0) = 1: the solution is exp(-t^2); the independent variable may be t.
+    assert!((value(run("rk4(-2*t*y, 0, 1, 1, 200)")) - (-1.0f64).exp()).abs() < 1e-9);
+    assert!(
+        UraeSession::new()
+            .execute_line("rk4(y, 0, 1, 1, 0)")
+            .is_error
+    );
+}

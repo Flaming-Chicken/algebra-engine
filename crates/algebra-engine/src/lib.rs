@@ -40,6 +40,7 @@ pub mod geometry;
 pub mod gosper;
 pub mod gpu;
 pub mod graph_commands;
+pub mod graph_paths;
 pub mod guess;
 pub mod hecs;
 pub mod heuristic;

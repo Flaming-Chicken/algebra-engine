@@ -79,6 +79,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         |_, line| crate::weighted_graph::run(line),
     ),
     (
+        "graph paths and matchings (euler_path, hamiltonian_cycle, max_matching)",
+        |_, line| crate::graph_paths::run(line),
+    ),
+    (
         "propositional logic (truth_table, tautology, ...)",
         |_, line| crate::logic_commands::run(line),
     ),

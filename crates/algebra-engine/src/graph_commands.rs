@@ -7,17 +7,17 @@ use num_traits::{One, Zero};
 use std::collections::{BTreeSet, VecDeque};
 
 /// A simple undirected graph on vertices `0..n` with named vertices.
-struct Graph {
-    names: Vec<String>,
-    edges: BTreeSet<(usize, usize)>,
+pub(crate) struct Graph {
+    pub(crate) names: Vec<String>,
+    pub(crate) edges: BTreeSet<(usize, usize)>,
 }
 
 impl Graph {
-    fn n(&self) -> usize {
+    pub(crate) fn n(&self) -> usize {
         self.names.len()
     }
 
-    fn adjacency(&self) -> Vec<Vec<usize>> {
+    pub(crate) fn adjacency(&self) -> Vec<Vec<usize>> {
         let mut adj = vec![Vec::new(); self.n()];
         for &(a, b) in &self.edges {
             adj[a].push(b);
@@ -49,7 +49,7 @@ pub(crate) fn split_top(text: &str) -> Vec<String> {
 }
 
 /// `K4`, `C5`, `P4`, `S4` (a star with 4 leaves) or an edge list.
-fn parse_graph(text: &str) -> Result<Graph, String> {
+pub(crate) fn parse_graph(text: &str) -> Result<Graph, String> {
     let t = text.trim();
     if let Some(rest) = t.strip_prefix(['K', 'C', 'P', 'S', 'k', 'c', 'p', 's'])
         && let Ok(n) = rest.parse::<usize>()

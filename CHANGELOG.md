@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Linear algebra on rational matrices: `rowspace`, `columnspace`, `adjugate`, `cofactor`, `minor`, `hadamard`, `pinv`, `lstsq`, `gram_schmidt`, `orthonormalize`, `projection`, `frobenius_norm`, `cond`, `matrix_exp`/`expm`, `eig`, and the predicates `is_symmetric`, `is_orthogonal`, `is_positive_definite`.
 - `regress(x, y)` (slope and intercept with standard errors, t, p, intervals, R^2), `wilcoxon(a, b)` (signed rank, exact) and `kruskal(a, b, c)` (Kruskal-Wallis H).
 - `fisher_exact([[a, b], [c, d]])`, `correlation_test(x, y)`, `spearman(x, y)` and `mann_whitney(a, b)`: exact p-values by enumeration where the sample is small.
 - More tests: a trailing `greater` / `less` selects a one-sided alternative; `proportion_test(x, n, p0)`, `chi2_test(observed, expected)`, `chi2_test(table)` and `anova(a, b, c)`.

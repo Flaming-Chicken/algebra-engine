@@ -3950,3 +3950,77 @@ fn linear_ode_systems_satisfy_their_equations_and_initial_conditions() {
             .is_error
     );
 }
+
+#[test]
+fn amortization_schedules_balance_to_zero() {
+    for (principal, rate, years) in [
+        (10_000.0f64, 0.06f64, 1u32),
+        (200_000.0, 0.06, 30),
+        (5_000.0, 0.12, 2),
+        (75_000.0, 0.045, 5),
+    ] {
+        let months = (years * 12) as usize;
+        let out = run(&format!(
+            "amortization({principal:?}, {rate:?}, {years}, {months})"
+        ));
+        let mut lines = out.lines();
+        let header = lines.next().unwrap();
+        let payment: f64 = header
+            .split("payment = ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        // The payment against the closed form.
+        let i = rate / 12.0;
+        let exact = principal * i / (1.0 - (1.0 + i).powi(-(months as i32)));
+        assert!(
+            (payment - exact).abs() <= 0.0051,
+            "payment {payment} vs {exact}"
+        );
+        let (mut balance, mut principal_paid, mut rows) = (principal, 0.0f64, 0);
+        for (k, line) in lines.enumerate() {
+            let cells: Vec<f64> = line
+                .split(" | ")
+                .skip(1)
+                .map(|c| c.trim().parse().unwrap())
+                .collect();
+            let (interest, repaid, shown) = (cells[0], cells[1], cells[2]);
+            // Each row against the recurrence: interest = balance * i, balance falls by the principal repaid.
+            let expected_interest = balance * i;
+            assert!(
+                (interest - expected_interest).abs() <= 0.0101,
+                "row {}: interest {interest} vs {expected_interest}",
+                k + 1
+            );
+            balance = balance * (1.0 + i) - exact;
+            assert!(
+                (shown - balance).abs() <= 0.02 * (k as f64 + 1.0).min(5.0) + 0.0101,
+                "row {}: balance {shown} vs {balance}",
+                k + 1
+            );
+            // Interest plus principal is the payment (to the cent).
+            assert!((interest + repaid - payment).abs() <= 0.0101);
+            principal_paid += repaid;
+            rows += 1;
+        }
+        assert_eq!(rows, months);
+        // The loan is repaid in full: the last balance is zero and the principal repaid adds up to the loan.
+        assert!(out.lines().last().unwrap().ends_with("| 0.00"), "{out}");
+        assert!(
+            (principal_paid - principal).abs() <= 0.01 * months as f64 * 0.5 + 0.02,
+            "principal repaid {principal_paid}"
+        );
+    }
+    // The first twelve rows by default, a zero rate repays in equal parts.
+    assert_eq!(run("amortization(10000, 0.06, 2)").lines().count(), 13);
+    let level = run("amortization(1200, 0, 1, 3)");
+    assert!(
+        level.starts_with("payment = 100.00 per month")
+            && level.contains("3 | 0.00 | 100.00 | 900.00"),
+        "{level}"
+    );
+}

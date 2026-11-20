@@ -140,6 +140,9 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "irr",
         "cagr",
         "doubling_time",
+        "amortization",
+        "amortisation",
+        "amortization_schedule",
     ];
     if !handled.contains(&name.as_str()) || args.is_empty() {
         return None;
@@ -221,6 +224,85 @@ fn evaluate(
                 .filter(|x| **x == target)
                 .count()
                 .to_string()))
+        }
+        "amortization" | "amortisation" | "amortization_schedule" => {
+            // amortization(principal, annual rate, years[, rows]): a monthly schedule, exact, printed to the cent.
+            let numbers: Vec<Q> = args
+                .iter()
+                .map(|a| rational(session, a))
+                .collect::<Option<_>>()?;
+            let (principal, annual, years, rows) = match numbers.as_slice() {
+                [p, r, y] => (p.clone(), r.clone(), y.clone(), None),
+                [p, r, y, n] => (p.clone(), r.clone(), y.clone(), Some(n.clone())),
+                _ => return None,
+            };
+            if !years.is_integer()
+                || !principal.is_positive()
+                || years.is_negative()
+                || years.is_zero()
+            {
+                return Some(Err(
+                    "amortization(principal, annual rate, whole years[, rows])".into(),
+                ));
+            }
+            let months = num_traits::ToPrimitive::to_usize(&(years.to_integer() * 12))?;
+            if months > 1200 {
+                return Some(Err("at most 100 years".into()));
+            }
+            let monthly = annual / Q::from_integer(BigInt::from(12));
+            let growth = Q::one() + &monthly;
+            let factor = (0..months).fold(Q::one(), |acc, _| acc * &growth);
+            let payment = if monthly.is_zero() {
+                &principal / Q::from_integer(BigInt::from(months))
+            } else {
+                &principal * &monthly / (Q::one() - factor.recip())
+            };
+            let shown_rows = match rows {
+                Some(n) if n.is_integer() && n.is_positive() => {
+                    num_traits::ToPrimitive::to_usize(&n.to_integer())?.min(months)
+                }
+                Some(_) => {
+                    return Some(Err("the number of rows must be a positive integer".into()));
+                }
+                None => months.min(12),
+            };
+            let cents = |q: &Q| -> String {
+                // Half away from zero at two decimals, on the exact value.
+                let hundred = Q::from_integer(BigInt::from(100));
+                let scaled = q * &hundred;
+                let rounded = (scaled.abs() + Q::new(BigInt::one(), BigInt::from(2))).floor();
+                let value = if scaled.is_negative() {
+                    -rounded
+                } else {
+                    rounded
+                };
+                let integer = value.to_integer();
+                let negative = integer.is_negative();
+                let digits = integer.abs().to_string();
+                let padded = format!("{digits:0>3}");
+                let (whole, fraction) = padded.split_at(padded.len() - 2);
+                format!("{}{whole}.{fraction}", if negative { "-" } else { "" })
+            };
+            let mut balance = principal.clone();
+            let mut lines = vec![format!(
+                "payment = {} per month; month | interest | principal | balance",
+                cents(&payment)
+            )];
+            for month in 1..=shown_rows {
+                let interest = &balance * &monthly;
+                let repaid = &payment - &interest;
+                balance -= &repaid;
+                lines.push(format!(
+                    "{month} | {} | {} | {}",
+                    cents(&interest),
+                    cents(&repaid),
+                    cents(&balance)
+                ));
+            }
+            Some(Ok(lines.join(
+                "
+",
+            )))
         }
         "npv" => {
             // npv(rate, [cash flows]): the first flow is at time 0, so npv = sum cf_k / (1 + r)^k.

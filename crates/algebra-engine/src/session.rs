@@ -373,6 +373,58 @@ impl UraeSession {
 
     /// Parse and execute a single line of input against this session, updating state.
     pub fn execute_line(&mut self, input: &str) -> OperationResult {
+        let mut result = self.execute_line_inner(input);
+        if !result.is_error {
+            self.append_float_for_decimal_input(input.trim(), &mut result);
+        }
+        result
+    }
+
+    /// A constant typed with a decimal literal (`sin(0.5)`, `ln(2.0)`, `normal_cdf(1.96)`) asks for a floating-point
+    /// answer: when the exact answer is not already a plain number, append its value (`sin(1/2) ≈ 0.4794...`).
+    fn append_float_for_decimal_input(&self, input: &str, result: &mut OperationResult) {
+        let bytes = input.as_bytes();
+        let has_decimal = bytes
+            .windows(3)
+            .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2].is_ascii_digit());
+        if !has_decimal || input.contains('=') || input.contains('[') || input.contains('{') {
+            return;
+        }
+        let shown = result.output_unicode.trim();
+        let plain_number = !shown.is_empty()
+            && shown
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '-' | ' ' | 'e' | '+'));
+        if plain_number || shown.contains('≈') {
+            return;
+        }
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        let Ok(id) = parser.parse(input) else {
+            return;
+        };
+        let mut symbols = std::collections::BTreeSet::new();
+        crate::poly::collect_expr_symbols(&self.graph, id, &mut symbols);
+        if symbols
+            .iter()
+            .filter_map(|s| self.graph.symbols.resolve(*s))
+            .any(|n| !matches!(n.as_str(), "pi" | "e" | "i"))
+        {
+            return;
+        }
+        let Ok(value) = self.graph.evalf(id, &EvalContext::default()) else {
+            return;
+        };
+        let (re, im) = value.as_complex();
+        if !re.is_finite() || im.abs() > 1e-12 * (1.0 + re.abs()) {
+            return;
+        }
+        let tail = format!(" ≈ {re}");
+        result.output_text.push_str(&tail);
+        result.output_unicode.push_str(&tail);
+        result.output_latex.push_str(&format!(r" \approx {re}"));
+    }
+
+    fn execute_line_inner(&mut self, input: &str) -> OperationResult {
         let trimmed = input.trim();
         if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
             return OperationResult::success("", "", "");

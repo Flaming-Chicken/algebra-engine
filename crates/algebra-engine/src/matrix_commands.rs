@@ -342,6 +342,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "logistic_regress",
         "logistic_regression",
         "logit",
+        "poisson_regress",
+        "poisson_regression",
     ];
     if !known.contains(&name.as_str()) {
         return None;
@@ -364,6 +366,7 @@ fn evaluate(
         "logistic_regress" | "logistic_regression" | "logit" => {
             logistic_regression(session, a, args)
         }
+        "poisson_regress" | "poisson_regression" => poisson_regression(session, a, args),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -783,6 +786,105 @@ fn logistic_regression(
         .map(|(row, yi)| {
             let eta: f64 = row.iter().zip(&beta).map(|(a, b)| a * b).sum();
             yi * eta - (1.0 + eta.exp()).ln()
+        })
+        .sum();
+    Ok(format!(
+        "{}; log-likelihood = {}",
+        parts.join("; "),
+        num(log_likelihood)
+    ))
+}
+
+/// `poisson_regress(X, y)`: counts with a log link, by Newton / IRLS, with Wald inference and rate ratios.
+fn poisson_regression(
+    session: &mut UraeSession,
+    x: &Matrix,
+    args: &[String],
+) -> Result<String, String> {
+    let y = parse(session, args.get(1).ok_or("poisson_regress(X, y)")?)
+        .ok_or("y must be a list of counts")?;
+    let (n, k) = (x.len(), x[0].len());
+    let f = |q: &Q| q.to_f64().unwrap_or(f64::NAN);
+    let counts: Vec<f64> = y.iter().map(|r| f(&r[0])).collect();
+    if counts.len() != n || y[0].len() != 1 || counts.iter().any(|v| *v < 0.0 || v.fract() != 0.0) {
+        return Err("y needs one non-negative integer count per row of X".into());
+    }
+    if n < k + 2 {
+        return Err("too few observations".into());
+    }
+    let design: Vec<Vec<f64>> = x
+        .iter()
+        .map(|row| std::iter::once(1.0).chain(row.iter().map(f)).collect())
+        .collect();
+    let p = k + 1;
+    let mut beta = vec![0.0; p];
+    beta[0] = (counts.iter().sum::<f64>() / n as f64).max(1e-3).ln();
+    let mut information = vec![vec![0.0; p]; p];
+    let mut converged = false;
+    for _ in 0..200 {
+        let mean: Vec<f64> = design
+            .iter()
+            .map(|row| row.iter().zip(&beta).map(|(a, b)| a * b).sum::<f64>().exp())
+            .collect();
+        let mut gradient = vec![0.0; p];
+        information = vec![vec![0.0; p]; p];
+        for (i, row) in design.iter().enumerate() {
+            for a in 0..p {
+                gradient[a] += row[a] * (counts[i] - mean[i]);
+                for b in 0..p {
+                    information[a][b] += mean[i] * row[a] * row[b];
+                }
+            }
+        }
+        let inverse = invert_f64(&information).ok_or("the predictors are linearly dependent")?;
+        let step: Vec<f64> = (0..p)
+            .map(|a| (0..p).map(|b| inverse[a][b] * gradient[b]).sum())
+            .collect();
+        for a in 0..p {
+            beta[a] += step[a];
+        }
+        if beta.iter().any(|b| !b.is_finite() || b.abs() > 50.0) {
+            return Err("the maximum likelihood estimate does not exist for this data".into());
+        }
+        if step.iter().all(|s| s.abs() < 1e-11) {
+            converged = true;
+            break;
+        }
+    }
+    if !converged {
+        return Err("the iteration did not converge".into());
+    }
+    let covariance = invert_f64(&information).ok_or("singular information matrix")?;
+    let num = |v: f64| {
+        let t = format!("{v:.6}");
+        t.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    let names: Vec<String> = std::iter::once("intercept".to_string())
+        .chain((1..=k).map(|i| format!("x{i}")))
+        .collect();
+    let parts: Vec<String> = (0..p)
+        .map(|i| {
+            let se = covariance[i][i].sqrt();
+            let z = beta[i] / se;
+            let tail = crate::inference::normal_cdf(z.abs());
+            format!(
+                "{} = {} (se {}, z = {}, p = {}, rate ratio {})",
+                names[i],
+                num(beta[i]),
+                num(se),
+                num(z),
+                num((2.0 * (1.0 - tail)).clamp(0.0, 1.0)),
+                num(beta[i].exp())
+            )
+        })
+        .collect();
+    let log_gamma = |v: f64| crate::distributions_f64::ln_gamma(v + 1.0);
+    let log_likelihood: f64 = design
+        .iter()
+        .zip(&counts)
+        .map(|(row, yi)| {
+            let eta: f64 = row.iter().zip(&beta).map(|(a, b)| a * b).sum();
+            yi * eta - eta.exp() - log_gamma(*yi)
         })
         .sum();
     Ok(format!(

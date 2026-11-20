@@ -7,7 +7,7 @@
 
 /// `ln Gamma(x)` for `x > 0` by the Lanczos approximation (`g = 7`, nine coefficients; relative error about 1e-15),
 /// fast enough for the inner loops of the quantile searches.
-fn ln_gamma(x: f64) -> f64 {
+pub(crate) fn ln_gamma(x: f64) -> f64 {
     const G: f64 = 7.0;
     const C: [f64; 9] = [
         0.999_999_999_999_809_9,

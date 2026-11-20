@@ -5386,3 +5386,95 @@ fn matrix_commands_satisfy_their_defining_properties() {
             .is_error
     );
 }
+
+#[test]
+fn kendall_tau_matches_pair_counting_and_the_inversion_distribution() {
+    let field = |text: &str, key: &str| -> f64 {
+        text.split(key)
+            .nth(1)
+            .unwrap()
+            .trim_start_matches([' ', '='])
+            .split([',', ' '])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let list = |v: &[i32]| {
+        format!(
+            "[{}]",
+            v.iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    // Without ties tau = (C - D) / C(n,2) and the exact two-sided p is the Mahonian (inversion count) tail.
+    let mut state = 0x1357_9BDF_2468_ACE1u64;
+    for n in [4usize, 5, 6, 7] {
+        for _ in 0..4 {
+            let x: Vec<i32> = (1..=n as i32).collect();
+            let mut y = x.clone();
+            for i in (1..n).rev() {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                y.swap(i, (state % (i as u64 + 1)) as usize);
+            }
+            let mut s = 0i64;
+            for i in 0..n {
+                for j in i + 1..n {
+                    s += if y[i] < y[j] { 1 } else { -1 };
+                }
+            }
+            let out = run(&format!("kendall({}, {})", list(&x), list(&y)));
+            let pairs = (n * (n - 1) / 2) as f64;
+            assert!(
+                (field(&out, "tau-b =") - s as f64 / pairs).abs() < 1e-4,
+                "{out}"
+            );
+            // Number of permutations with k inversions: DP over insertion positions.
+            let mut counts = vec![1u64];
+            for m in 2..=n {
+                let mut next = vec![0u64; counts.len() + m - 1];
+                for (k, c) in counts.iter().enumerate() {
+                    for add in 0..m {
+                        next[k + add] += c;
+                    }
+                }
+                counts = next;
+            }
+            let total: u64 = counts.iter().sum();
+            let extreme: u64 = counts
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| (pairs as i64 - 2 * *k as i64).abs() >= s.abs())
+                .map(|(_, c)| c)
+                .sum();
+            assert!(
+                (field(&out, "p =") - extreme as f64 / total as f64).abs() < 1e-4,
+                "{out}: expected {extreme}/{total}"
+            );
+        }
+    }
+    assert!(run("kendall([1,2,3,4,5],[1,2,3,4,5])").contains("tau-b = 1"));
+    assert!(run("kendall([1,2,3,4,5],[5,4,3,2,1])").contains("tau-b = -1"));
+    // Ties: tau-b = (C - D) / sqrt((n0 - n1)(n0 - n2)); this data has C=4, D=0, one tie in each.
+    let out = run("kendall([1,2,2,3],[1,2,3,3])");
+    assert!(
+        (field(&out, "tau-b =") - 4.0 / (5.0f64 * 5.0).sqrt()).abs() < 1e-4,
+        "{out}"
+    );
+    // Large samples use the normal approximation: perfectly alternating pairs give a small positive tau.
+    let x: Vec<i32> = (1..=12).collect();
+    let y: Vec<i32> = vec![2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11];
+    let out = run(&format!("kendall({}, {})", list(&x), list(&y)));
+    assert!((field(&out, "tau-b =") - 54.0 / 66.0).abs() < 1e-4, "{out}");
+    let z = 54.0 / (12.0f64 * 11.0 * 29.0 / 18.0).sqrt();
+    assert!((field(&out, "z =") - z).abs() < 1e-3, "{out}");
+    assert!(
+        UraeSession::new()
+            .execute_line("kendall([1,1,1],[1,2,3])")
+            .is_error
+    );
+}

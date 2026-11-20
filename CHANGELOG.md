@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `dsolve` solves d'Alembert (Lagrange) equations `y = x F(y') + G(y')` parametrically.
 - `is_planar(G)`: planarity of small graphs.
 - `poisson_regress` reports deviance, Pearson chi-square and a dispersion test.
 - `inverse_ztransform(X, z, n, left)`: the left-sided sequence.

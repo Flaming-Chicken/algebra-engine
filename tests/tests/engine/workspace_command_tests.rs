@@ -2287,3 +2287,57 @@ fn calculus_shorthand_means_the_explicit_command() {
     // A division of two symbols is not a derivative.
     assert_eq!(run("d/dx"), "d / dx");
 }
+
+#[test]
+fn quantities_in_sentences_sum_and_convert() {
+    let result = |q: &str| -> f64 {
+        let out = run(q);
+        out.rsplit(" = ")
+            .next()
+            .unwrap()
+            .split(" [")
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{q}: {out}"))
+    };
+    // SI factors: metres per unit, grams per unit, seconds per unit.
+    let metres = [("km", 1000.0), ("m", 1.0), ("cm", 0.01), ("mm", 0.001)];
+    let grams = [("kg", 1000.0), ("g", 1.0), ("mg", 0.001)];
+    let seconds = [("h", 3600.0), ("min", 60.0), ("s", 1.0)];
+    for table in [&metres[..], &grams[..], &seconds[..]] {
+        for (a, fa) in table {
+            for (b, fb) in table {
+                for (c, fc) in table {
+                    let (x, y) = (3.0, 250.0);
+                    // x a + y b to c, and the subtraction.
+                    let plus = result(&format!("{x} {a} + {y} {b} to {c}"));
+                    let minus = result(&format!("{x} {a} - {y} {b} to {c}"));
+                    assert!(
+                        (plus - (x * fa + y * fb) / fc).abs() < 1e-9 * (1.0 + plus.abs()),
+                        "{x} {a} + {y} {b} to {c}: {plus}"
+                    );
+                    assert!(
+                        (minus - (x * fa - y * fb) / fc).abs() < 1e-9 * (1.0 + minus.abs()),
+                        "{x} {a} - {y} {b} to {c}: {minus}"
+                    );
+                }
+            }
+        }
+    }
+    // The old behaviour silently dropped the second term of `convert 3 kg + 500 g to g`.
+    assert_eq!(
+        run("convert 3 kg + 500 g to g"),
+        "3 [kg] + 500 [g] = 3500 [g]"
+    );
+    assert_eq!(run("2 km - 500 m to m"), "2 [km] - 500 [m] = 1500 [m]");
+    // A single quantity without the word convert, and the other spellings.
+    assert_eq!(run("5 km to m"), run("convert 5 km to m"));
+    assert_eq!(run("100 C to F"), run("convert 100 C to F"));
+    assert_eq!(run("10 choose 3"), "120");
+    assert_eq!(run("|-3|"), "3");
+    assert_eq!(run("|x - 3|"), run("abs(x - 3)"));
+    // Bracket literals are not JSON requests.
+    assert_eq!(run("[[1,2],[3,4]] * [[5,6],[7,8]]"), "[ 19, 22 ; 43, 50 ]");
+}

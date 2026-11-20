@@ -171,6 +171,9 @@ fn dft(x: &[(f64, f64)], inverse: bool) -> Vec<(f64, f64)> {
 
 /// `Some(result)` when `input` is one of the commands above applied to constants.
 pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, String>> {
+    if let Some(outcome) = unit_expression(session, input) {
+        return Some(outcome);
+    }
     let (name, args) = split_call(input)?;
     match name.as_str() {
         "arg" | "phase" | "argument" | "modulus" | "polar" | "atan2" | "convolve" | "conv"
@@ -534,4 +537,107 @@ fn replace_word(text: &str, word: &str, with: &str) -> String {
         }
     }
     out
+}
+
+// ------------------------------------------------------------------------------------------------------------
+// Quantities with units written as a sentence: `5 km to m`, `3 kg + 500 g to g`, `convert 1 h + 30 min to s`.
+// ------------------------------------------------------------------------------------------------------------
+
+/// `number unit` as `(number text, unit text)`.
+fn quantity_term(term: &str) -> Option<(String, String)> {
+    let t = term.trim();
+    let split = t.find(char::is_whitespace)?;
+    let (number, unit) = (t[..split].trim(), t[split..].trim());
+    let numeric = !number.is_empty()
+        && number
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '-'))
+        && number.chars().any(|c| c.is_ascii_digit());
+    let unit_ok = !unit.is_empty()
+        && !unit.contains(char::is_whitespace)
+        && unit
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '°' || c == '%');
+    (numeric && unit_ok).then(|| (number.to_string(), unit.to_string()))
+}
+
+/// Split `a + b - c` at ` + ` and ` - ` (with their signs).
+fn signed_terms(text: &str) -> Vec<(f64, String)> {
+    let (mut out, mut sign, mut current) = (Vec::new(), 1.0, String::new());
+    let words: Vec<&str> = text.split(' ').collect();
+    let mut i = 0;
+    while i < words.len() {
+        match words[i] {
+            "+" | "-" if !current.is_empty() => {
+                out.push((sign, std::mem::take(&mut current)));
+                sign = if words[i] == "-" { -1.0 } else { 1.0 };
+            }
+            w => {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(w);
+            }
+        }
+        i += 1;
+    }
+    if !current.is_empty() {
+        out.push((sign, current));
+    }
+    out
+}
+
+fn unit_expression(session: &mut UraeSession, input: &str) -> Option<Result<String, String>> {
+    let t = input.trim();
+    let body = t.strip_prefix("convert ").unwrap_or(t);
+    let (lhs, target) = [" to ", " in ", " as "]
+        .iter()
+        .filter_map(|w| body.rfind(w).map(|at| (at, w.len())))
+        .max_by_key(|(at, _)| *at)
+        .map(|(at, len)| (&body[..at], body[at + len..].trim()))?;
+    if target.is_empty() || target.contains(char::is_whitespace) {
+        return None;
+    }
+    let terms = signed_terms(lhs);
+    let quantities: Vec<(f64, (String, String))> = terms
+        .iter()
+        .map(|(s, term)| quantity_term(term).map(|q| (*s, q)))
+        .collect::<Option<_>>()?;
+    if quantities.is_empty() {
+        return None;
+    }
+    // A single quantity without the word `convert`: hand it to the conversion command.
+    if quantities.len() == 1 {
+        if t.starts_with("convert ") {
+            return None;
+        }
+        let (_, (number, unit)) = &quantities[0];
+        return Some(session.eval(&format!("convert {number} {unit} to {target}")));
+    }
+    let mut total = 0.0;
+    let mut shown = Vec::new();
+    for (sign, (number, unit)) in &quantities {
+        let converted = match session.eval(&format!("convert {number} {unit} to {target}")) {
+            Ok(c) => c,
+            Err(e) => return Some(Err(e)),
+        };
+        let value: f64 = converted
+            .rsplit(" = ")
+            .next()
+            .and_then(|r| r.split(" [").next())
+            .and_then(|n| n.trim().parse().ok())?;
+        total += sign * value;
+        let term = format!("{number} [{unit}]");
+        shown.push(if shown.is_empty() {
+            term
+        } else {
+            format!("{} {term}", if *sign < 0.0 { "-" } else { "+" })
+        });
+    }
+    Some(Ok(format!(
+        "{} = {} [{target}]",
+        shown.join(" "),
+        clean(total)
+    )))
 }

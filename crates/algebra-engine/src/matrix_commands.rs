@@ -340,6 +340,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "jordan",
         "jordan_form",
         "hessenberg",
+        "sqrtm",
+        "matrix_sqrt",
         "mregress",
         "multiple_regression",
         "ols",
@@ -373,6 +375,7 @@ fn evaluate(
         "poisson_regress" | "poisson_regression" => poisson_regression(session, a, args),
         "jordan" | "jordan_form" => jordan(session, a),
         "hessenberg" => hessenberg(session, a),
+        "sqrtm" | "matrix_sqrt" => sqrtm(session, a),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -1046,4 +1049,123 @@ fn hessenberg(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
         display(session, &h)?,
         display(session, &p)?
     ))
+}
+
+fn multiply_f64(a: &[Vec<f64>], b: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    (0..a.len())
+        .map(|i| {
+            (0..b[0].len())
+                .map(|j| (0..b.len()).map(|k| a[i][k] * b[k][j]).sum())
+                .collect()
+        })
+        .collect()
+}
+
+/// The rational closest to `x` with a denominator of at most 10^4 by continued fractions, if it is within 1e-10.
+fn recognise(x: f64) -> Option<Q> {
+    let (mut h0, mut h1, mut k0, mut k1) = (0i64, 1i64, 1i64, 0i64);
+    let mut v = x;
+    for _ in 0..24 {
+        let a = v.floor();
+        if a.abs() > 1e9 {
+            return None;
+        }
+        let a = a as i64;
+        let (h2, k2) = (
+            a.checked_mul(h1)?.checked_add(h0)?,
+            a.checked_mul(k1)?.checked_add(k0)?,
+        );
+        if k2 > 10_000 {
+            return None;
+        }
+        (h0, h1, k0, k1) = (h1, h2, k1, k2);
+        if (x - h1 as f64 / k1 as f64).abs() < 1e-10 {
+            return Some(Q::new(BigInt::from(h1), BigInt::from(k1)));
+        }
+        let frac = v - a as f64;
+        if frac.abs() < 1e-14 {
+            return None;
+        }
+        v = 1.0 / frac;
+    }
+    None
+}
+
+/// `sqrtm(A)`: the principal square root (Denman-Beavers iteration). When the root is rational the result is exact (checked by
+/// squaring in rational arithmetic); otherwise the entries are decimals.
+fn sqrtm(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
+    let n = a.len();
+    if a[0].len() != n {
+        return Err("sqrtm needs a square matrix".into());
+    }
+    let float: Vec<Vec<f64>> = a
+        .iter()
+        .map(|r| r.iter().map(|q| q.to_f64().unwrap_or(f64::NAN)).collect())
+        .collect();
+    let mut y = float.clone();
+    let mut z: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+        .collect();
+    let mut converged = false;
+    for _ in 0..100 {
+        let (Some(y_inverse), Some(z_inverse)) = (invert_f64(&y), invert_f64(&z)) else {
+            return Err("the matrix has no principal square root (it is singular or has a negative eigenvalue)".into());
+        };
+        let next_y: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| (y[i][j] + z_inverse[i][j]) / 2.0).collect())
+            .collect();
+        let next_z: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| (z[i][j] + y_inverse[i][j]) / 2.0).collect())
+            .collect();
+        let change: f64 = (0..n)
+            .flat_map(|i| (0..n).map(move |j| (i, j)))
+            .map(|(i, j)| (next_y[i][j] - y[i][j]).abs())
+            .fold(0.0, f64::max);
+        y = next_y;
+        z = next_z;
+        if y.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(
+                "the matrix has no principal square root (it has a negative eigenvalue)".into(),
+            );
+        }
+        if change < 1e-14 {
+            converged = true;
+            break;
+        }
+    }
+    let square = multiply_f64(&y, &y);
+    let scale = float.iter().flatten().fold(1.0f64, |m, v| m.max(v.abs()));
+    let error = (0..n)
+        .flat_map(|i| (0..n).map(move |j| (i, j)))
+        .map(|(i, j)| (square[i][j] - float[i][j]).abs())
+        .fold(0.0, f64::max);
+    if !converged && error > 1e-8 * scale || error > 1e-6 * scale {
+        return Err("no principal square root found (the matrix has an eigenvalue on or below the negative real axis)".into());
+    }
+    let exact: Option<Matrix> = y
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| recognise(*v))
+                .collect::<Option<Vec<Q>>>()
+        })
+        .collect();
+    if let Some(root) = exact
+        && multiply(&root, &root).as_ref() == Some(a)
+    {
+        return display(session, &root);
+    }
+    let rows: Vec<String> = y
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| {
+                    let t = format!("{v:.10}");
+                    t.trim_end_matches('0').trim_end_matches('.').to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .collect();
+    Ok(format!("[ {} ]", rows.join(" ; ")))
 }

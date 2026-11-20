@@ -780,7 +780,7 @@ fn digits_exponent(chars: &[char], i: &mut usize) -> Option<u32> {
     }
 }
 
-/// `d/dx f`, `d/dx(f)`, `d^2/dx^2 f`, `∂/∂x f` as `diff(f, x, n)`.
+/// `d/dx f`, `d/dx(f)`, `d^2/dx^2 f`, `∂/∂x f`, `∂^2/∂x∂y f`, `d²/dxdy f` as `diff(f, x, n)` or a chain `diff(f, x, y)`.
 fn derivative_shorthand(s: &str) -> Option<String> {
     let chars: Vec<char> = s.chars().collect();
     let is_d = |c: char| c == 'd' || c == '∂';
@@ -794,30 +794,44 @@ fn derivative_shorthand(s: &str) -> Option<String> {
         return None;
     }
     i += 1;
-    if !is_d(*chars.get(i)?) {
-        return None;
+    // The denominator: groups `dx`, `dx^2`, `∂y` written one after the other.
+    let mut variables: Vec<(char, u32)> = Vec::new();
+    while let Some(&c) = chars.get(i)
+        && is_d(c)
+    {
+        i += 1;
+        let variable = *chars.get(i)?;
+        if !variable.is_alphabetic() {
+            return None;
+        }
+        i += 1;
+        let power = digits_exponent(&chars, &mut i)?;
+        variables.push((variable, power));
     }
-    i += 1;
-    let variable = *chars.get(i)?;
-    if !variable.is_alphabetic() {
-        return None;
-    }
-    i += 1;
-    let denominator_order = digits_exponent(&chars, &mut i)?;
-    if denominator_order != order {
+    if variables.is_empty() || variables.iter().map(|(_, k)| *k).sum::<u32>() != order {
         return None;
     }
     let rest: String = chars[i..].iter().collect();
     let rest = rest.trim();
     if rest.is_empty()
         || rest.starts_with('=')
-        || !(chars[i..]
+        || !chars[i..]
             .first()
-            .is_some_and(|c| c.is_whitespace() || *c == '('))
+            .is_some_and(|c| c.is_whitespace() || *c == '(')
     {
         return None;
     }
-    Some(format!("diff({rest}, {variable}, {order})"))
+    let steps: Vec<String> = variables
+        .iter()
+        .map(|(v, k)| {
+            if *k == 1 {
+                v.to_string()
+            } else {
+                format!("{v}, {k}")
+            }
+        })
+        .collect();
+    Some(format!("diff({rest}, {})", steps.join(", ")))
 }
 
 /// `lim x->a f` and `limit x -> a f` as `limit(f, x, a)` (a two-sided limit).
@@ -838,9 +852,15 @@ fn limit_shorthand(s: &str) -> Option<String> {
     let after = rest[arrow.0 + arrow.1..].trim_start();
     let end = after.find(char::is_whitespace)?;
     let (target, function) = (&after[..end], after[end..].trim());
-    if function.is_empty() || target.ends_with('+') || target.ends_with('-') {
+    if function.is_empty() {
         return None;
     }
+    let target = target
+        .replace("^+", "+")
+        .replace("^-", "-")
+        .replace('⁺', "+")
+        .replace('⁻', "-");
+    let target = target.as_str();
     let target = if target == "inf" || target == "infinity" || target == "∞" {
         "oo"
     } else {
@@ -871,6 +891,17 @@ fn function_space_shorthand(s: &str) -> Option<String> {
 /// Brackets-free calculus shorthand and a few spellings, or `None` when the input is not one of them.
 pub fn shorthand(input: &str) -> Option<String> {
     let t = input.trim();
+    // `limit(f, x, 0^+)` and `limit(f, x, 0⁺)` as `limit(f, x, 0+)`.
+    if t.starts_with("limit(") || t.starts_with("lim(") {
+        let fixed = t
+            .replace("^+)", "+)")
+            .replace("^-)", "-)")
+            .replace("⁺)", "+)")
+            .replace("⁻)", "-)");
+        if fixed != t {
+            return Some(fixed);
+        }
+    }
     if let Some(rest) = t.strip_prefix("derivative(") {
         return Some(format!("diff({rest}"));
     }

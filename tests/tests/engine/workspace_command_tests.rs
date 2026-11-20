@@ -3769,3 +3769,79 @@ fn npv_irr_cagr_and_doubling_time_are_self_consistent() {
     }
     assert_eq!(run("doubling_time(1)"), "1");
 }
+
+#[test]
+fn mixed_partial_derivatives_and_one_sided_limit_shorthand() {
+    // d^(a+b) / dx^a dy^b of x^m y^n is m!/(m-a)! n!/(n-b)! x^(m-a) y^(n-b), whatever the order of the variables.
+    let falling = |m: i64, a: i64| -> i64 { (0..a).map(|k| m - k).product() };
+    for (m, n) in [(2i64, 3i64), (4, 2), (3, 3), (5, 1)] {
+        for a in 0..=m.min(3) {
+            for b in 0..=n.min(3) {
+                if a + b < 2 || a == 0 || b == 0 {
+                    continue;
+                }
+                let coefficient = falling(m, a) * falling(n, b);
+                let expected = {
+                    let (px, py) = (m - a, n - b);
+                    let x = match px {
+                        0 => String::new(),
+                        1 => "x".to_string(),
+                        p => format!("x^{p}"),
+                    };
+                    let y = match py {
+                        0 => String::new(),
+                        1 => "y".to_string(),
+                        p => format!("y^{p}"),
+                    };
+                    let factors: Vec<String> =
+                        [x, y].into_iter().filter(|f| !f.is_empty()).collect();
+                    let body = factors.join(" · ");
+                    match (coefficient, body.is_empty()) {
+                        (c, true) => c.to_string(),
+                        (1, false) => body,
+                        (c, false) => format!("{c} · {body}"),
+                    }
+                };
+                let f = format!("x^{m}*y^{n}");
+                let by_x_then_y = run(&format!("diff({f}, x, {a}, y, {b})"));
+                let by_y_then_x = run(&format!("diff({f}, y, {b}, x, {a})"));
+                assert_eq!(by_x_then_y, expected, "diff({f}, x, {a}, y, {b})");
+                // Clairaut: the order of differentiation does not matter.
+                assert_eq!(by_y_then_x, expected, "diff({f}, y, {b}, x, {a})");
+            }
+        }
+    }
+    // Repeating a variable is the same as giving its order, and the spellings agree.
+    assert_eq!(run("diff(x^2*y^3, x, x, y)"), run("diff(x^2*y^3, x, 2, y)"));
+    for spelling in [
+        "partial(x^2*y^3, x, y)",
+        "mixed_partial(x^2*y^3, x, y)",
+        "∂^2/∂x∂y (x^2*y^3)",
+        "d^2/dxdy (x^2*y^3)",
+        "diff(x^2*y^3, y, x)",
+    ] {
+        assert_eq!(run(spelling), "6 · x · y^2", "{spelling}");
+    }
+    assert_eq!(run("d^3/dx^2dy x^2*y^3"), "6 · y^2");
+    assert_eq!(
+        run("diff(sin(x*y), x, y)"),
+        "-x · y · sin(x · y) + cos(x · y)"
+    );
+    // The ordinary derivatives are unchanged.
+    assert_eq!(run("diff(x^3, x)"), "3 · x^2");
+    assert_eq!(run("diff(x^2*y^3, x, 2)"), "2 · y^3");
+    assert_eq!(run("d^2/dx^2 x^4"), "12 · x^2");
+    // One-sided limits written as a sentence equal the call form.
+    for (short, explicit) in [
+        ("lim x->0+ 1/x", "limit(1/x, x, 0+)"),
+        ("lim x->0- 1/x", "limit(1/x, x, 0-)"),
+        ("limit x -> 2- 1/(x-2)", "limit(1/(x-2), x, 2-)"),
+        ("limit(1/x, x, 0^+)", "limit(1/x, x, 0+)"),
+        ("limit(1/x, x, 0^-)", "limit(1/x, x, 0-)"),
+    ] {
+        assert_eq!(run(short), run(explicit), "{short}");
+    }
+    assert!(run("lim x->0+ 1/x").ends_with("= ∞"));
+    assert!(run("lim x->0- 1/x").ends_with("= -∞"));
+    assert!(run("lim x->0+ abs(x)/x").ends_with("= 1"));
+}

@@ -1448,6 +1448,15 @@ fn pre_simplify_algebraic_with_assumptions(
                 {
                     return crate::poly::expr_from_rational(g, &(qn / qd));
                 }
+                // a / b^(-k) -> a b^k for a positive integer k (`1/((y^2+1)^(-1))` is `y^2+1`).
+                if let ExprKind::Pow(db, de) = g.get(sd).kind
+                    && let Some(q) = as_rat(g, de)
+                    && q.is_integer()
+                    && q.is_negative()
+                {
+                    let positive = crate::poly::expr_from_rational(g, &-q);
+                    return rec(g, g.mul([sn, g.pow(db, positive)]), assumptions);
+                }
                 // sin(u)/cos(u) -> tan(u), cos(u)/sin(u) -> cot(u)
                 if let (
                     ExprKind::Function { name: n1, args: a1 },
@@ -1513,6 +1522,23 @@ fn pre_simplify_algebraic_with_assumptions(
                 }
                 if is_one_id(g, se) {
                     return sb;
+                }
+                // (b^m)^n -> b^(m n) for an integer n (valid for every m), so `((y^2+1)^(-1))^(-1)` is `y^2+1`.
+                if let Some(qn) = as_rat(g, se)
+                    && qn.is_integer()
+                    && let ExprKind::Pow(inner_base, inner_exp) = g.get(sb).kind
+                    && as_rat(g, inner_exp).is_some()
+                {
+                    return rec(g, g.pow(inner_base, g.mul([inner_exp, se])), assumptions);
+                }
+                // (a / b)^(-k) -> (b / a)^k for a positive integer k.
+                if let ExprKind::Div(qn, qd) = g.get(sb).kind
+                    && let Some(q) = as_rat(g, se)
+                    && q.is_integer()
+                    && q.is_negative()
+                {
+                    let positive = crate::poly::expr_from_rational(g, &-q);
+                    return rec(g, g.pow(g.div(qd, qn), positive), assumptions);
                 }
                 // e^x is exp(x), so that the rules for exp (and exp(i pi) = -1) apply to both spellings.
                 let base_is_e = matches!(

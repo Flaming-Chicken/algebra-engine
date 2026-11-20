@@ -173,12 +173,33 @@ fn factors_of(graph: &ExprGraph, id: ExprId, out: &mut Vec<ExprId>) {
             let mut den = Vec::new();
             factors_of(graph, *d, &mut den);
             for f in den {
-                out.push(graph.pow(f, graph.integer(-1)));
+                // 1 / b^e is b^(-e): `(y^2)^(-1)` would otherwise stay a power of a power.
+                if let ExprKind::Pow(base, exponent) = graph.get(f).kind
+                    && matches!(graph.get(exponent).kind, ExprKind::Number(_))
+                {
+                    out.push(graph.pow(base, graph.neg(exponent)));
+                } else {
+                    out.push(graph.pow(f, graph.integer(-1)));
+                }
             }
         }
         ExprKind::Neg(a) => {
             out.push(graph.integer(-1));
             factors_of(graph, *a, out);
+        }
+        // (b^m)^n with numeric exponents is b^(m n): `(y^2)^(-1)` from `1/y^2` is `y^(-2)`.
+        ExprKind::Pow(base, exponent)
+            if matches!(graph.get(*exponent).kind, ExprKind::Number(_))
+                && matches!(
+                    graph.get(*base).kind,
+                    ExprKind::Pow(_, inner) if matches!(graph.get(inner).kind, ExprKind::Number(_))
+                ) =>
+        {
+            if let ExprKind::Pow(b, m) = graph.get(*base).kind {
+                out.push(simplified(graph, graph.pow(b, graph.mul([m, *exponent]))));
+            } else {
+                out.push(id);
+            }
         }
         _ => out.push(id),
     }
@@ -220,13 +241,34 @@ pub(crate) fn solve_separable(
     let mut factors = Vec::new();
     factors_of(graph, h, &mut factors);
     let (mut fx, mut gy) = (Vec::new(), Vec::new());
+    let mut mixed = false;
     for f in factors {
         let (has_x, has_y) = (graph.has_symbol(f, x), graph.has_symbol(f, y));
         match (has_x, has_y) {
-            (true, true) => return None,
+            (true, true) => mixed = true,
             (false, true) => gy.push(f),
             _ => fx.push(f),
         }
+    }
+    if mixed {
+        // `h` may be stored expanded (`x + x y^2` for `x (1 + y^2)`): h = f(x) g(y) exactly when
+        // h = h(x, 1) h(1, y) / h(1, 1).
+        let one = graph.integer(1);
+        let h_x = simplified(graph, graph.substitute(h, y, one));
+        let h_y = simplified(graph, graph.substitute(h, x, one));
+        let corner = simplified(graph, graph.substitute(h_x, x, one));
+        if corner == graph.integer(0) {
+            return None;
+        }
+        let g_part = simplified(graph, graph.div(h_y, corner));
+        let product = simplified(graph, graph.mul([h_x, g_part]));
+        let difference = simplified(graph, graph.sub(h, product));
+        if difference != graph.integer(0) || graph.has_symbol(h_x, y) || graph.has_symbol(g_part, x)
+        {
+            return None;
+        }
+        fx = vec![h_x];
+        gy = vec![g_part];
     }
     if gy.is_empty() {
         return None; // y' = f(x): a plain integral, handled elsewhere
@@ -236,7 +278,8 @@ pub(crate) fn solve_separable(
     } else {
         graph.mul(fx)
     };
-    let g_expr = graph.mul(gy);
+    // Simplified first: `(y^2)^(-1)` from `1/y^2` must become `y^(-2)` before it is inverted and integrated.
+    let g_expr = simplified(graph, graph.mul(gy));
     // G(y) = int dy / g(y), F(x) = int f dx.
     let big_g = graph
         .integrate(simplified(graph, graph.div(graph.integer(1), g_expr)), y)
@@ -244,7 +287,7 @@ pub(crate) fn solve_separable(
     let big_f = graph.integrate(f_expr, x).ok()?;
     let c1 = graph.symbol("C1");
     let implicit = graph.sub(graph.sub(big_g, big_f), c1);
-    match graph.solveset(implicit, y) {
+    match graph.solveset(clear_negative_powers(graph, implicit, y), y) {
         Ok(solutions)
             if !solutions.is_empty() && !solutions.iter().any(|&s| graph.has_symbol(s, y)) =>
         {
@@ -644,4 +687,46 @@ pub(crate) fn exp_clean(graph: &ExprGraph, exponent: ExprId) -> ExprId {
         1 => factors[0],
         _ => graph.mul(factors),
     }
+}
+
+/// The equation `expr = 0` multiplied through by `y^k`, where `y^(-k)` is the most negative power of `y` in it: the solver
+/// isolates `y` from a polynomial equation but not from `-y^(-1) - x - C1 = 0`.
+fn clear_negative_powers(graph: &ExprGraph, expr: ExprId, y: SymbolId) -> ExprId {
+    fn deepest(graph: &ExprGraph, id: ExprId, y: SymbolId) -> i64 {
+        match graph.get(id).kind.clone() {
+            ExprKind::Pow(base, exponent) => {
+                let own = match (&graph.get(base).kind, &graph.get(exponent).kind) {
+                    (ExprKind::Symbol(s), ExprKind::Number(n)) if *s == y => n
+                        .as_f64()
+                        .filter(|v| v.fract() == 0.0 && *v < 0.0)
+                        .map_or(0, |v| -(v as i64)),
+                    _ => 0,
+                };
+                own.max(deepest(graph, base, y))
+            }
+            ExprKind::Add(ts) | ExprKind::Mul(ts) => {
+                ts.iter().map(|&t| deepest(graph, t, y)).max().unwrap_or(0)
+            }
+            ExprKind::Sub(a, b) | ExprKind::Div(a, b) => {
+                deepest(graph, a, y).max(deepest(graph, b, y))
+            }
+            ExprKind::Neg(a) => deepest(graph, a, y),
+            _ => 0,
+        }
+    }
+    let k = deepest(graph, expr, y);
+    if k == 0 {
+        return expr;
+    }
+    let scaled = graph.mul([
+        expr,
+        graph.pow(
+            graph.symbol(&graph.symbols.resolve(y).unwrap_or_default()),
+            graph.integer(k),
+        ),
+    ]);
+    simplified(
+        graph,
+        crate::simplify::AlgebraicTransformations::expand(graph, scaled),
+    )
 }

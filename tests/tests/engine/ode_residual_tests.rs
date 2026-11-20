@@ -113,18 +113,49 @@ fn nonlinear_separable_equations_were_solved_as_if_linear() {
         &[0.3, 0.6, 0.9, 1.5],
     );
     check("y' = x*y^2", |x, y, y1, _| y1 - x * y * y, &[0.3, 0.6, 0.9]);
-    // No closed form for y here: an implicit solution is reported and labelled as such.
+    // Either a closed form or an implicit solution labelled as such; neither may fail the equation.
     let r = UraeSession::new().execute_line("dsolve(y' = exp(x)*y^3)");
     assert!(!r.is_error, "{}", r.output_text);
-    assert!(
-        r.output_text.contains("implicit solution"),
-        "{}",
-        r.output_text
-    );
-    // The implicit relation -1/(2 y^2) = e^x + C1 differentiates to y' = e^x y^3: check that identity directly.
-    for (x, y) in [(0.1f64, 0.7f64), (0.5, 1.9)] {
-        let (g_prime, f_prime) = (y.powi(-3), x.exp());
-        assert!((g_prime * (x.exp() * y.powi(3)) - f_prime).abs() < 1e-12);
+    if r.output_text.contains("implicit solution") {
+        // The implicit relation -1/(2 y^2) = e^x + C1 differentiates to y' = e^x y^3: check that identity directly.
+        for (x, y) in [(0.1f64, 0.7f64), (0.5, 1.9)] {
+            let (g_prime, f_prime) = (y.powi(-3), x.exp());
+            assert!((g_prime * (x.exp() * y.powi(3)) - f_prime).abs() < 1e-12);
+        }
+    } else {
+        // y = +-1 / sqrt(-2 (e^x + C1)): with C1 = -5 the radicand is positive on the points below.
+        assert!(r.output_text.starts_with("y(x) = "), "{}", r.output_text);
+        for alternative in r.output_text.split("  or  ") {
+            let expression = alternative.strip_prefix("y(x) = ").unwrap_or(alternative);
+            let at = |x: f64| -> f64 {
+                let mut session = UraeSession::new();
+                let out =
+                    session.execute_line(&format!("subs(({expression}), x = {x:?}, C1 = -5.0)"));
+                assert!(!out.is_error, "{}", out.output_text);
+                let text = out
+                    .output_text
+                    .rsplit(" ≈ ")
+                    .next()
+                    .unwrap()
+                    .trim()
+                    .to_string();
+                match text.split_once('/') {
+                    Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                    None => text
+                        .parse()
+                        .unwrap_or_else(|_| panic!("not a number: {}", out.output_text)),
+                }
+            };
+            for x in [0.2f64, 0.7, 1.1] {
+                let h = 1e-5;
+                let derivative = (at(x + h) - at(x - h)) / (2.0 * h);
+                let expected = x.exp() * at(x).powi(3);
+                assert!(
+                    (derivative - expected).abs() < 1e-6 * (1.0 + expected.abs()),
+                    "y' = {derivative}, e^x y^3 = {expected} at {x}"
+                );
+            }
+        }
     }
     check("y' = y/x", |x, y, y1, _| y1 - y / x, PTS);
     check("x*y' = y", |x, y, y1, _| x * y1 - y, PTS);

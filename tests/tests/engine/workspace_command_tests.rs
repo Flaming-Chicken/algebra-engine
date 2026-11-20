@@ -4300,3 +4300,76 @@ fn homogeneous_and_exact_first_order_equations_satisfy_themselves() {
     assert_eq!(run("dsolve(y' = y)"), "y(x) = C1 · exp(x)");
     assert_eq!(run("dsolve(y' = y/x + 1)"), "y(x) = x · (ln(x) + C1)");
 }
+
+#[test]
+fn separable_equations_in_quotient_form_are_solved() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    // y' = F(x, y): the solution is explicit (differentiate it) or g(y) = f(x) + C1 (g'(y) F = f'(x)).
+    type Rhs = fn(f64, f64) -> f64;
+    let cases: [(&str, Rhs); 8] = [
+        ("1/y^2", |_, y| 1.0 / (y * y)),
+        ("x/y^2", |x, y| x / (y * y)),
+        ("1/(y^2+1)", |_, y| 1.0 / (y * y + 1.0)),
+        ("(x^2+1)/(y^2+1)", |x, y| (x * x + 1.0) / (y * y + 1.0)),
+        ("x*(1+y^2)", |x, y| x * (1.0 + y * y)),
+        ("x + x*y^2", |x, y| x + x * y * y),
+        ("exp(x - y)", |x, y| (x - y).exp()),
+        ("y^2/x", |x, y| y * y / x),
+    ];
+    for (rhs, f) in cases {
+        let out = run(&format!("dsolve(y' = {rhs})"));
+        assert!(
+            !out.starts_with("Differential Equation Analysis"),
+            "{rhs}: {out}"
+        );
+        if let Some((relation, _)) = out.split_once("  (implicit") {
+            let (g, rest) = relation.split_once(" = ").unwrap();
+            let fx = rest.strip_suffix(" + C1").unwrap_or(rest).to_string();
+            let g = g.to_string();
+            let g_at = |y: f64| number(run(&format!("subs(({g}), y = {y:.4})")));
+            let f_at = |x: f64| number(run(&format!("subs(({fx}), x = {x:.4})")));
+            for (x, y) in [(0.8f64, 0.6f64), (1.4, 1.1), (2.0, 0.4)] {
+                let h = 1e-3;
+                let g_prime = (g_at(y + h) - g_at(y - h)) / (2.0 * h);
+                let f_prime = (f_at(x + h) - f_at(x - h)) / (2.0 * h);
+                assert!(
+                    (g_prime * f(x, y) - f_prime).abs() < 1e-4 * (1.0 + f_prime.abs()),
+                    "{rhs}: g' F = {}, f' = {f_prime}\n{out}",
+                    g_prime * f(x, y)
+                );
+            }
+        } else {
+            for branch in out.split("  or  ") {
+                let expression = branch.split_once(" = ").unwrap().1.to_string();
+                let y_at =
+                    |x: f64| number(run(&format!("subs(({expression}), x = {x:.4}, C1 = 1.5)")));
+                for x in [1.1f64, 1.7, 2.3] {
+                    let h = 1e-3;
+                    let derivative = (y_at(x + h) - y_at(x - h)) / (2.0 * h);
+                    let expected = f(x, y_at(x));
+                    assert!(
+                        (derivative - expected).abs() < 1e-4 * (1.0 + expected.abs()),
+                        "{rhs}: y' = {derivative}, F = {expected} at {x}\n{out}"
+                    );
+                }
+            }
+        }
+    }
+    // Equations that were solved before keep their form.
+    assert_eq!(run("dsolve(y' = y^2)"), "y(x) = -(x + C1)^(-1)");
+    // The simplifier: quotients and powers of powers with integer exponents.
+    assert_eq!(run("1/((y^2+1)^(-1))"), "y^2 + 1");
+    assert_eq!(run("((y^2+1)^(-1))^(-1)"), "y^2 + 1");
+    assert_eq!(run("(1/(y^2+1))^(-1)"), "y^2 + 1");
+    assert_eq!(run("(a/b)^(-2)"), "(b / a)^2");
+    assert_eq!(run("(x^2)^3"), "x^6");
+    assert_eq!(run("x/(y^(-2))"), "x · y^2");
+    // (x^2)^(1/2) is not x: a fractional outer exponent is left alone.
+    assert_eq!(run("(x^2)^(1/2)"), "(x^2)^(1/2)");
+}

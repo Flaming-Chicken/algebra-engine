@@ -90,6 +90,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         "stationary points (critical_points, extrema)",
         crate::stationary::run,
     ),
+    (
+        "inverse Laplace transforms (inverse_laplace, ilaplace)",
+        crate::inverse_laplace::run,
+    ),
 ];
 
 /// Centralized stateful execution engine session for URAE.
@@ -115,6 +119,8 @@ pub struct UraeSession {
     pub user_aliases: HashMap<String, String>,
     /// Matrix and vector variables `name -> [[1,2],[3,4]]` (from `A = [[1,2],[3,4]]` or `B = A*A`).
     pub matrix_vars: HashMap<String, String>,
+    /// Set while an internal evaluation runs: results carry no appended floating-point value.
+    plain_results: bool,
     /// Most recent successfully computed AST node (used for `ans`).
     pub last_result_expr: Option<ExprId>,
     /// Most recent parseable mathematical result string (used for `ans`).
@@ -145,6 +151,7 @@ impl UraeSession {
             user_functions: HashMap::new(),
             user_aliases: HashMap::new(),
             matrix_vars: HashMap::new(),
+            plain_results: false,
             last_result_expr: None,
             last_result_text: None,
             context: MathContext::default(),
@@ -342,7 +349,10 @@ impl UraeSession {
 
     /// Evaluate any URAE expression or command and return its Unicode result string.
     pub fn eval(&mut self, input: &str) -> Result<String, String> {
+        // An evaluation made on behalf of a command stays exact: the floating-point tail is for the user's own line.
+        let previous = std::mem::replace(&mut self.plain_results, true);
         let res = self.execute_line(input);
+        self.plain_results = previous;
         if res.is_error {
             Err(res.error_msg.unwrap_or(res.output_text))
         } else {
@@ -608,7 +618,7 @@ impl UraeSession {
                 result = retry;
             }
         }
-        if !result.is_error {
+        if !result.is_error && !self.plain_results {
             self.append_float_for_decimal_input(input.trim(), &mut result);
         }
         result
@@ -629,13 +639,35 @@ impl UraeSession {
             && shown
                 .chars()
                 .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '-' | ' ' | 'e' | '+'));
-        if plain_number || shown.contains('≈') {
+        // A rational with a long denominator (`16679880978201/10240000000`) is unreadable: it gets the value too.
+        let long_fraction = plain_number
+            && shown
+                .split_once('/')
+                .is_some_and(|(_, denominator)| denominator.trim().len() >= 5);
+        if (plain_number && !long_fraction) || shown.contains('≈') {
             return;
+        }
+        if long_fraction && let Some((numerator, denominator)) = shown.split_once('/') {
+            use num_traits::ToPrimitive as _;
+            if let (Ok(n), Ok(d)) = (
+                numerator.trim().parse::<num_bigint::BigInt>(),
+                denominator.trim().parse::<num_bigint::BigInt>(),
+            ) && d != num_bigint::BigInt::from(0)
+                && let Some(value) = num_rational::BigRational::new(n, d).to_f64()
+                && value.is_finite()
+            {
+                let tail = format!(" ≈ {value}");
+                result.output_text.push_str(&tail);
+                result.output_unicode.push_str(&tail);
+                result.output_latex.push_str(&format!(r" pprox {value}"));
+                return;
+            }
         }
         let parser = algebra_core::parser::ExprParser::new(&self.graph);
         // `sin(10.5°)` does not parse as typed: use the rewritten form the engine actually evaluated.
         let rewritten = crate::input_text::normalise(input).unwrap_or_else(|| input.to_string());
-        let Ok(id) = parser.parse(&rewritten) else {
+        // The printed result is a constant expression more often than the input is one (`subs(f, t, 0.3)`, `normal_cdf(1.96)`).
+        let Ok(id) = parser.parse(shown).or_else(|_| parser.parse(&rewritten)) else {
             return;
         };
         let mut symbols = std::collections::BTreeSet::new();

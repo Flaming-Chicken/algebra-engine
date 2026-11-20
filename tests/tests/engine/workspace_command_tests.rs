@@ -2603,3 +2603,64 @@ fn series_sums_and_triangle_formulas_match_their_definitions() {
     assert_eq!(run("angle_between([1, 0], [0, 1])"), "π/2");
     assert_eq!(run("maclaurin(cos(x), 4)"), run("taylor(cos(x), x, 0, 4)"));
 }
+
+#[test]
+fn bit_operations_and_number_bases_match_the_standard_library() {
+    let int = |q: &str| -> u64 { run(q).parse().unwrap_or_else(|_| panic!("{q}: {}", run(q))) };
+    // Bit operations on a grid of values, against Rust's own operators.
+    for a in [0u64, 1, 5, 12, 255, 1000, 65_535, 123_456_789] {
+        for b in [0u64, 1, 3, 10, 170, 4096] {
+            assert_eq!(int(&format!("{a} & {b}")), a & b, "{a} & {b}");
+            assert_eq!(int(&format!("{a} | {b}")), a | b, "{a} | {b}");
+            assert_eq!(int(&format!("{a} xor {b}")), a ^ b, "{a} xor {b}");
+            assert_eq!(int(&format!("bitand({a}, {b})")), a & b);
+        }
+        for shift in [0u32, 1, 3, 8] {
+            assert_eq!(
+                int(&format!("{a} << {shift}")),
+                a << shift,
+                "{a} << {shift}"
+            );
+            assert_eq!(
+                int(&format!("{a} >> {shift}")),
+                a >> shift,
+                "{a} >> {shift}"
+            );
+        }
+    }
+    // Base conversion against the standard formatters, and the round trip through each base.
+    for n in [0u64, 1, 7, 10, 255, 4096, 987_654_321] {
+        assert_eq!(
+            run(&format!("{n} to binary")),
+            format!("dec2bin({n}) = {n:b}")
+        );
+        assert_eq!(run(&format!("{n} in hex")), format!("dec2hex({n}) = {n:x}"));
+        assert_eq!(
+            run(&format!("{n} as octal")),
+            format!("dec2oct({n}) = {n:o}")
+        );
+        assert_eq!(
+            run(&format!("from_binary({n:b})")),
+            format!("bin2dec({n:b}) = {n}")
+        );
+        assert_eq!(
+            run(&format!("from_hex({n:x})")),
+            format!("hex2dec({n:x}) = {n}")
+        );
+        // 0x, 0b and 0o literals are numbers.
+        assert_eq!(int(&format!("0x{n:x}")), n);
+        assert_eq!(int(&format!("0b{n:b}")), n);
+        assert_eq!(int(&format!("0o{n:o}")), n);
+    }
+    assert_eq!(int("0xFF + 0b1"), 256);
+    assert_eq!(run("0b1010 + 1"), "11");
+    // Words that are not variables are never read as a product: `5 xor 3` was `15 xor`.
+    assert!(!run("5 xor 3").contains("xor"));
+    // A set typed with braces is a set: the power set has 2^n members.
+    for items in ["{1, 2}", "{1, 2, 3}", "[1, 2, 3, 4]"] {
+        let out = run(&format!("powerset({items})"));
+        let members = items.matches(',').count() + 1;
+        let subsets = out.matches('[').count() - 1;
+        assert_eq!(subsets, 1 << members, "{out}");
+    }
+}

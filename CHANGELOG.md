@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Fixed: `5 xor 3` printed `15 · xor`, `0xFF` printed 0, `0b1010 + 1` printed 1 and `powerset({1,2})` was garbled. Added `0x`/`0b`/`0o` literals, `&`, `|`, `xor`, `<<`, `>>` on integers, `255 to binary` / `in hex` / `as octal`, and the spellings `bin`, `to_binary`, `to_hex`, `from_binary`, `from_hex`, `to_octal`.
 - Added: `arithmetic_sum(a, d, n)`, `geometric_sum(a, r, n)`, `hypotenuse(a, b)`, `area_triangle` (Heron's formula or three points), `angle_between(u, v)` (exact multiples of pi) and `maclaurin(f, n)`; `maclaurin(cos(x), 6)` used to return `cos(x)` unchanged.
 - Added: exact `binomial_cdf`, `hypergeometric_pmf`, `z_score`, `bayes(prior, sensitivity, false_positive)`, `expected_value(values, probabilities)` and `variance_discrete`. They were echoed back.
 - Fixed: `10!!` was read as the factorial of 10! (a wrong answer); `n!!` is now the double factorial. Added `primes(n)` (also `primes_up_to`), `digit_sum` (also `sum_of_digits`) and `is_square`.

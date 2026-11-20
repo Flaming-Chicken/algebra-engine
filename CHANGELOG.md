@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ## [Unreleased]
 
+### Added
+
+- `amortization(principal, annual rate, years[, rows])`: the monthly payment and a schedule of interest, principal repaid and balance, to the cent.
+
 ## [0.7.0] - 2026-11-20
 
 A usability release. A probe loop that feeds the engine the plain inputs a first user types (and checks every answer against an

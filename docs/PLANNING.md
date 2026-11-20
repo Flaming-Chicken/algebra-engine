@@ -86,7 +86,7 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R59` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R67` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
@@ -111,9 +111,10 @@ spellings a new user types first. The open list, by field:
   (`sum of 1 to 10`, `area of circle radius 3`), `sin x cos x`, unit arithmetic across dimensions (`3 m * 2 s`),
   `|x| + 1`, the decimal tail for commands typed with decimals (`integrate(sin(x), x, 0, 0.5)`).
 - **Structure.** The two parser tables of command names (`parser.rs` and `numeric_commands.rs`) must stay in step; one
-  table would remove a class of mistakes. The hooks at the top of `UraeSession::execute_line` (about fifteen now:
-  linear programs, logic, ODE methods, complex functions, stationary points, ...) should become one registry with a
-  stated order. The `missing_docs` backlog.
+  table would remove a class of mistakes. Seven of the command hooks at the top of `UraeSession::execute_line` are now one
+  ordered registry (`COMMAND_HOOKS` in `session.rs`); the rest (linear programs and Lagrange multipliers, element
+  assignment and indexing, matrix variables, `input_text` rewrites) still sit inline in an order that matters and should
+  join it. The `missing_docs` backlog.
 
 **What the loop taught (so far).** Wrong answers came almost only from code that reinterprets input: an English or
 shorthand rewrite, a retry after a parse failure, or an alias that shadowed an existing function. Each such rewrite

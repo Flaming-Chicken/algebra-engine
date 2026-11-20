@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `poisson_regress(X, y)`: Poisson regression with Wald inference and rate ratios.
 - `is_isomorphic(G, H)` and `automorphisms(G)` for graphs.
 - `predict(x, y, x0)`: fitted value with confidence and prediction intervals.
 - `logistic_regress(X, y)` / `logit`: logistic regression with Wald inference and odds ratios.

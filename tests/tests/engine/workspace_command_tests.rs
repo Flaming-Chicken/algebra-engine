@@ -6586,3 +6586,130 @@ fn graph_isomorphism_and_automorphism_counts_match_permutation_search() {
         "false"
     );
 }
+
+#[test]
+fn poisson_regression_satisfies_the_score_equations_and_the_group_closed_form() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // One binary predictor: exp(intercept) is the mean of group 0, the rate ratio the ratio of the group means, and the
+    // Wald variance of the slope is 1/sum0 + 1/sum1.
+    let group0 = [2, 3, 1, 4, 2, 3];
+    let group1 = [6, 8, 5, 9, 7];
+    let xs = format!(
+        "[{}]",
+        group0
+            .iter()
+            .map(|_| "[0]")
+            .chain(group1.iter().map(|_| "[1]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        group0
+            .iter()
+            .chain(&group1)
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let (sum0, sum1) = (
+        group0.iter().sum::<i32>() as f64,
+        group1.iter().sum::<i32>() as f64,
+    );
+    let (mean0, mean1) = (sum0 / group0.len() as f64, sum1 / group1.len() as f64);
+    assert!(
+        (field(&out, "intercept =") - mean0.ln()).abs() < 1e-5,
+        "{out}"
+    );
+    let slope_part = out.split("x1").nth(1).unwrap();
+    assert!(
+        (field(slope_part, "=") - (mean1 / mean0).ln()).abs() < 1e-5,
+        "{out}"
+    );
+    assert!(
+        (field(slope_part, "rate ratio ") - mean1 / mean0).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(slope_part, "se ") - (1.0 / sum0 + 1.0 / sum1).sqrt()).abs() < 1e-5,
+        "{out}"
+    );
+    // Continuous predictors: X^T (y - mu) = 0 and the log-likelihood.
+    let data: [(f64, f64, u32); 12] = [
+        (0.5, 1.0, 1),
+        (1.0, 3.0, 2),
+        (1.5, 2.0, 2),
+        (2.0, 5.0, 6),
+        (2.5, 1.0, 3),
+        (3.0, 4.0, 7),
+        (3.5, 2.0, 5),
+        (4.0, 6.0, 12),
+        (4.5, 3.0, 9),
+        (5.0, 1.0, 8),
+        (5.5, 5.0, 17),
+        (6.0, 2.0, 15),
+    ];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        data.iter()
+            .map(|d| d.2.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let beta = [
+        field(&out, "intercept ="),
+        field(out.split("x1").nth(1).unwrap(), "="),
+        field(out.split("x2").nth(1).unwrap(), "="),
+    ];
+    let mut score = [0.0f64; 3];
+    let mut log_likelihood = 0.0;
+    for (a, b, count) in data {
+        let eta = beta[0] + beta[1] * a + beta[2] * b;
+        let mu = eta.exp();
+        let r = count as f64 - mu;
+        score[0] += r;
+        score[1] += r * a;
+        score[2] += r * b;
+        let factorial: f64 = (1..=count).map(|v| (v as f64).ln()).sum();
+        log_likelihood += count as f64 * eta - mu - factorial;
+    }
+    assert!(
+        score.iter().all(|s| s.abs() < 1e-3),
+        "{out}: score {score:?}"
+    );
+    assert!(
+        (field(&out, "log-likelihood =") - log_likelihood).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("poisson_regress([[1],[2],[3],[4]], [1,-2,3,4])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("poisson_regress([[1],[2],[3],[4]], [1,2.5,3,4])")
+            .is_error
+    );
+}

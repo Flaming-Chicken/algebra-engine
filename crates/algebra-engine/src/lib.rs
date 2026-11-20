@@ -57,6 +57,7 @@ pub mod lifting;
 pub mod limit_check;
 pub mod limits;
 pub mod linprog;
+pub mod list_utils;
 pub mod logic;
 pub mod logic_commands;
 pub mod macros;

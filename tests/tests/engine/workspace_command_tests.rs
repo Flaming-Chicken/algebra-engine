@@ -3120,3 +3120,137 @@ fn binomial_equations_have_exact_roots_that_satisfy_them() {
     );
     assert!(run("solve(x^5 = 1)").starts_with("Solutions for x: [1,"));
 }
+
+#[test]
+fn list_utilities_match_direct_computation() {
+    let mut state = 0xC2B2_AE3D_27D4_EB4Fu64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i64
+    };
+    let literal = |v: &[i64]| {
+        format!(
+            "[{}]",
+            v.iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let ints = |text: &str| -> Vec<i64> {
+        text.trim_matches(|c| c == '[' || c == ']')
+            .split(", ")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.parse().unwrap())
+            .collect()
+    };
+    for _ in 0..25 {
+        let n = 3 + next(7) as usize;
+        let v: Vec<i64> = (0..n).map(|_| next(21) - 10).collect();
+        let l = literal(&v);
+        assert_eq!(run(&format!("sum({l})")), v.iter().sum::<i64>().to_string());
+        assert_eq!(run(&format!("len({l})")), n.to_string());
+        let prefix: Vec<i64> = v
+            .iter()
+            .scan(0, |s, x| {
+                *s += x;
+                Some(*s)
+            })
+            .collect();
+        assert_eq!(ints(&run(&format!("cumsum({l})"))), prefix);
+        let differences: Vec<i64> = v.windows(2).map(|w| w[1] - w[0]).collect();
+        assert_eq!(ints(&run(&format!("diff({l})"))), differences);
+        let mut sorted = v.clone();
+        sorted.sort();
+        assert_eq!(ints(&run(&format!("sort({l})"))), sorted);
+        let mut unique = sorted.clone();
+        unique.dedup();
+        assert_eq!(ints(&run(&format!("unique({l})"))), unique);
+        let mut reversed = v.clone();
+        reversed.reverse();
+        assert_eq!(ints(&run(&format!("reverse({l})"))), reversed);
+        let target = v[0];
+        assert_eq!(
+            run(&format!("count({l}, {target})")),
+            v.iter().filter(|x| **x == target).count().to_string()
+        );
+        let (max, min) = (*v.iter().max().unwrap(), *v.iter().min().unwrap());
+        assert_eq!(
+            v[run(&format!("argmax({l})")).parse::<usize>().unwrap()],
+            max
+        );
+        assert_eq!(
+            v[run(&format!("argmin({l})")).parse::<usize>().unwrap()],
+            min
+        );
+        assert_eq!(run(&format!("min({l})")), min.to_string());
+        assert_eq!(
+            run(&format!("sum_squares({l})")),
+            v.iter().map(|x| x * x).sum::<i64>().to_string()
+        );
+        // Moving average: exact rationals against direct sums.
+        let w = 2 + next(2) as usize;
+        let averages = run(&format!("moving_average({l}, {w})"));
+        let expected: Vec<(i64, i64)> = v
+            .windows(w)
+            .map(|win| (win.iter().sum::<i64>(), w as i64))
+            .collect();
+        for (got, (num, den)) in averages
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(", ")
+            .zip(expected)
+        {
+            let (a, b) = match got.split_once('/') {
+                Some((a, b)) => (a.parse::<i64>().unwrap(), b.parse::<i64>().unwrap()),
+                None => (got.parse().unwrap(), 1),
+            };
+            assert_eq!(a * den, num * b, "moving_average({l}, {w}): {averages}");
+        }
+        // Average ranks: ties share the mean of their positions.
+        let ranks = run(&format!("rank_data({l})"));
+        for (i, got) in ranks
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(", ")
+            .enumerate()
+        {
+            let less = v.iter().filter(|x| **x < v[i]).count() as f64;
+            let equal = v.iter().filter(|x| **x == v[i]).count() as f64;
+            let expected = less + (equal + 1.0) / 2.0;
+            let value = match got.split_once('/') {
+                Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                None => got.parse().unwrap(),
+            };
+            assert!(
+                (value - expected).abs() < 1e-12,
+                "rank_data({l})[{i}]: {got} vs {expected}"
+            );
+        }
+        // Histogram counts.
+        let histogram = run(&format!("histogram({l})"));
+        for value in &unique {
+            let count = v.iter().filter(|x| *x == value).count();
+            assert!(
+                histogram.contains(&format!("{value}: {count}")),
+                "{histogram}"
+            );
+        }
+    }
+    // Sequences.
+    assert_eq!(run("range(5)"), "[0, 1, 2, 3, 4]");
+    assert_eq!(run("range(1, 10, 3)"), "[1, 4, 7]");
+    assert_eq!(run("range(10, 0, -3)"), "[10, 7, 4, 1]");
+    assert_eq!(run("linspace(0, 1, 5)"), "[0, 1/4, 1/2, 3/4, 1]");
+    assert_eq!(run("arange(0, 1, 1/4)"), "[0, 1/4, 1/2, 3/4]");
+    // Means: exact where the answer is rational or a radical.
+    assert_eq!(run("harmonic_mean([1, 2, 4])"), "12/7");
+    assert_eq!(run("weighted_mean([1, 2, 3], [1, 1, 2])"), "9/4");
+    assert_eq!(run("geometric_mean([1, 2, 4])"), "2");
+    assert_eq!(run("rms([3, 4])"), "5/2 · √(2)");
+    // Older meanings are untouched: a series sum, a derivative, the statistical range of a list, mean of scalars.
+    assert_eq!(run("sum(k, k, 1, 10)"), "55");
+    assert_eq!(run("diff(x^3, x)"), "3 · x^2");
+    assert_eq!(run("range([1, 2, 10])"), "range = 9");
+    assert_eq!(run("mean(2, 4, 6)"), "mean = 4");
+}

@@ -447,6 +447,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `sum([1,2,3])`, `cumsum`, `sort`, `len`, `unique`, `linspace`, `moving_average`, ...: exact list utilities.
+        if let Some(outcome) = crate::list_utils::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // `solve(x^8 = 1)`, `roots(x^6 - 64)`: exact roots of a binomial equation.
         if let Some(outcome) = crate::binomial_roots::run(self, trimmed) {
             return match outcome {

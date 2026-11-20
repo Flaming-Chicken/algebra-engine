@@ -45,7 +45,11 @@ fn test_executor_combinatorics_and_physics() {
     let op_conv = parse_operation("convert 72 [km/h] to [m/s]");
     let res_conv = OperationExecutor::execute(&graph, &op_conv, &ctx);
     assert!(!res_conv.is_error);
-    assert!(res_conv.output_text.contains("20.0000 [m/s]"));
+    assert!(
+        res_conv.output_text.contains("= 20 [m/s]"),
+        "{}",
+        res_conv.output_text
+    );
 }
 
 #[test]

@@ -275,3 +275,152 @@ fn test_lake_trajectory_export() {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
+
+// ---------------------------------------------------------------------------------------------
+// The learned policy.
+// ---------------------------------------------------------------------------------------------
+
+use algebra_core::parser::ExprParser;
+use algebra_engine::mcts::{LearnedPolicy, PolicyFeatures};
+
+#[allow(clippy::expect_used)]
+fn parse(graph: &ExprGraph, text: &str) -> algebra_core::ExprId {
+    ExprParser::new(graph)
+        .parse(text)
+        .expect("a valid expression")
+}
+
+#[test]
+fn the_untrained_learned_policy_reproduces_the_heuristic_exactly() {
+    let graph = ExprGraph::new();
+    let model = LearnedPolicy::from_heuristic();
+    for text in [
+        "(x+1)*(x+2)",
+        "1/x + 1/y",
+        "sin(x)^2 + cos(x)^2",
+        "x^2 + 2*x + 1",
+        "3 + 4",
+    ] {
+        let e = parse(&graph, text);
+        let heuristic = MctsPolicyHead::compute_policy(&graph, e, None);
+        let learned = MctsPolicyHead::compute_policy_with(&model, &graph, e, None);
+        assert_eq!(heuristic.len(), learned.len(), "{text}");
+        for ((a, p), (b, q)) in heuristic.iter().zip(&learned) {
+            assert_eq!(a, b, "{text}");
+            assert!((p - q).abs() < 1e-12, "{text}: {a}: {p} vs {q}");
+        }
+        let total: f64 = learned.iter().map(|(_, p)| p).sum();
+        assert!((total - 1.0).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn gradient_steps_move_the_policy_towards_the_target_distribution() {
+    let graph = ExprGraph::new();
+    let e = parse(&graph, "(x+1)*(x+2)");
+    let phi = PolicyFeatures::of(&graph, e);
+    assert_eq!(phi.len(), PolicyFeatures::DIM);
+    let actions = [
+        MctsAction::Expand,
+        MctsAction::FoldConstants,
+        MctsAction::Together,
+    ];
+    let target = [0.0, 1.0, 0.0];
+    let mut model = LearnedPolicy::from_heuristic();
+    let mut previous = f64::INFINITY;
+    let first = model.update(&phi, &actions, &target, 0.1);
+    assert!(first < previous);
+    previous = first;
+    for _ in 0..300 {
+        let loss = model.update(&phi, &actions, &target, 0.1);
+        assert!(loss <= previous + 1e-12, "the loss must not increase");
+        previous = loss;
+    }
+    assert!(previous < 0.2, "final loss {previous}");
+    // The action that was favoured by the heuristic is no longer, for this kind of expression.
+    let scored: Vec<f64> = actions.iter().map(|a| model.logit(a, &phi)).collect();
+    assert!(scored[1] > scored[0] && scored[1] > scored[2], "{scored:?}");
+    // The weights of other kinds of action are untouched by that gradient.
+    let other = MctsAction::TrigReduction;
+    assert_eq!(
+        model.logit(&other, &phi),
+        LearnedPolicy::from_heuristic().logit(&other, &phi)
+    );
+}
+
+#[test]
+fn the_learned_policy_round_trips_through_json() {
+    let graph = ExprGraph::new();
+    let e = parse(&graph, "x + 1/x");
+    let phi = PolicyFeatures::of(&graph, e);
+    let mut model = LearnedPolicy::from_heuristic();
+    model.update(
+        &phi,
+        &[MctsAction::Together, MctsAction::Cancel],
+        &[1.0, 0.0],
+        0.3,
+    );
+    let again = LearnedPolicy::from_json(&model.to_json()).unwrap();
+    assert_eq!(again, model);
+    assert!(LearnedPolicy::from_json("{\"Expand\": [\"1.0\"]}").is_err());
+    let mut bad = model.to_json();
+    bad = bad.replacen("\"2.5\"", "\"NaN\"", 1);
+    assert!(
+        LearnedPolicy::from_json(&bad).is_err(),
+        "non-finite weights are rejected"
+    );
+    assert!(LearnedPolicy::from_json("not json").is_err());
+}
+
+#[test]
+fn training_on_search_statistics_lowers_the_loss_and_changes_the_priors() {
+    let graph = ExprGraph::new();
+    let roots: Vec<_> = [
+        "sin(x)^2 + cos(x)^2",
+        "sin(y)^2 + cos(y)^2",
+        "sin(a)^2 + cos(a)^2",
+        "(x+1)*(x+2)",
+        "(y+3)*(y-1)",
+        "1/x + 1/y",
+    ]
+    .iter()
+    .map(|t| parse(&graph, t))
+    .collect();
+    let config = MctsConfig {
+        max_iterations: 40,
+        ..MctsConfig::default()
+    };
+    let mut engine = MctsSearchEngine::new(config, MctsValueHead::default(), None);
+    assert!(engine.policy().is_none());
+    let first = engine.train_policy(&graph, &roots, 1, 0.2);
+    let later = engine.train_policy(&graph, &roots, 12, 0.2);
+    assert!(first > 0.0, "the search produced targets");
+    assert!(
+        later < first,
+        "the loss against the search's own visit distribution falls: {first} -> {later}"
+    );
+    let model = engine.policy().expect("a policy was trained").clone();
+    assert_ne!(model, LearnedPolicy::from_heuristic());
+
+    // A new expression of the kind seen in training is scored differently from the heuristic.
+    let fresh = parse(&graph, "sin(z)^2 + cos(z)^2");
+    let heuristic = MctsPolicyHead::compute_policy(&graph, fresh, None);
+    let learned = MctsPolicyHead::compute_policy_with(&model, &graph, fresh, None);
+    let differs = heuristic
+        .iter()
+        .zip(&learned)
+        .any(|((_, p), (_, q))| (p - q).abs() > 1e-3);
+    assert!(differs, "training changed the priors");
+    let total: f64 = learned.iter().map(|(_, p)| p).sum();
+    assert!((total - 1.0).abs() < 1e-12);
+
+    // Searching with the trained policy still finds the identity.
+    let result = engine.search(&graph, fresh, None);
+    assert!(result.best_value >= 0.0 && !result.trajectory.is_empty());
+    let one = graph.integer(1);
+    assert_eq!(
+        result.best_expr,
+        one.index(),
+        "sin^2 + cos^2 simplifies to 1"
+    );
+}

@@ -405,3 +405,82 @@ fn test_adelic_universal_ball_and_product_containment() {
     // 6/35 ≈ 0.1714 <= 1.0, so ball contains the adele!
     assert!(ball_adele.contains_scalar(&cat_core::scalar::ScalarAtom::Adele(atom)));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Exact values (ledger B16 / surreal engine unification)
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A dyadic rational as an exact fraction, the oracle for the arithmetic below.
+fn exact(num: i64, exp2: u32) -> (i128, u32) {
+    (num as i128, exp2)
+}
+
+/// Compare `a/2^i` and `b/2^j` by cross-multiplication on integers (independent of the engine).
+fn dyadic_cmp(a: (i128, u32), b: (i128, u32)) -> std::cmp::Ordering {
+    let e = a.1.max(b.1);
+    (a.0 << (e - a.1)).cmp(&(b.0 << (e - b.1)))
+}
+
+#[test]
+fn exact_dyadic_arithmetic_and_order_agree_with_integer_cross_multiplication() {
+    let values: Vec<(i64, u32)> = vec![
+        (0, 0),
+        (1, 0),
+        (-1, 0),
+        (3, 0),
+        (-5, 0),
+        (1, 1),
+        (-1, 1),
+        (3, 2),
+        (5, 3),
+        (-7, 3),
+        (1, 4),
+    ];
+    for &(n1, e1) in &values {
+        for &(n2, e2) in &values {
+            let x = SurrealNumber::dyadic(n1, e1);
+            let y = SurrealNumber::dyadic(n2, e2);
+            let (a, b) = (exact(n1, e1), exact(n2, e2));
+            // order
+            let want = dyadic_cmp(a, b);
+            assert_eq!(
+                x.le(&y),
+                want != std::cmp::Ordering::Greater,
+                "{n1}/2^{e1} <= {n2}/2^{e2}"
+            );
+            // sum and product, compared to the exact integer result
+            let e = e1.max(e2);
+            let sum = (a.0 << (e - e1)) + (b.0 << (e - e2));
+            let s = x.add(&y);
+            let want_sum = SurrealNumber::dyadic(sum as i64, e);
+            assert!(s.equiv(&want_sum), "{n1}/2^{e1} + {n2}/2^{e2}");
+            let prod = a.0 * b.0;
+            let p = x.mul(&y);
+            let want_prod = SurrealNumber::dyadic(prod as i64, e1 + e2);
+            assert!(p.equiv(&want_prod), "{n1}/2^{e1} * {n2}/2^{e2}");
+        }
+    }
+}
+
+#[test]
+fn a_cut_has_the_simplest_number_between_its_options_as_its_value() {
+    // { 0 | 3 } is 1, not the midpoint 1.5.
+    let cut = SurrealNumber::cut(
+        vec![SurrealNumber::zero()],
+        vec![SurrealNumber::from_i64(3)],
+    );
+    assert!(cut.equiv(&SurrealNumber::one()));
+    assert!(cut.le(&SurrealNumber::one()) && SurrealNumber::one().le(&cut));
+    // 1 < 1.25 < 1.5 are ordered correctly although the old float shortcut compared {0|3} as 1.5.
+    let one_and_a_quarter = SurrealNumber::dyadic(5, 2);
+    assert!(cut.lt(&one_and_a_quarter));
+    // {1 | 2} is 3/2.
+    let half_way = SurrealNumber::cut(vec![SurrealNumber::one()], vec![SurrealNumber::from_i64(2)]);
+    assert!(half_way.equiv(&SurrealNumber::dyadic(3, 1)));
+    // Tiny dyadic values are not mistaken for the infinitesimal stand-in.
+    let tiny = SurrealNumber::dyadic(1, 40);
+    assert!(matches!(
+        tiny.to_atom(),
+        cat_core::scalar::SurrealAtom::ConwayForm { .. }
+    ));
+}

@@ -2,7 +2,7 @@
 
 [![Rust Workspace](https://img.shields.io/badge/Rust-1.85%2B%20%7C%202024%20Edition-orange?logo=rust)](https://www.rust-lang.org/)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE.md)
-[![Tests Passing](https://img.shields.io/badge/Tests-720%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-926%20Passing%20%7C%200%20Failures-brightgreen.svg)](tests/)
 [![Clippy](https://img.shields.io/badge/Clippy-0%20Warnings-brightgreen.svg)](Cargo.toml)
 [![WASM Ready](https://img.shields.io/badge/WebAssembly-Cloudflare%20Pages%20%7C%20PWA-9cf?logo=webassembly)](crates/urae-wasm)
 
@@ -96,8 +96,9 @@ graph TD
 
 ### 1. Symbolic CAS & Equality Saturation
 - **E-Graph Equality Saturation (`egg`)**: Non-greedy pattern matching discovers the simplest canonical algebraic forms without getting trapped in local algorithmic minima.
-- **Symbolic Calculus & Differential Algebra**: Symbolic limits, derivatives, Taylor/Laurent series, and automated Risch indefinite integration.
-- **Polynomial Algebra & Gröbner Bases**: Multivariate polynomial arithmetic, Buchberger algorithm, and polynomial GCDs over finite fields and rationals.
+- **Symbolic Calculus & Differential Algebra**: Symbolic limits (direct substitution, L'Hôpital, Gruntz-style asymptotics), derivatives, Taylor/Laurent series, and indefinite integration: rational functions (Hermite reduction, Rothstein–Trager) and a partial elementary Risch integrator that refuses what it cannot do (see `docs/DESIGN.md`).
+- **Polynomial Algebra & Gröbner Bases**: Multivariate polynomial arithmetic, Buchberger algorithm, polynomial GCDs, and complete factorisation of univariate polynomials over $\mathbb{Z}$ and $\mathbb{Q}$ (Zassenhaus with Hensel lifting).
+- **Honest Results**: `simplify` says where its result is valid (`x/x` is `1` for `x ≠ 0`), and `solve` says which solutions are real and complex and when only the principal branch of a periodic equation is given.
 
 ### 2. Parametric CAD, Machinery & Isogeometric Analysis (IGA)
 - **Parametric Machinery Generators**: Involute spur and helical gears with custom pressure angles and teeth count, ISO standard metric screws with thread profiles, and NACA 4-digit symmetric and cambered aerodynamic airfoils.
@@ -108,6 +109,7 @@ graph TD
 - **Quantum Field Theory & Spinor Helicity**: Dirac gamma matrices, 4D Clifford algebra traces, Weyl 2-component spinor angle/square brackets $\langle p q \rangle [p q]$, and Parke-Taylor tree-level gluon scattering amplitudes.
 - **Exceptional Lie Groups & Hypercomplex Algebras**: 8D non-associative Octonions $\mathbb{O}$, Albert Jordan algebras $H_3(\mathbb{O})$, and $E_8$ root systems with Cartan-Killing forms.
 - **Holonomic $D$-Modules & Zeilberger's Algorithm**: Differential operators in Weyl algebra $A_n(\mathbb{C})$ ($[d, x] = 1$) with automated creative telescoping proofs for hypergeometric summation identities.
+- **Finite Fields, Galois Theory & Coding**: arithmetic in $GF(p^n)$, Galois groups over $\mathbb{Q}$ of polynomials up to degree 4, elliptic curves over $\mathbb{Q}$ and $\mathbb{F}_p$ (Frobenius traces, reduction types), Reed–Solomon codes over $GF(2^8)$ with error correction, and exact dyadic surreal numbers.
 - **Certified Arithmetic & Complex Analysis**: Directed-rounding interval arithmetic $[a, b]$, and complex branch cut Riemann surface topological sheet visualizers ($\sqrt{z}, \ln(z), \arcsin(z)$).
 
 ### 4. Formal Proof Verification & Cross-System Export
@@ -131,8 +133,8 @@ graph TD
 | **Polynomials & Ideals** | Sparse univariate/multivariate polynomials, Gröbner bases, resultants, Sturm chains | Yun square-free decomposition, subresultant GCD, Buchberger + Gebauer-Möller criteria |
 | **Linear Algebra** | `SymbolicMatrix` (`det`, `inv`, `rref`, `rank`, `nullspace`, `charpoly`, `eigenvalues`), Lie Cartan matrices | Bareiss elimination, Faddeev-LeVerrier / cofactor expansion, exact RREF |
 | **Numerical ODE / PDE Integration** | `NumericalOdeSolver` (`Auto`, `Rk4`, `DormandPrince54`, `Tsitouras54`, `RadauIIA5`, `GaussLegendre4`, `VelocityVerlet`, `SelfOptimizingMeta`), Method-of-Lines, FDM/FEM | Adaptive embedded RK5(4), stiff implicit Runge-Kutta, symplectic Hamiltonian integration |
-| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proof export (skeleton only, see `docs/PLANNING.md` A9) | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
-| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 notebook export (unformatted stubs, `docs/PLANNING.md` A11) |
+| **Domain & Geometry Extensions** | Hexagonal grids (`Hecs<T>`), SE(3) rigid poses (`Pose<T>`), `Magnitude`, NURBS/IGA, QFT spinors, TDA, Lean 4 / Coq proof export (skeleton only, see `docs/LEDGER.md` A9) | Cylindrical Algebraic Decomposition (Collins/McCallum), persistent homology, differential algebra |
+| **Frontends & Interoperability** | Native `egui` Notebook (`urae-notebook`), Web UI (`urae-wasm`), CLI/JSON streams (`urae-cli`), Rust symbolic/matrix API, Python bindings (`urae-py`), Jupyter kernel, LSP, C ABI | Multi-notation ingestion (standard infix, LaTeX, semicolon-delimited matrices `[1 2; 3 4]`, Python `**`), `.py`/LaTeX/Lean 4 notebook export (unformatted stubs, `docs/LEDGER.md` A11) |
 
 ---
 
@@ -300,14 +302,14 @@ fn main() {
 All workspace integration and unit tests are centralized in the `tests/` directory:
 
 ```bash
-# Run all 890+ workspace unit, integration, and doc tests
+# Run all workspace unit, integration, and doc tests (987 pass as of 19 Nov 2026)
 cargo test --workspace
 
-# Run specific integration suites (counts as of 18 Nov 2026)
+# Run specific integration suites (counts as of 19 Nov 2026)
 cargo test --test notebook_suite    # GUI notepad, smart stream, plot bounds, sliders, exports & workspace routing (115 tests)
-cargo test --test engine_suite      # Symbolic engine, physics, CAD, FEA, summation & differential forms (484 tests, 1 ignored)
-cargo test --test advanced_suite    # Category theory, proofs, CAD, IGA & quantum (64 tests)
-cargo test --test core_suite        # ExprGraph, intervals, numbers & formatters (43 tests)
+cargo test --test engine_suite      # Symbolic engine, physics, CAD, FEA, summation & differential forms (547 tests, 1 ignored)
+cargo test --test advanced_suite    # Category theory, proofs, CAD, IGA & quantum (80 tests)
+cargo test --test core_suite        # ExprGraph, intervals, numbers & formatters (44 tests)
 cargo test --test ecosystem_suite   # Python kernel, LSP, Jupyter, CLI, C ABI & the umbrella facade and macros (36 tests)
 
 # Verify zero compiler warnings & zero clippy lints

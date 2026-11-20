@@ -140,10 +140,255 @@ impl RischIntegrator {
         ))
     }
 
+    /// `P(x) * (a x + b)^e` with `P` a polynomial with rational coefficients and `e` a rational
+    /// that is not an integer (`sqrt` is `e = 1/2`; a quotient by such a power has `-e`).
+    ///
+    /// Substituting `u = a x + b` turns `P` into a polynomial `sum_m q_m u^m` and the integral into
+    /// `(1 / a) sum_m q_m u^(m + e + 1) / (m + e + 1)`, with no zero denominator because `e` is not an
+    /// integer. `None` if the expression is not of this form (it is then left to the other methods).
+    fn integrate_linear_radical(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> Option<ExprId> {
+        use crate::gosper::QPoly;
+        use algebra_core::Number;
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        use num_traits::ToPrimitive;
+        use num_traits::{One, Zero};
+
+        let q = |n: i64, d: i64| BigRational::new(BigInt::from(n), BigInt::from(d));
+
+        // A polynomial in `wrt` with rational coefficients.
+        fn polynomial(graph: &ExprGraph, e: ExprId, wrt: SymbolId) -> Option<QPoly> {
+            use algebra_core::Number;
+            use num_bigint::BigInt;
+            use num_rational::BigRational;
+            match &graph.get(e).kind {
+                ExprKind::Number(Number::Integer(i)) => {
+                    Some(QPoly::new(vec![BigRational::from_integer(BigInt::from(
+                        *i,
+                    ))]))
+                }
+                ExprKind::Number(Number::Rational(n, d)) if *d != 0 => {
+                    Some(QPoly::new(vec![BigRational::new(
+                        BigInt::from(*n),
+                        BigInt::from(*d),
+                    )]))
+                }
+                ExprKind::Symbol(s) if *s == wrt => Some(QPoly::k()),
+                ExprKind::Neg(a) => polynomial(graph, *a, wrt)
+                    .map(|p| p.scale(&-BigRational::from_integer(1.into()))),
+                ExprKind::Add(xs) => xs.iter().try_fold(QPoly::zero(), |acc, &x| {
+                    polynomial(graph, x, wrt).map(|p| acc.add(&p))
+                }),
+                ExprKind::Sub(a, b) => {
+                    Some(polynomial(graph, *a, wrt)?.sub(&polynomial(graph, *b, wrt)?))
+                }
+                ExprKind::Mul(xs) => xs.iter().try_fold(QPoly::one(), |acc, &x| {
+                    polynomial(graph, x, wrt).map(|p| acc.mul(&p))
+                }),
+                ExprKind::Pow(base, exp) => {
+                    let ExprKind::Number(Number::Integer(n)) = graph.get(*exp).kind else {
+                        return None;
+                    };
+                    if !(0..=64).contains(&n) {
+                        return None;
+                    }
+                    let b = polynomial(graph, *base, wrt)?;
+                    Some((0..n).fold(QPoly::one(), |acc, _| acc.mul(&b)))
+                }
+                _ => None,
+            }
+        }
+
+        // `(base, e)` if `f` is `base^e` or `sqrt(base)` with a rational, non-integer `e` and a linear base.
+        let radical = |f: ExprId| -> Option<(ExprId, BigRational)> {
+            let (base, e) = match &graph.get(f).kind {
+                ExprKind::Pow(base, exp) => {
+                    let e = match graph.get(*exp).kind {
+                        ExprKind::Number(Number::Rational(n, d)) if d != 0 => q(n, d),
+                        _ => return None,
+                    };
+                    (*base, e)
+                }
+                ExprKind::Function { name, args } if args.len() == 1 => {
+                    if graph.symbols.resolve(*name).as_deref() != Some("sqrt") {
+                        return None;
+                    }
+                    (args[0], q(1, 2))
+                }
+                _ => return None,
+            };
+            if e.is_integer() {
+                return None;
+            }
+            let lin = polynomial(graph, base, wrt)?;
+            (lin.degree() == Some(1)).then_some((base, e))
+        };
+
+        // Split into the numerator factors, the denominator factors and a sign.
+        let (num_factors, den_factors): (Vec<ExprId>, Vec<ExprId>) = match &graph.get(expr).kind {
+            ExprKind::Mul(xs) => (xs.to_vec(), Vec::new()),
+            ExprKind::Div(n, d) => {
+                let numerator = match &graph.get(*n).kind {
+                    ExprKind::Mul(xs) => xs.to_vec(),
+                    _ => vec![*n],
+                };
+                let denominator = match &graph.get(*d).kind {
+                    ExprKind::Mul(xs) => xs.to_vec(),
+                    _ => vec![*d],
+                };
+                (numerator, denominator)
+            }
+            _ => return None,
+        };
+        let mut found: Option<(ExprId, BigRational)> = None;
+        let mut poly = QPoly::one();
+        for (factors, sign) in [(&num_factors, 1), (&den_factors, -1)] {
+            for &f in factors {
+                if let Some((base, e)) = radical(f) {
+                    if found.is_some() {
+                        return None; // two radicals: not handled here
+                    }
+                    found = Some((base, if sign == 1 { e } else { -e }));
+                } else if sign == 1 {
+                    poly = poly.mul(&polynomial(graph, f, wrt)?);
+                } else {
+                    // A constant in the denominator.
+                    let c = polynomial(graph, f, wrt)?;
+                    if c.degree() != Some(0) {
+                        return None;
+                    }
+                    poly = poly.scale(&(BigRational::one() / c.coeff(0)));
+                }
+            }
+        }
+        let (base, e) = found?;
+        let lin = polynomial(graph, base, wrt)?;
+        let (b0, a) = (lin.coeff(0), lin.coeff(1));
+        if a.is_zero() {
+            return None;
+        }
+        // Q(u) = P((u - b) / a).
+        let inverse = QPoly::new(vec![-(&b0 / &a), BigRational::one() / &a]);
+        let mut composed = QPoly::zero();
+        for j in (0..=poly.degree().unwrap_or(0)).rev() {
+            composed = composed.mul(&inverse).add(&QPoly::new(vec![poly.coeff(j)]));
+        }
+        let mut terms = Vec::new();
+        for m in 0..=composed.degree().unwrap_or(0) {
+            let qm = composed.coeff(m);
+            if qm.is_zero() {
+                continue;
+            }
+            let exponent =
+                BigRational::from_integer(BigInt::from(m as i64)) + &e + BigRational::one();
+            let coefficient = qm / (&a * &exponent);
+            let (cn, cd) = (coefficient.numer().to_i64()?, coefficient.denom().to_i64()?);
+            let (en, ed) = (exponent.numer().to_i64()?, exponent.denom().to_i64()?);
+            let power = graph.pow(base, graph.rational(en, ed));
+            terms.push(graph.mul([graph.rational(cn, cd), power]));
+        }
+        Some(if terms.len() == 1 {
+            terms[0]
+        } else {
+            graph.add(terms)
+        })
+    }
+
     /// Perform full Risch transcendental integration on `expr` with respect to variable `wrt`.
     pub fn integrate(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
         let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
         let x = graph.symbol(&wrt_name);
+        // A product of powers of x (`x^2 * (-2 x)`, `x^(-1) * x^3`) is one power: merge it first.
+        if let Some(merged) = Self::merge_powers_of_x(graph, expr, wrt, x) {
+            return Self::integrate(graph, merged, wrt);
+        }
+        // A denominator with a repeated irreducible quadratic (or higher) factor, such as `1/(x^2+1)^2`: the
+        // Hermite code below overflowed the stack on these, so partial fractions over Q go first.
+        if crate::rational_pf::has_repeated_nonlinear_factor(graph, expr, wrt)
+            && let Some(Ok(v)) =
+                crate::rational_pf::integrate_rational_function(graph, expr, wrt, x)
+        {
+            return Ok(v);
+        }
+        match Self::integrate_main(graph, expr, wrt) {
+            Ok(v) => Ok(v),
+            // The main rules gave up: try partial fractions over Q, then the further families (quadratic
+            // radicals, by parts, trigonometric powers); if none applies, report the original error.
+            Err(e) => {
+                if let Some(Ok(v)) =
+                    crate::rational_pf::integrate_rational_function(graph, expr, wrt, x)
+                {
+                    return Ok(v);
+                }
+                crate::risch_more::fallback_integral(graph, expr, wrt, x).unwrap_or(Err(e))
+            }
+        }
+    }
+
+    /// `c * x^a * x^b * ...` with at least two powers of `x` and every other factor free of `x`, as `c * x^(a + b + ...)`.
+    fn merge_powers_of_x(
+        graph: &ExprGraph,
+        expr: ExprId,
+        wrt: SymbolId,
+        x: ExprId,
+    ) -> Option<ExprId> {
+        // Flatten nested products and negations into one list of factors.
+        fn flatten(graph: &ExprGraph, id: ExprId, out: &mut Vec<ExprId>) {
+            match &graph.get(id).kind {
+                ExprKind::Mul(fs) => {
+                    for &f in fs.iter() {
+                        flatten(graph, f, out);
+                    }
+                }
+                ExprKind::Neg(inner) => {
+                    out.push(graph.integer(-1));
+                    flatten(graph, *inner, out);
+                }
+                _ => out.push(id),
+            }
+        }
+        if !matches!(graph.get(expr).kind, ExprKind::Mul(_)) {
+            return None;
+        }
+        let mut factors = Vec::new();
+        flatten(graph, expr, &mut factors);
+        let (mut constants, mut exponents) = (Vec::new(), Vec::new());
+        for &f in factors.iter() {
+            if !graph.has_symbol(f, wrt) {
+                constants.push(f);
+            } else if f == x {
+                exponents.push(graph.integer(1));
+            } else if let ExprKind::Pow(base, e) = graph.get(f).kind
+                && base == x
+                && !graph.has_symbol(e, wrt)
+            {
+                exponents.push(e);
+            } else {
+                return None;
+            }
+        }
+        if exponents.len() < 2 {
+            return None;
+        }
+        let sum = crate::simplify::Simplifier::simplify(graph, graph.add(exponents)).ok()?;
+        constants.push(graph.pow(x, sum));
+        Some(graph.mul(constants))
+    }
+
+    fn integrate_main(graph: &ExprGraph, expr: ExprId, wrt: SymbolId) -> AlgebraResult<ExprId> {
+        let wrt_name = graph.symbols.resolve(wrt).unwrap_or_default();
+        let x = graph.symbol(&wrt_name);
+
+        // 0. A polynomial times a non-integer power of a linear form: exact substitution.
+        if matches!(graph.get(expr).kind, ExprKind::Mul(_) | ExprKind::Div(_, _))
+            && let Some(result) = Self::integrate_linear_radical(graph, expr, wrt)
+        {
+            return Ok(result);
+        }
+
+        if let Some(result) = crate::risch_exptrig::integrate_abs(graph, expr, wrt) {
+            return result;
+        }
 
         // 1. Basic Polynomial & Power Check
         let node = graph.get(expr);
@@ -198,7 +443,17 @@ impl RischIntegrator {
                 }
 
                 // Check standard integration-by-parts / u-sub forms
-                let dep_int = Self::integrate_products(graph, &dep_factors, wrt)?;
+                let dep_int = match Self::integrate_products(graph, &dep_factors, wrt) {
+                    Ok(v) => v,
+                    // The hand-written cases did not match: try the general exp/trig families.
+                    Err(e) => crate::risch_exptrig::integrate_exp_trig_product(
+                        graph,
+                        &dep_factors,
+                        wrt,
+                        x,
+                    )
+                    .ok_or(e)?,
+                };
                 if const_factors.is_empty() {
                     Ok(dep_int)
                 } else {

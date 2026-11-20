@@ -31,10 +31,10 @@ fn test_matrix_identity_simplification() {
 fn test_quaternion_rewrite_simplification() {
     let graph = ExprGraph::new();
 
-    // i * j -> k
-    let qi = graph.symbol("i");
-    let qj = graph.symbol("j");
-    let qk = graph.symbol("k");
+    // qi * qj -> qk (plain i, j, k are ordinary variables)
+    let qi = graph.symbol("qi");
+    let qj = graph.symbol("qj");
+    let qk = graph.symbol("qk");
     let mul_ij = graph.mul([qi, qj]);
 
     let simplified = Simplifier::simplify(&graph, mul_ij).unwrap();

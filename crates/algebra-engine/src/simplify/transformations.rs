@@ -1349,10 +1349,22 @@ fn mv_poly_from_expr(graph: &ExprGraph, expr: ExprId) -> Option<MvPoly> {
                 && qe.is_integer()
                 && !qe.is_negative()
                 && let Some(n) = qe.numer().to_u32()
-                && n <= 32
+                && n <= 400
             {
                 let pb = mv_poly_from_expr(graph, *base)?;
-                return Some(mv_pow(&pb, n));
+                // The number of terms of a multinomial expansion: C(n + t - 1, t - 1) for t terms. Large exponents
+                // are expanded while that stays small (`(x + 1)^60` has 61 terms, `(x + y + z)^40` has 861).
+                let terms = pb.len() as u128;
+                let mut count: u128 = 1;
+                for i in 1..terms.max(1) {
+                    count = count.saturating_mul(n as u128 + i) / i;
+                    if count > 40_000 {
+                        break;
+                    }
+                }
+                if n <= 32 || count <= 40_000 {
+                    return Some(mv_pow(&pb, n));
+                }
             }
             let mut m = MvPoly::new();
             m.insert(

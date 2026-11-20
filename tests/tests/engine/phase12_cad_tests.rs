@@ -174,9 +174,44 @@ fn test_dsl_macros_cad_and_quantifier_elim() {
     f.terms.insert(vec![2], 1.0);
     f.terms.insert(vec![0], -9.0); // x^2 - 9
 
-    // cad! macro
-    let cad_res = cad!(&[f.clone()], &vars);
-    assert!(cad_res.is_ok());
+    // cad! macro: x^2 - 9 produces 5 cells (-inf..-3, -3, -3..3, 3, 3..+inf)
+    let cad_res = cad!(&[f.clone()], &vars).unwrap();
+    assert_eq!(cad_res.children.len(), 5);
+    assert_eq!(cad_res.children[0].signs[0], Sign::Positive);
+    assert_eq!(cad_res.children[1].signs[0], Sign::Zero);
+    assert_eq!(cad_res.children[2].signs[0], Sign::Negative);
+    assert_eq!(cad_res.children[3].signs[0], Sign::Zero);
+    assert_eq!(cad_res.children[4].signs[0], Sign::Positive);
+
+    // Unsupported constraints (Angle/Perpendicular) currently leave free points unsolved (pinned audit finding)
+    let mut partial_solver = GeometricConstraintSolver::new();
+    partial_solver.add_entity(
+        "P1",
+        GeometricEntity::Point2D {
+            name: "P1".to_string(),
+            x: Some(0.0),
+            y: Some(0.0),
+        },
+    );
+    partial_solver.add_entity(
+        "P2",
+        GeometricEntity::Point2D {
+            name: "P2".to_string(),
+            x: None,
+            y: None,
+        },
+    );
+    partial_solver.add_constraint(GeometricConstraint::Angle(
+        "P1".to_string(),
+        "P2".to_string(),
+        45.0,
+    ));
+    // An angle is a constraint between two lines; between two points it used to be ignored silently and
+    // is now reported (audit C3).
+    let err = partial_solver
+        .solve()
+        .expect_err("an angle between points is not defined");
+    assert!(err.to_string().contains("not a Line2D"), "{err}");
 
     // quantifier_elim! macro
     let q_exists = vec![(Quantifier::Exists, "x".to_string())];

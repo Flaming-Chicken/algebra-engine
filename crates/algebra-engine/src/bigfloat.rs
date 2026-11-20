@@ -1,0 +1,834 @@
+//! Arbitrary-precision evaluation of constant expressions (`N(pi, 50)`, `evalf(sqrt(2), 100)`).
+//!
+//! Numbers are binary fixed-point integers (`value = n / 2^p`) with guard bits; the elementary functions are computed
+//! from their series with argument reduction: `exp` by halving, `ln` by the `atanh` series after reducing the mantissa
+//! to `[1, 2)`, `sin` and `cos` by reduction modulo `pi/2` and the Taylor series, `atan` by the half-angle
+//! identity and the Taylor series, `pi` by Machin's formula. The error of every result is below `2^-(p - 20)`,
+//! far inside the guard bits that [`evaluate`] adds.
+
+use crate::poly::rational_from_number;
+use algebra_core::{AlgebraError, AlgebraResult, Constant, ExprGraph, ExprId, ExprKind};
+use num_bigint::{BigInt, Sign};
+use num_rational::BigRational;
+use num_traits::{One, Signed, ToPrimitive, Zero};
+
+fn err(message: impl Into<String>) -> AlgebraError {
+    AlgebraError::EvaluationError(message.into())
+}
+
+/// The fixed-point context: `p` fractional bits.
+#[derive(Clone, Copy)]
+struct Fixed {
+    p: u32,
+}
+
+impl Fixed {
+    fn one(&self) -> BigInt {
+        BigInt::one() << self.p
+    }
+
+    fn scale_rational(&self, r: &BigRational) -> BigInt {
+        (r.numer() << self.p) / r.denom()
+    }
+
+    fn mul(&self, a: &BigInt, b: &BigInt) -> BigInt {
+        (a * b) >> self.p
+    }
+
+    fn div(&self, a: &BigInt, b: &BigInt) -> AlgebraResult<BigInt> {
+        if b.is_zero() {
+            return Err(err("division by zero"));
+        }
+        Ok((a << self.p) / b)
+    }
+
+    fn sqrt(&self, a: &BigInt) -> AlgebraResult<BigInt> {
+        if a.is_negative() {
+            return Err(err("the square root of a negative number is not real"));
+        }
+        Ok((a << self.p).sqrt())
+    }
+
+    /// `exp(x)` by halving the argument until it is small, the Taylor series, and squaring back.
+    fn exp(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        // exp of a large argument would need many more bits for the integer part.
+        let magnitude = x.bits().saturating_sub(self.p as u64);
+        if magnitude > 24 {
+            return Err(err("exp: the argument is too large"));
+        }
+        let mut halvings = 0u32;
+        let mut r = x.clone();
+        let limit = self.one() >> 8;
+        while r.abs() > limit {
+            r >>= 1;
+            halvings += 1;
+        }
+        let (mut term, mut sum) = (self.one(), self.one());
+        for n in 1..(self.p as i64 + 20) {
+            term = self.mul(&term, &r) / n;
+            if term.is_zero() {
+                break;
+            }
+            sum += &term;
+        }
+        for _ in 0..halvings {
+            sum = self.mul(&sum, &sum);
+        }
+        Ok(sum)
+    }
+
+    /// `atanh(z)` for `|z| < 1/2` by its series.
+    fn atanh(&self, z: &BigInt) -> BigInt {
+        let z2 = self.mul(z, z);
+        let (mut power, mut sum) = (z.clone(), z.clone());
+        for n in 1..(self.p as i64) {
+            power = self.mul(&power, &z2);
+            if power.is_zero() {
+                break;
+            }
+            sum += &power / (2 * n + 1);
+        }
+        sum
+    }
+
+    fn ln2(&self) -> BigInt {
+        // ln 2 = 2 atanh(1/3)
+        let third = self.one() / 3;
+        self.atanh(&third) * 2
+    }
+
+    /// `ln(x)` for `x > 0`.
+    fn ln(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if !x.is_positive() {
+            return Err(err("ln: the argument must be positive"));
+        }
+        // x = m 2^k with m in [1, 2).
+        let k = x.bits() as i64 - 1 - self.p as i64;
+        let m = if k >= 0 {
+            x >> (k as u32)
+        } else {
+            x << ((-k) as u32)
+        };
+        let one = self.one();
+        let z = self.div(&(&m - &one), &(&m + &one))?;
+        Ok(self.atanh(&z) * 2 + self.ln2() * k)
+    }
+
+    fn atan_small(&self, x: &BigInt) -> BigInt {
+        // Taylor series for |x| <= 1/8.
+        let x2 = self.mul(x, x);
+        let (mut power, mut sum) = (x.clone(), x.clone());
+        for n in 1..(self.p as i64) {
+            power = -self.mul(&power, &x2);
+            if power.is_zero() {
+                break;
+            }
+            sum += &power / (2 * n + 1);
+        }
+        sum
+    }
+
+    fn atan(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        // Halve the angle: atan x = 2 atan(x / (1 + sqrt(1 + x^2))) until the argument is small.
+        let mut halvings = 0u32;
+        let mut r = x.clone();
+        let eighth = self.one() >> 3;
+        while r.abs() > eighth {
+            let sq = self.sqrt(&(self.one() + self.mul(&r, &r)))?;
+            r = self.div(&r, &(self.one() + sq))?;
+            halvings += 1;
+        }
+        Ok(self.atan_small(&r) << halvings)
+    }
+
+    fn pi(&self) -> AlgebraResult<BigInt> {
+        // Machin: pi = 16 atan(1/5) - 4 atan(1/239)
+        let a = self.atan_small(&(self.one() / 5));
+        let b = self.atan_small(&(self.one() / 239));
+        Ok(a * 16 - b * 4)
+    }
+
+    /// `(sin x, cos x)`.
+    fn sin_cos(&self, x: &BigInt) -> AlgebraResult<(BigInt, BigInt)> {
+        // Reduce modulo pi/2 (the context carries guard bits for the cancellation).
+        let half_pi: BigInt = self.pi()? >> 1;
+        let floor_adjust: BigInt = if x.is_negative() {
+            BigInt::from(-1)
+        } else {
+            BigInt::zero()
+        };
+        let quotient: BigInt = (x / &half_pi) + floor_adjust;
+        let r = x - &quotient * &half_pi;
+        let r2 = self.mul(&r, &r);
+        // Taylor series for sin and cos of |r| <= pi/2 (reduced again by the quadrant below).
+        let (mut s_term, mut s_sum) = (r.clone(), r.clone());
+        let (mut c_term, mut c_sum) = (self.one(), self.one());
+        for n in 1..(self.p as i64 + 20) {
+            c_term = -self.mul(&c_term, &r2) / ((2 * n - 1) * (2 * n));
+            s_term = -self.mul(&s_term, &r2) / ((2 * n) * (2 * n + 1));
+            if c_term.is_zero() && s_term.is_zero() {
+                break;
+            }
+            c_sum += &c_term;
+            s_sum += &s_term;
+        }
+        let quadrant = quotient.mod_floor_i(4);
+        Ok(match quadrant {
+            0 => (s_sum, c_sum),
+            1 => (c_sum, -s_sum),
+            2 => (-s_sum, -c_sum),
+            _ => (-c_sum, s_sum),
+        })
+    }
+}
+
+trait ModFloorI {
+    fn mod_floor_i(&self, m: i64) -> i64;
+}
+
+impl ModFloorI for BigInt {
+    fn mod_floor_i(&self, m: i64) -> i64 {
+        let m_big = BigInt::from(m);
+        let r = ((self % &m_big) + &m_big) % &m_big;
+        r.to_i64().unwrap_or(0)
+    }
+}
+
+/// An exact value or a fixed-point value during evaluation.
+fn eval_node(fx: &Fixed, graph: &ExprGraph, id: ExprId) -> AlgebraResult<BigInt> {
+    match &graph.get(id).kind {
+        ExprKind::Number(n) => match n {
+            algebra_core::Number::Constant(Constant::Pi) => fx.pi(),
+            algebra_core::Number::Constant(Constant::E) => fx.exp(&fx.one()),
+            algebra_core::Number::Float(bits) => {
+                let v = f64::from_bits(*bits);
+                let r = BigRational::from_float(v).ok_or_else(|| err("a non-finite number"))?;
+                Ok(fx.scale_rational(&r))
+            }
+            algebra_core::Number::Constant(c) => Err(err(format!(
+                "the constant {c:?} has no numerical value here"
+            ))),
+            other => Ok(fx.scale_rational(
+                &rational_from_number(other).map_err(|_| err("unsupported number"))?,
+            )),
+        },
+        ExprKind::Symbol(s) => {
+            let name = graph.symbols.resolve(*s).unwrap_or_default();
+            match name.as_str() {
+                "pi" | "π" => fx.pi(),
+                "e" => fx.exp(&fx.one()),
+                _ => Err(err(format!("the symbol {name} has no value"))),
+            }
+        }
+        ExprKind::Add(terms) => {
+            let mut sum = BigInt::zero();
+            for &t in terms {
+                sum += eval_node(fx, graph, t)?;
+            }
+            Ok(sum)
+        }
+        ExprKind::Sub(a, b) => Ok(eval_node(fx, graph, *a)? - eval_node(fx, graph, *b)?),
+        ExprKind::Neg(a) => Ok(-eval_node(fx, graph, *a)?),
+        ExprKind::Mul(factors) => {
+            let mut product = fx.one();
+            for &f in factors {
+                product = fx.mul(&product, &eval_node(fx, graph, f)?);
+            }
+            Ok(product)
+        }
+        ExprKind::Div(a, b) => fx.div(&eval_node(fx, graph, *a)?, &eval_node(fx, graph, *b)?),
+        ExprKind::Pow(base, exponent) => {
+            // An integer exponent by repeated multiplication (exact for negative bases), else exp(y ln x).
+            if let ExprKind::Number(n) = &graph.get(*exponent).kind
+                && let Ok(q) = rational_from_number(n)
+                && q.is_integer()
+                && let Some(k) = q.to_integer().to_i64()
+                && k.unsigned_abs() <= 100_000
+            {
+                let b = eval_node(fx, graph, *base)?;
+                let mut result = fx.one();
+                let mut square = b;
+                let mut e = k.unsigned_abs();
+                while e > 0 {
+                    if e & 1 == 1 {
+                        result = fx.mul(&result, &square);
+                    }
+                    square = fx.mul(&square, &square);
+                    e >>= 1;
+                }
+                return if k < 0 {
+                    fx.div(&fx.one(), &result)
+                } else {
+                    Ok(result)
+                };
+            }
+            let b = eval_node(fx, graph, *base)?;
+            let y = eval_node(fx, graph, *exponent)?;
+            let lnb = fx.ln(&b)?;
+            fx.exp(&fx.mul(&y, &lnb))
+        }
+        ExprKind::Function { name, args } if args.len() == 1 => {
+            let x = eval_node(fx, graph, args[0])?;
+            let fname = graph.symbols.resolve(*name).unwrap_or_default();
+            match fname.as_str() {
+                "sqrt" => fx.sqrt(&x),
+                "exp" => fx.exp(&x),
+                "ln" | "log" => fx.ln(&x),
+                "sin" => Ok(fx.sin_cos(&x)?.0),
+                "cos" => Ok(fx.sin_cos(&x)?.1),
+                "tan" => {
+                    let (s, c) = fx.sin_cos(&x)?;
+                    fx.div(&s, &c)
+                }
+                "atan" => fx.atan(&x),
+                "abs" => Ok(x.abs()),
+                "gamma" => fx.gamma(&x),
+                "lgamma" | "log_gamma" | "lngamma" => fx.ln_gamma(&x),
+                "digamma" | "psi" => fx.digamma(&x),
+                "zeta" => fx.zeta(&x),
+                "erf" => erf_fixed(fx, &x, false),
+                "erfc" => erf_fixed(fx, &x, true),
+                "sinh" | "cosh" | "tanh" => {
+                    let (ex, enx) = (fx.exp(&x)?, fx.exp(&-x.clone())?);
+                    match fname.as_str() {
+                        "sinh" => Ok((&ex - &enx) >> 1),
+                        "cosh" => Ok((&ex + &enx) >> 1),
+                        _ => fx.div(&(&ex - &enx), &(&ex + &enx)),
+                    }
+                }
+                "asin" | "acos" => {
+                    // asin x = atan(x / sqrt(1 - x^2)); acos x = pi/2 - asin x
+                    let root = fx.sqrt(&(fx.one() - fx.mul(&x, &x)))?;
+                    let asin = if root.is_zero() {
+                        let half_pi: BigInt = fx.pi()? >> 1;
+                        if x.is_negative() { -half_pi } else { half_pi }
+                    } else {
+                        fx.atan(&fx.div(&x, &root)?)?
+                    };
+                    if fname == "asin" {
+                        Ok(asin)
+                    } else {
+                        Ok((fx.pi()? >> 1) - asin)
+                    }
+                }
+                other => Err(err(format!(
+                    "the function {other} is not available at arbitrary precision"
+                ))),
+            }
+        }
+        ExprKind::Function { name, args } if args.len() == 2 => {
+            let fname = graph.symbols.resolve(*name).unwrap_or_default();
+            match fname.as_str() {
+                "polygamma" => {
+                    let m = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=500).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("polygamma needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    fx.polygamma(m, &x)
+                }
+                "hurwitz_zeta" | "zeta" => {
+                    let (s, a) = (
+                        eval_node(fx, graph, args[0])?,
+                        eval_node(fx, graph, args[1])?,
+                    );
+                    fx.hurwitz(&s, &a)
+                }
+                "besseli" | "bessel_i" => {
+                    let order = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=10_000).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("besseli needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    bessel_i_fixed(fx, order, &x)
+                }
+                "beta" => {
+                    let (a, b) = (
+                        eval_node(fx, graph, args[0])?,
+                        eval_node(fx, graph, args[1])?,
+                    );
+                    fx.beta(&a, &b)
+                }
+                "besselj" | "bessel_j" => {
+                    let order = match &graph.get(args[0]).kind {
+                        ExprKind::Number(algebra_core::Number::Integer(n))
+                            if (0..=10_000).contains(n) =>
+                        {
+                            *n as u32
+                        }
+                        _ => return Err(err("besselj needs a non-negative integer order")),
+                    };
+                    let x = eval_node(fx, graph, args[1])?;
+                    bessel_j_fixed(fx, order, &x)
+                }
+                other => Err(err(format!(
+                    "the function {other} is not available at arbitrary precision"
+                ))),
+            }
+        }
+        _ => Err(err(
+            "this expression is not a constant numerical expression",
+        )),
+    }
+}
+
+/// Evaluate a constant expression to `digits` significant decimal digits, correctly rounded in the last place except in
+/// the rare case of a result within the guard bits of a rounding boundary.
+pub fn evaluate(graph: &ExprGraph, expr: ExprId, digits: usize) -> AlgebraResult<String> {
+    if digits == 0 || digits > 100_000 {
+        return Err(err("the number of digits must be between 1 and 100000"));
+    }
+    // 3.33 bits per digit plus guard bits for the accumulated rounding of long series and cancellation.
+    let bits =
+        (digits as f64 * 3.3219281).ceil() as u32 + 96 + (digits as f64).log2().ceil() as u32 * 4;
+    let fx = Fixed { p: bits };
+    let value = eval_node(&fx, graph, expr)?;
+    Ok(to_decimal(&value, bits, digits))
+}
+
+/// `value / 2^bits` as a decimal string with `digits` significant digits.
+fn to_decimal(value: &BigInt, bits: u32, digits: usize) -> String {
+    if value.is_zero() {
+        return "0".to_string();
+    }
+    let negative = value.sign() == Sign::Minus;
+    let magnitude = value.abs();
+    // Number of digits before the decimal point (can be negative for values below 1).
+    let integer_digits = {
+        let integer_part = &magnitude >> bits;
+        if integer_part.is_zero() {
+            // 10^-k <= value < 10^-(k-1)
+            let mut k = 0i64;
+            let mut scaled = &magnitude * 10;
+            let one = BigInt::one() << bits;
+            while scaled < one {
+                scaled *= 10;
+                k += 1;
+            }
+            -k
+        } else {
+            integer_part.to_string().len() as i64
+        }
+    };
+    // value * 10^(digits - integer_digits) rounded to an integer has exactly `digits` digits.
+    let shift = digits as i64 - integer_digits;
+    let numerator = if shift >= 0 {
+        &magnitude * BigInt::from(10).pow(shift as u32)
+    } else {
+        magnitude.clone()
+    };
+    let denominator = if shift >= 0 {
+        BigInt::one() << bits
+    } else {
+        (BigInt::one() << bits) * BigInt::from(10).pow((-shift) as u32)
+    };
+    let scaled: BigInt = (&numerator * 2 + &denominator) / (&denominator * 2); // round half up
+    let mut text = scaled.to_string();
+    let mut point = integer_digits;
+    if text.len() > digits {
+        // rounding carried into a new digit (9.99.. -> 10.0..)
+        text.truncate(digits);
+        point += 1;
+    }
+    let body = if point <= 0 {
+        format!("0.{}{}", "0".repeat((-point) as usize), text)
+    } else if point as usize >= text.len() {
+        format!("{}{}", text, "0".repeat(point as usize - text.len()))
+    } else {
+        format!("{}.{}", &text[..point as usize], &text[point as usize..])
+    };
+    if negative { format!("-{body}") } else { body }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Gamma, log-gamma, erf, erfc
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Bernoulli numbers `B_0 .. B_m` by the recurrence `B_n = -1/(n+1) sum_{k<n} C(n+1, k) B_k`.
+fn bernoulli_numbers(m: usize) -> Vec<BigRational> {
+    let mut b: Vec<BigRational> = vec![BigRational::one()];
+    for n in 1..=m {
+        let mut sum = BigRational::zero();
+        let mut binomial = BigInt::one(); // C(n+1, 0)
+        for (k, bk) in b.iter().enumerate().take(n) {
+            sum += BigRational::from_integer(binomial.clone()) * bk;
+            binomial = binomial * BigInt::from((n + 1 - k) as u64) / BigInt::from((k + 1) as u64);
+        }
+        b.push(-sum / BigRational::from_integer(BigInt::from((n + 1) as u64)));
+    }
+    b
+}
+
+impl Fixed {
+    /// `ln(2 pi)`
+    fn ln_two_pi(&self) -> AlgebraResult<BigInt> {
+        let two_pi = self.pi()? << 1;
+        self.ln(&two_pi)
+    }
+
+    /// `ln Gamma(z)` for a large positive `z` by Stirling's series (`z` at least about `0.4 p`).
+    fn ln_gamma_stirling(&self, z: &BigInt) -> AlgebraResult<BigInt> {
+        let half = self.one() >> 1;
+        let ln_z = self.ln(z)?;
+        let mut sum = self.mul(&(z - &half), &ln_z) - z + (self.ln_two_pi()? >> 1);
+        let terms = (self.p as usize) / 5 + 10;
+        let bernoulli = bernoulli_numbers(2 * terms);
+        let inv_z = self.div(&self.one(), z)?;
+        let inv_z2 = self.mul(&inv_z, &inv_z);
+        let mut power = inv_z; // z^-(2k-1)
+        for k in 1..=terms {
+            let coefficient = &bernoulli[2 * k]
+                / BigRational::from_integer(BigInt::from((2 * k * (2 * k - 1)) as u64));
+            let term = self.mul(&self.scale_rational(&coefficient), &power);
+            if term.is_zero() {
+                break;
+            }
+            sum += term;
+            power = self.mul(&power, &inv_z2);
+        }
+        Ok(sum)
+    }
+
+    /// `ln Gamma(x)` for `x > 0`, by shifting the argument up with the recurrence and applying Stirling.
+    fn ln_gamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if !x.is_positive() {
+            return Err(err("lgamma: the argument must be positive"));
+        }
+        let target = BigInt::from((self.p as u64 * 2 / 5) + 12);
+        let target_fixed = self.scale_rational(&BigRational::from_integer(target));
+        let mut shifted = x.clone();
+        let mut product = self.one();
+        let mut steps = 0u64;
+        while shifted < target_fixed {
+            product = self.mul(&product, &shifted);
+            shifted += self.one();
+            steps += 1;
+            if steps > 100_000 {
+                return Err(err("lgamma: the argument is too small"));
+            }
+        }
+        Ok(self.ln_gamma_stirling(&shifted)? - self.ln(&product)?)
+    }
+
+    /// `Gamma(x)`.
+    fn gamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if x.is_positive() {
+            return self.exp(&self.ln_gamma(x)?);
+        }
+        // Poles at zero and the negative integers.
+        let integer_part = x >> self.p;
+        if (&integer_part << self.p) == *x {
+            return Err(err("gamma has a pole at zero and the negative integers"));
+        }
+        // Reflection: Gamma(x) = pi / (sin(pi x) Gamma(1 - x))
+        let pi = self.pi()?;
+        let (sin_pi_x, _) = self.sin_cos(&self.mul(&pi, x))?;
+        let reflected = self.gamma(&(self.one() - x))?;
+        self.div(&pi, &self.mul(&sin_pi_x, &reflected))
+    }
+}
+
+/// Evaluate `erf(x)` (and, for `erfc`, `1 - erf(x)`) from the Maclaurin series with enough extra bits to absorb the
+/// cancellation (the terms reach `e^(x^2)`).
+fn erf_fixed(fx: &Fixed, x: &BigInt, complementary: bool) -> AlgebraResult<BigInt> {
+    let magnitude = (x.abs() >> fx.p.saturating_sub(8)).to_f64().unwrap_or(0.0) / 256.0;
+    if magnitude > 60.0 {
+        return Err(err("erf: the argument is too large for the series"));
+    }
+    let extra =
+        (1.45 * magnitude * magnitude * if complementary { 2.0 } else { 1.0 }).ceil() as u32 + 16;
+    let wide = Fixed { p: fx.p + extra };
+    let xw = x << extra;
+    let x2 = wide.mul(&xw, &xw);
+    // sum_{n>=0} (-1)^n x^(2n+1) / (n! (2n+1))
+    let mut term = xw.clone(); // x^(2n+1) / n!, signed
+    let mut sum = xw.clone();
+    for n in 1..(wide.p as i64 * 2) {
+        term = -wide.mul(&term, &x2) / n;
+        if term.is_zero() {
+            break;
+        }
+        sum += &term / (2 * n + 1);
+    }
+    // erf = 2/sqrt(pi) * sum
+    let two_over_sqrt_pi = wide.div(&(wide.one() << 1), &wide.sqrt(&wide.pi()?)?)?;
+    let erf = wide.mul(&two_over_sqrt_pi, &sum);
+    let value = if complementary { wide.one() - erf } else { erf };
+    Ok(value >> extra)
+}
+
+/// Correctly rounded `f64` values of the special functions, computed at high precision (the usual `f64` series and
+/// Lanczos approximations lose a few digits: `gamma(1/2)` came out with a relative error of `1e-13`).
+pub fn special_f64(name: &str, x: f64) -> Option<f64> {
+    if !x.is_finite() {
+        return None;
+    }
+    let bits = 192 + (2.9 * x * x).min(4000.0) as u32;
+    let fx = Fixed { p: bits };
+    let r = BigRational::from_float(x)?;
+    let fixed_x = fx.scale_rational(&r);
+    let to_f64 =
+        |v: &BigInt| -> Option<f64> { BigRational::new(v.clone(), BigInt::one() << bits).to_f64() };
+    let value = match name {
+        "gamma" => {
+            if x > 171.7 {
+                return Some(f64::INFINITY);
+            }
+            fx.gamma(&fixed_x).ok()?
+        }
+        "lgamma" => fx.ln_gamma(&fixed_x).ok()?,
+        "digamma" => fx.digamma(&fixed_x).ok()?,
+        "zeta" if (x - 1.0).abs() > 1e-9 && x > -400.0 => fx.zeta(&fixed_x).ok()?,
+        "erf" => {
+            if x.abs() > 27.0 {
+                return Some(x.signum());
+            }
+            erf_fixed(&fx, &fixed_x, false).ok()?
+        }
+        "erfc" => {
+            if x > 27.3 {
+                return Some(0.0);
+            }
+            if x < -27.0 {
+                return Some(2.0);
+            }
+            erf_fixed(&fx, &fixed_x, true).ok()?
+        }
+        _ => return None,
+    };
+    to_f64(&value)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Digamma, beta, zeta, Bessel J
+// ---------------------------------------------------------------------------------------------------------------
+
+impl Fixed {
+    /// The digamma function (the logarithmic derivative of the gamma function): shift the argument up with
+    /// `psi(x) = psi(x + 1) - 1/x`, then the asymptotic series `ln y - 1/(2y) - sum B_2k / (2k y^2k)`; the
+    /// reflection formula handles negative arguments.
+    fn digamma(&self, x: &BigInt) -> AlgebraResult<BigInt> {
+        if !x.is_positive() {
+            let integer_part = x >> self.p;
+            if (&integer_part << self.p) == *x {
+                return Err(err("digamma has a pole at zero and the negative integers"));
+            }
+            // psi(1 - x) - psi(x) = pi cot(pi x)
+            let pi = self.pi()?;
+            let (s, c) = self.sin_cos(&self.mul(&pi, x))?;
+            let cot = self.div(&c, &s)?;
+            let reflected = self.digamma(&(self.one() - x))?;
+            return Ok(reflected - self.mul(&pi, &cot));
+        }
+        let target = BigInt::from((self.p as u64 * 2 / 5) + 12);
+        let target_fixed = self.scale_rational(&BigRational::from_integer(target));
+        let mut shifted = x.clone();
+        let mut correction = BigInt::zero();
+        let mut steps = 0u64;
+        while shifted < target_fixed {
+            correction += self.div(&self.one(), &shifted)?;
+            shifted += self.one();
+            steps += 1;
+            if steps > 100_000 {
+                return Err(err("digamma: the argument is too small"));
+            }
+        }
+        let inv = self.div(&self.one(), &shifted)?;
+        let inv2 = self.mul(&inv, &inv);
+        let mut sum = self.ln(&shifted)? - (&inv >> 1);
+        let terms = (self.p as usize) / 5 + 10;
+        let bernoulli = bernoulli_numbers(2 * terms);
+        let mut power = inv2.clone(); // y^-2k
+        for k in 1..=terms {
+            let coefficient =
+                &bernoulli[2 * k] / BigRational::from_integer(BigInt::from((2 * k) as u64));
+            let term = self.mul(&self.scale_rational(&coefficient), &power);
+            if term.is_zero() {
+                break;
+            }
+            sum -= term;
+            power = self.mul(&power, &inv2);
+        }
+        Ok(sum - correction)
+    }
+
+    /// The Riemann zeta function for real `s != 1` (analytic continuation by Euler-Maclaurin summation).
+    fn zeta(&self, s: &BigInt) -> AlgebraResult<BigInt> {
+        self.hurwitz(s, &self.one())
+    }
+
+    /// The Hurwitz zeta function `sum_{k >= 0} (a + k)^(-s)` for real `s != 1` and `a > 0`, continued analytically
+    /// by Euler-Maclaurin summation (so it is also the Riemann zeta function for `a = 1`, at any real `s != 1`).
+    fn hurwitz(&self, s: &BigInt, a: &BigInt) -> AlgebraResult<BigInt> {
+        let one = self.one();
+        if !a.is_positive() {
+            return Err(err("hurwitz zeta needs a positive second argument"));
+        }
+        if (s - &one).abs() < (BigInt::one() << (self.p / 2)) {
+            return Err(err("zeta has a pole at s = 1"));
+        }
+        // The summation point grows with |s| so that the correction terms stay small.
+        let magnitude = (s.abs() >> self.p.saturating_sub(8))
+            .to_f64()
+            .unwrap_or(0.0)
+            / 256.0;
+        if magnitude > 400.0 {
+            return Err(err("zeta: |s| is too large"));
+        }
+        let n_terms = (self.p as usize) / 4 + 20 + magnitude.ceil() as usize;
+        let m_terms = (self.p as usize) / 5 + 10 + magnitude.ceil() as usize / 2;
+        let neg_s = -s.clone();
+        let integer =
+            |k: usize| self.scale_rational(&BigRational::from_integer(BigInt::from(k as u64)));
+        let mut sum = BigInt::zero();
+        for k in 0..n_terms {
+            let point = a + integer(k);
+            let ln_k = self.ln(&point)?;
+            sum += self.exp(&self.mul(&neg_s, &ln_k))?;
+        }
+        let x = a + integer(n_terms);
+        let ln_x = self.ln(&x)?;
+        let pw = self.exp(&self.mul(&neg_s, &ln_x))?; // x^-s
+        sum += self.div(&self.mul(&pw, &x), &(s - &one))?;
+        sum += &pw >> 1;
+        let bernoulli = bernoulli_numbers(2 * m_terms);
+        let inv_x = self.div(&one, &x)?;
+        let inv_x2 = self.mul(&inv_x, &inv_x);
+        let mut inv_power = inv_x.clone(); // x^-(2j-1)
+        let mut rising = s.clone(); // s (s+1) ... (s + 2j - 2)
+        let mut factorial = BigInt::one(); // (2j)!
+        for j in 1..=m_terms {
+            factorial *= BigInt::from((2 * j - 1) as u64) * BigInt::from((2 * j) as u64);
+            let coefficient = &bernoulli[2 * j] / BigRational::from_integer(factorial.clone());
+            let term = self.mul(
+                &self.mul(&self.scale_rational(&coefficient), &rising),
+                &self.mul(&pw, &inv_power),
+            );
+            if term.is_zero() {
+                break;
+            }
+            sum += term;
+            let p1 = s + integer(2 * j - 1);
+            let p2 = s + integer(2 * j);
+            rising = self.mul(&self.mul(&rising, &p1), &p2);
+            inv_power = self.mul(&inv_power, &inv_x2);
+        }
+        Ok(sum)
+    }
+
+    /// The polygamma function `psi^(m)(x) = (-1)^(m+1) m! zeta(m + 1, x)` for `m >= 1` and `x > 0` (`m = 0` is the
+    /// digamma function).
+    fn polygamma(&self, m: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+        if m == 0 {
+            return self.digamma(x);
+        }
+        if !x.is_positive() {
+            return Err(err("polygamma is available for x > 0"));
+        }
+        let s = self.scale_rational(&BigRational::from_integer(BigInt::from(m as u64 + 1)));
+        let h = self.hurwitz(&s, x)?;
+        let factorial: BigInt = (1..=m as u64).map(BigInt::from).product();
+        let value = h * factorial;
+        Ok(if m.is_multiple_of(2) { -value } else { value })
+    }
+
+    /// `B(a, b) = Gamma(a) Gamma(b) / Gamma(a + b)`.
+    fn beta(&self, a: &BigInt, b: &BigInt) -> AlgebraResult<BigInt> {
+        if a.is_positive() && b.is_positive() {
+            let log = self.ln_gamma(a)? + self.ln_gamma(b)? - self.ln_gamma(&(a + b))?;
+            return self.exp(&log);
+        }
+        let numerator = self.mul(&self.gamma(a)?, &self.gamma(b)?);
+        self.div(&numerator, &self.gamma(&(a + b))?)
+    }
+}
+
+/// Bessel function of the first kind of non-negative integer order, from the power series with enough extra bits to
+/// absorb the cancellation (the terms reach `e^|x|`).
+fn bessel_j_fixed(fx: &Fixed, order: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+    let magnitude = (x.abs() >> fx.p.saturating_sub(8)).to_f64().unwrap_or(0.0) / 256.0;
+    if magnitude > 5000.0 {
+        return Err(err("besselj: the argument is too large for the series"));
+    }
+    let extra = (1.45 * magnitude).ceil() as u32 + 24;
+    let wide = Fixed { p: fx.p + extra };
+    let half = (x << extra) >> 1;
+    let half2 = wide.mul(&half, &half);
+    let mut term = wide.one();
+    for k in 1..=order {
+        term = wide.mul(&term, &half) / k;
+    }
+    let mut sum = term.clone();
+    let mut m = 0u64;
+    loop {
+        m += 1;
+        term = -wide.mul(&term, &half2) / BigInt::from(m * (m + order as u64));
+        if term.is_zero() {
+            break;
+        }
+        sum += &term;
+        if m > 200_000 {
+            return Err(err("besselj: the series did not converge"));
+        }
+    }
+    Ok(sum >> extra)
+}
+
+/// Modified Bessel function of the first kind of non-negative integer order: all terms of the power series are
+/// positive, so there is no cancellation.
+fn bessel_i_fixed(fx: &Fixed, order: u32, x: &BigInt) -> AlgebraResult<BigInt> {
+    let half = x >> 1;
+    let half2 = fx.mul(&half, &half);
+    let mut term = fx.one();
+    for k in 1..=order {
+        term = fx.mul(&term, &half) / k;
+    }
+    let mut sum = term.clone();
+    let mut m = 0u64;
+    loop {
+        m += 1;
+        term = fx.mul(&term, &half2) / BigInt::from(m * (m + order as u64));
+        if term.is_zero() {
+            break;
+        }
+        sum += &term;
+        if m > 200_000 {
+            return Err(err("besseli: the series did not converge"));
+        }
+    }
+    Ok(sum)
+}
+
+/// Correctly rounded `f64` values of the two-argument special functions: `polygamma(m, x)`, `hurwitz_zeta(s, a)` and
+/// `besseli(n, x)`.
+pub fn special2_f64(name: &str, a: f64, b: f64) -> Option<f64> {
+    if !(a.is_finite() && b.is_finite()) {
+        return None;
+    }
+    let bits = 192 + (1.5 * b.abs()).min(4000.0) as u32;
+    let fx = Fixed { p: bits };
+    let scale =
+        |v: f64| -> Option<BigInt> { Some(fx.scale_rational(&BigRational::from_float(v)?)) };
+    let value = match name {
+        "polygamma" if a >= 0.0 && a.fract() == 0.0 && a <= 500.0 => {
+            fx.polygamma(a as u32, &scale(b)?).ok()?
+        }
+        "hurwitz_zeta" => fx.hurwitz(&scale(a)?, &scale(b)?).ok()?,
+        "besseli" if a >= 0.0 && a.fract() == 0.0 && a <= 10_000.0 => {
+            bessel_i_fixed(&fx, a as u32, &scale(b)?).ok()?
+        }
+        "besselj" if a >= 0.0 && a.fract() == 0.0 && a <= 10_000.0 => {
+            bessel_j_fixed(&fx, a as u32, &scale(b)?).ok()?
+        }
+        _ => return None,
+    };
+    BigRational::new(value, BigInt::one() << bits).to_f64()
+}

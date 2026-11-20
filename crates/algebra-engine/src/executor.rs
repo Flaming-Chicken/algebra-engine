@@ -148,6 +148,149 @@ impl OperationResult {
     }
 }
 
+/// Whether a solution is a real number, a genuinely complex one, or could not be evaluated (free parameters).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolutionKind {
+    Real,
+    NonReal,
+    Unknown,
+}
+
+/// Classify a solution by evaluating it numerically.
+pub fn classify_solution(
+    graph: &ExprGraph,
+    solution: ExprId,
+    eval_ctx: &crate::numeric::EvalContext,
+) -> SolutionKind {
+    match graph.evalf(solution, eval_ctx) {
+        Ok(crate::numeric::BigValue::Real(v)) if v.is_finite() => SolutionKind::Real,
+        Ok(crate::numeric::BigValue::Complex(re, im)) if re.is_finite() && im.is_finite() => {
+            if im.abs() <= 1e-12 * (1.0 + re.abs()) {
+                SolutionKind::Real
+            } else {
+                SolutionKind::NonReal
+            }
+        }
+        _ => SolutionKind::Unknown,
+    }
+}
+
+/// Functions whose inverse is multivalued: solving an equation that contains them by inversion yields the
+/// principal solution only, and the general solution adds the other branches.
+fn has_periodic_function(graph: &ExprGraph, root: ExprId) -> bool {
+    let mut stack = vec![root];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        if let ExprKind::Function { name, .. } = &node.kind {
+            let name = graph.symbols.resolve(*name).unwrap_or_default();
+            if matches!(
+                name.as_str(),
+                "sin" | "cos" | "tan" | "cot" | "sec" | "csc" | "exp"
+            ) {
+                return true;
+            }
+        }
+        stack.extend(node.children());
+    }
+    false
+}
+
+/// Say, in the result's metadata and domain information, which solutions are real, which are not, and whether the
+/// list is the principal solution only.
+fn describe_solution_domain(
+    graph: &ExprGraph,
+    equation: ExprId,
+    solutions: &[ExprId],
+    eval_ctx: &crate::numeric::EvalContext,
+    res: &mut OperationResult,
+) {
+    let kinds: Vec<SolutionKind> = solutions
+        .iter()
+        .map(|&s| classify_solution(graph, s, eval_ctx))
+        .collect();
+    let real = kinds.iter().filter(|k| **k == SolutionKind::Real).count();
+    let nonreal = kinds
+        .iter()
+        .filter(|k| **k == SolutionKind::NonReal)
+        .count();
+    res.metadata
+        .insert("real_solutions".into(), real.to_string());
+    res.metadata
+        .insert("nonreal_solutions".into(), nonreal.to_string());
+    let mut notes = Vec::new();
+    if nonreal > 0 {
+        notes.push(format!(
+            "{real} real, {nonreal} non-real (complex) solution{}",
+            if nonreal == 1 { "" } else { "s" }
+        ));
+    }
+    if !solutions.is_empty() && has_periodic_function(graph, equation) {
+        res.metadata.insert("coverage".into(), "principal".into());
+        notes.push(
+            "principal solution(s) only: the equation is periodic or multivalued, so the general solution adds the other branches"
+                .to_string(),
+        );
+    }
+    if !notes.is_empty() {
+        res.domain_info = Some(notes.join("; "));
+    }
+}
+
+/// `factor 360` is `2^3 * 3^2 * 5`: an integer literal above 1 factors into primes (an integer was returned
+/// unchanged before). `None` for anything that is not such a literal.
+fn integer_prime_factorisation(graph: &ExprGraph, id: ExprId) -> Option<ExprId> {
+    let ExprKind::Number(algebra_core::Number::Integer(n)) = graph.get(id).kind.clone() else {
+        return None;
+    };
+    if n < 2 {
+        return None;
+    }
+    let factors = crate::numbertheory::integer_prime_factors(n as u64);
+    let terms: Vec<ExprId> = factors
+        .into_iter()
+        .map(|(p, e)| {
+            let base = graph.integer(p as i64);
+            if e == 1 {
+                base
+            } else {
+                graph.pow(base, graph.integer(e as i64))
+            }
+        })
+        .collect();
+    Some(match terms.len() {
+        0 => return None,
+        1 => terms[0],
+        _ => graph.mul(terms),
+    })
+}
+
+/// Whether the text is one bracketed group `[ ... ]` whose first bracket closes at the very end (so `[1,2]+[3,4]`
+/// is not one).
+pub(crate) fn is_single_bracket_group(text: &str) -> bool {
+    let text = text.trim();
+    if !text.starts_with('[') || !text.ends_with(']') {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '[' | '(' | '{' => depth += 1,
+            ']' | ')' | '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i == text.len() - 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Central mathematical operation execution engine.
 pub struct OperationExecutor;
 
@@ -167,6 +310,18 @@ impl OperationExecutor {
                 let trimmed = raw.trim();
                 if trimmed.is_empty() {
                     return OperationResult::success("", "", "");
+                }
+                // A bare matrix literal is shown as a grid (`[ 1, 2 ; 3, 4 ]`), not as its internal
+                // `matrix(row(...))` form.
+                if is_single_bracket_group(trimmed)
+                    && let Ok(m) = SymbolicMatrix::from_expr_str(graph, trimmed)
+                {
+                    let mat_id = m.to_expr_id(graph);
+                    let latex = latex_fmt.format(graph, mat_id).unwrap_or_default();
+                    let unicode = unicode_fmt.format(graph, mat_id).unwrap_or_default();
+                    let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                    res.root_expr = Some(mat_id);
+                    return res;
                 }
                 match parser.parse(trimmed) {
                     Ok(expr_id) => {
@@ -322,7 +477,27 @@ impl OperationExecutor {
                                 .into_iter()
                                 .next()
                                 .unwrap_or_else(|| graph.symbols.get_or_intern("x"));
-                            match graph.integrate(subbed_id, wrt_sym) {
+                            // Bounds must not be dropped: `integrate f from a to b` is a number, not the
+                            // antiderivative.
+                            let integral = match (lower, upper) {
+                                (Some(l_str), Some(u_str)) => {
+                                    match (parser.parse(l_str), parser.parse(u_str)) {
+                                        (Ok(l_id), Ok(u_id)) => {
+                                            graph.integrate_definite(subbed_id, wrt_sym, l_id, u_id)
+                                        }
+                                        (Err(e), _) | (_, Err(e)) => {
+                                            return OperationResult::error(e.to_string());
+                                        }
+                                    }
+                                }
+                                (None, None) => graph.integrate(subbed_id, wrt_sym),
+                                _ => {
+                                    return OperationResult::error(
+                                        "a definite integral needs both a lower and an upper bound",
+                                    );
+                                }
+                            };
+                            match integral {
                                 Ok(int_id) => {
                                     let simp_id = Simplifier::simplify(graph, int_id)
                                         .unwrap_or_else(|_| graph.simplify(int_id));
@@ -332,13 +507,24 @@ impl OperationExecutor {
                                         latex_fmt.format(graph, simp_id).unwrap_or_default();
                                     let wrt_name =
                                         graph.symbols.resolve(wrt_sym).unwrap_or_default();
-                                    let out = format!("{} (w.r.t {})", unicode, wrt_name);
+                                    let bounds_suffix = match (lower, upper) {
+                                        (Some(l), Some(u)) => format!(" along [{}, {}]", l, u),
+                                        _ => String::new(),
+                                    };
+                                    let out = format!(
+                                        "{} (w.r.t {}{})",
+                                        unicode, wrt_name, bounds_suffix
+                                    );
                                     let mut res = OperationResult::success(out.clone(), latex, out);
                                     res.root_expr = Some(simp_id);
                                     res
                                 }
                                 Err(e) => OperationResult::error(e.to_string()),
                             }
+                        } else if lower.is_some() || upper.is_some() {
+                            OperationResult::error(
+                                "the integrand has several variables: say which one to integrate over, for example `integrate(f, x, a, b)` or `integrate f dx from a to b`",
+                            )
                         } else {
                             let mut lines = Vec::new();
                             for (i, wrt_sym) in free_sym_ids.iter().enumerate() {
@@ -370,6 +556,26 @@ impl OperationExecutor {
                 let var_name = variable.as_deref().unwrap_or("x");
                 let wrt_sym = graph.symbols.get_or_intern(var_name);
                 match parser.parse(equation) {
+                    Ok(expr_id)
+                        if matches!(
+                            graph.get(expr_id).kind,
+                            ExprKind::Relational {
+                                op: algebra_core::RelOp::LessThan
+                                    | algebra_core::RelOp::LessEqual
+                                    | algebra_core::RelOp::GreaterThan
+                                    | algebra_core::RelOp::GreaterEqual,
+                                ..
+                            }
+                        ) =>
+                    {
+                        match crate::inequality::solve(graph, expr_id, var_name) {
+                            Ok(set) => {
+                                let out = format!("Solutions for {var_name}: {set}");
+                                OperationResult::success(out.clone(), out.clone(), out)
+                            }
+                            Err(e) => OperationResult::error(e),
+                        }
+                    }
                     Ok(expr_id) => match graph.solveset(expr_id, wrt_sym) {
                         Ok(solutions) => {
                             let eval_ctx = crate::numeric::EvalContext::default();
@@ -396,6 +602,7 @@ impl OperationExecutor {
                             let mut sol_strs = Vec::new();
                             let mut sol_latex = Vec::new();
                             for &sol in &filtered {
+                                let sol = crate::special_exact::roots_as_sqrt(graph, sol);
                                 sol_strs.push(unicode_fmt.format(graph, sol).unwrap_or_default());
                                 sol_latex.push(latex_fmt.format(graph, sol).unwrap_or_default());
                             }
@@ -414,6 +621,9 @@ impl OperationExecutor {
                             if filtered.len() == 1 {
                                 res.root_expr = Some(filtered[0]);
                             }
+                            describe_solution_domain(
+                                graph, expr_id, &filtered, &eval_ctx, &mut res,
+                            );
                             res
                         }
                         Err(e) => OperationResult::error(e.to_string()),
@@ -438,11 +648,16 @@ impl OperationExecutor {
                                 .unwrap_or(expr_id)
                         }
                         SimplifyStrategy::Expand => {
+                            let expr_id = if crate::simplify::trig_expand::has_trig(graph, expr_id)
+                            {
+                                crate::simplify::trig_expand::expand_trig(graph, expr_id)
+                            } else {
+                                expr_id
+                            };
                             AlgebraicTransformations::expand(graph, expr_id)
                         }
-                        SimplifyStrategy::Factor => {
-                            AlgebraicTransformations::factor(graph, expr_id)
-                        }
+                        SimplifyStrategy::Factor => integer_prime_factorisation(graph, expr_id)
+                            .unwrap_or_else(|| AlgebraicTransformations::factor(graph, expr_id)),
                         SimplifyStrategy::Together => {
                             AlgebraicTransformations::together(graph, expr_id)
                         }
@@ -481,6 +696,19 @@ impl OperationExecutor {
                     let mut res = OperationResult::success(unicode.clone(), latex, unicode.clone());
                     res.root_expr = Some(transformed_id);
                     res.simplified_unicode = Some(unicode);
+                    // The transformation may have dropped restrictions of the input (`x / x` is `1` only for
+                    // `x != 0`); say so instead of presenting the result as unconditional.
+                    let excluded = Simplifier::excluded_points(graph, expr_id, transformed_id);
+                    if !excluded.is_empty() {
+                        let text: Vec<String> =
+                            excluded.iter().map(|c| c.describe(graph)).collect();
+                        res.metadata
+                            .insert("conditions".to_string(), text.join("; "));
+                        if res.domain_info.is_none() {
+                            // Shown by the notebook next to the result.
+                            res.domain_info = Some(format!("valid where {}", text.join("; ")));
+                        }
+                    }
                     #[cfg(any(test, feature = "shadow-verify"))]
                     if let Ok(legacy) = cat_bridge::LegacyAstTree::from_graph(transformed_id, graph)
                     {
@@ -509,6 +737,18 @@ impl OperationExecutor {
                     let mut eval_bindings = ctx.bindings.clone();
                     for (k, v) in bindings {
                         eval_bindings.insert(k.clone(), *v);
+                    }
+                    // An explicit number of digits other than the default 15 (`N(pi, 50)`) is evaluated at that
+                    // precision: arbitrary-precision arithmetic for constant expressions.
+                    if let Some(d) = precision_digits
+                        && *d != 15
+                        && eval_bindings.is_empty()
+                        && bindings.is_empty()
+                        && let Ok(text) = crate::bigfloat::evaluate(graph, expr_id, *d)
+                    {
+                        let mut res = OperationResult::success(text.clone(), text.clone(), text);
+                        res.metadata.insert("digits".to_string(), d.to_string());
+                        return res;
                     }
                     let p = precision_digits.unwrap_or(ctx.precision_digits);
                     let eval_ctx = EvalContext::with_bindings(p, eval_bindings.clone())
@@ -593,6 +833,23 @@ impl OperationExecutor {
                 Err(e) => OperationResult::error(e.to_string()),
             },
 
+            MathOperation::Numeric { function, args } => {
+                match crate::numeric_commands::run(graph, function, args) {
+                    Ok(crate::numeric_commands::NumericOutput::Text(text)) => {
+                        OperationResult::success(text.clone(), text.clone(), text)
+                    }
+                    Ok(crate::numeric_commands::NumericOutput::Expression(id, note)) => {
+                        let unicode = unicode_fmt.format(graph, id).unwrap_or_default();
+                        let latex = latex_fmt.format(graph, id).unwrap_or_default();
+                        let mut res = OperationResult::success(unicode.clone(), latex, unicode);
+                        res.root_expr = Some(id);
+                        res.domain_info = Some(note);
+                        res
+                    }
+                    Err(e) => OperationResult::error(e),
+                }
+            }
+
             MathOperation::Substitute {
                 expression,
                 variable,
@@ -619,6 +876,7 @@ impl OperationExecutor {
             } => match (parser.parse(expression), parser.parse(point)) {
                 (Ok(expr_id), Ok(pt_id)) => {
                     let wrt_sym = graph.symbols.get_or_intern(variable);
+                    crate::limits::NUMERIC_LIMIT_ESTIMATE.with(|f| f.set(false));
                     let lim_res = match direction
                         .as_deref()
                         .map(|s| s.trim().to_ascii_lowercase())
@@ -646,6 +904,41 @@ impl OperationExecutor {
                     };
                     match lim_res {
                         Ok(lim_id) => {
+                            // A numerical sanity check at a finite point: replace an answer that the samples contradict.
+                            let mut lim_id = lim_id;
+                            let mut checked_numerically = false;
+                            if let Ok(crate::numeric::BigValue::Real(a)) =
+                                graph.evalf(pt_id, &crate::numeric::EvalContext::default())
+                                && a.is_finite()
+                            {
+                                let sides: Vec<f64> = match direction
+                                    .as_deref()
+                                    .map(|s| s.trim().to_ascii_lowercase())
+                                    .as_deref()
+                                {
+                                    Some("+" | "right" | "r" | "+1") => vec![1.0],
+                                    Some("-" | "left" | "l" | "-1") => vec![-1.0],
+                                    _ => vec![1.0, -1.0],
+                                };
+                                if let Some(behaviour) = crate::limit_check::combined(
+                                    graph, expr_id, variable, a, &sides,
+                                ) && !crate::limit_check::agrees(graph, lim_id, behaviour)
+                                {
+                                    lim_id = crate::limit_check::as_expression(graph, behaviour);
+                                    checked_numerically = true;
+                                } else if !matches!(
+                                    graph.evalf(lim_id, &crate::numeric::EvalContext::default()),
+                                    Ok(crate::numeric::BigValue::Real(v)) if !v.is_nan()
+                                ) && !matches!(
+                                    graph.get(lim_id).kind,
+                                    ExprKind::Number(algebra_core::Number::Constant(_))
+                                ) {
+                                    // The samples are inconclusive (an oscillation, as for sin(1/x)) and the symbolic
+                                    // answer still contains a division by zero: it is not a value.
+                                    lim_id = graph.constant(algebra_core::Constant::Undefined);
+                                    checked_numerically = true;
+                                }
+                            }
                             let latex = latex_fmt.format(graph, lim_id).unwrap_or_default();
                             let unicode = unicode_fmt.format(graph, lim_id).unwrap_or_default();
                             let dir_s = direction.as_deref().unwrap_or("");
@@ -655,6 +948,20 @@ impl OperationExecutor {
                             );
                             let mut res = OperationResult::success(out, latex, unicode);
                             res.root_expr = Some(lim_id);
+                            if checked_numerically {
+                                res.metadata.insert("method".into(), "numerical".into());
+                                res.domain_info = Some(
+                                    "numerical estimate from samples near the point, not a proof"
+                                        .into(),
+                                );
+                            }
+                            if crate::limits::NUMERIC_LIMIT_ESTIMATE.with(|f| f.replace(false)) {
+                                res.metadata.insert("method".into(), "numerical".into());
+                                res.domain_info = Some(
+                                    "numerical estimate from values at 10^2 .. 10^5, not a proof"
+                                        .into(),
+                                );
+                            }
                             res
                         }
                         Err(e) => OperationResult::error(e.to_string()),
@@ -672,7 +979,43 @@ impl OperationExecutor {
                 (Ok(expr_id), Ok(pt_expr)) => {
                     let wrt_sym = graph.symbols.get_or_intern(variable);
                     use crate::series::SymbolicSeries;
-                    match graph.laurent_series(expr_id, wrt_sym, pt_expr, 0, *order as u32) {
+                    // An expansion at infinity: substitute x = 1/t, expand about t = 0 and substitute back.
+                    let at_infinity = matches!(
+                        graph.get(pt_expr).kind,
+                        ExprKind::Number(algebra_core::Number::Constant(
+                            algebra_core::Constant::Infinity
+                        ))
+                    ) || matches!(graph.get(pt_expr).kind, ExprKind::Symbol(s)
+                        if matches!(graph.symbols.resolve(s).as_deref(), Some("oo" | "inf" | "infinity" | "∞")));
+                    let expansion = if at_infinity {
+                        let t_name = "__t_inf";
+                        let t_sym = graph.symbols.get_or_intern(t_name);
+                        let t = graph.symbol(t_name);
+                        let in_t =
+                            graph.substitute(expr_id, wrt_sym, graph.div(graph.integer(1), t));
+                        let in_t = Simplifier::simplify(graph, in_t).unwrap_or(in_t);
+                        // 1/(1/t + 1) is t/(t + 1): clear the inner fractions so that the expansion at t = 0 is a
+                        // Taylor series.
+                        let in_t = AlgebraicTransformations::cancel(
+                            graph,
+                            AlgebraicTransformations::together(graph, in_t),
+                        );
+                        graph
+                            .laurent_series(in_t, t_sym, graph.integer(0), 0, *order as u32)
+                            .map(|series| {
+                                merge_negative_powers(
+                                    graph,
+                                    graph.substitute(
+                                        series,
+                                        t_sym,
+                                        graph.pow(graph.symbol(variable), graph.integer(-1)),
+                                    ),
+                                )
+                            })
+                    } else {
+                        graph.laurent_series(expr_id, wrt_sym, pt_expr, 0, *order as u32)
+                    };
+                    match expansion {
                         Ok(series_id) => {
                             let simp_id = graph.simplify(series_id);
                             let latex = latex_fmt.format(graph, simp_id).unwrap_or_default();
@@ -1199,22 +1542,16 @@ impl OperationExecutor {
                     from_unit,
                     to_unit,
                 } => {
-                    let converted = if (from_unit == "km/h" || from_unit == "kmh")
-                        && (to_unit == "m/s" || to_unit == "ms")
-                    {
-                        val / 3.6
-                    } else if (from_unit == "m/s" || from_unit == "ms")
-                        && (to_unit == "km/h" || to_unit == "kmh")
-                    {
-                        val * 3.6
-                    } else if from_unit == "m" && from_unit == "ft" {
-                        val * 3.28084
-                    } else {
-                        *val
+                    let converted = match crate::units::convert(*val, from_unit, to_unit) {
+                        Ok(v) => v,
+                        Err(e) => return OperationResult::error(e),
                     };
                     let out = format!(
-                        "{:.4} [{}] = {:.4} [{}]",
-                        val, from_unit, converted, to_unit
+                        "{} [{}] = {} [{}]",
+                        crate::units::clean(*val),
+                        from_unit,
+                        crate::units::clean(converted),
+                        to_unit
                     );
                     OperationResult::success(out.clone(), out.clone(), out)
                 }
@@ -1445,6 +1782,12 @@ impl OperationExecutor {
                         ),
                         out,
                     )
+                }
+                NumberTheoryOpKind::Arithmetic { function, args } => {
+                    match crate::numbertheory::arithmetic_function(function, args) {
+                        Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                        Err(e) => OperationResult::error(e),
+                    }
                 }
                 NumberTheoryOpKind::IsPrime { n } => {
                     let prime = is_prime(*n);
@@ -2524,9 +2867,17 @@ impl OperationExecutor {
                     // Replace prime notation dep'' and dep' cleanly for classification and solving
                     let prime2_pat = format!("{}''", dep_name);
                     let prime1_pat = format!("{}'", dep_name);
-                    let eq_for_solve = equation
-                        .replace(&prime2_pat, "__ode_d2")
-                        .replace(&prime1_pat, "__ode_d1");
+                    // Derivatives of any order up to six, the longest pattern first.
+                    let mut eq_for_solve = equation.to_string();
+                    let mut max_order = 0usize;
+                    for k in (1..=6usize).rev() {
+                        let pattern = format!("{}{}", dep_name, "'".repeat(k));
+                        if eq_for_solve.contains(&pattern) {
+                            max_order = max_order.max(k);
+                            eq_for_solve = eq_for_solve.replace(&pattern, &format!("__ode_d{k}"));
+                        }
+                    }
+                    let _ = (&prime2_pat, &prime1_pat);
                     let eq_for_cls = equation
                         .replace(
                             &prime2_pat,
@@ -2576,8 +2927,33 @@ impl OperationExecutor {
                         )
                         .unwrap_or_else(|_| graph.sub(eval_coeffs(zero, zero, one), base));
 
-                        let eval_ctx = EvalContext::default();
-                        let solved_opt = if c2 == zero && c1 != zero {
+                        // The coefficients above were read by substituting 0 and 1; they describe the equation only if it is
+                        // linear in y'', y' and y (`y' = y^2` read as `y' = y` gave a wrong answer).
+                        let linear = crate::ode::classical::is_linear_model(
+                            graph,
+                            ode_res,
+                            [d2_sym, d1_sym, d0_sym, x_sym],
+                            [c2, c1, c0, base],
+                        );
+                        let mut implicit_solution: Option<(ExprId, ExprId)> = None;
+                        let solved_list: Option<Vec<ExprId>> = if max_order >= 3 {
+                            None // the second-order coefficient extraction below does not describe it
+                        } else if !linear {
+                            if c2 == zero {
+                                match crate::ode::classical::solve_separable(
+                                    graph, ode_res, d1_sym, d0_sym, x_sym,
+                                ) {
+                                    Some(crate::ode::classical::Separable::Explicit(v)) => Some(v),
+                                    Some(crate::ode::classical::Separable::Implicit { g, f }) => {
+                                        implicit_solution = Some((g, f));
+                                        None
+                                    }
+                                    None => None,
+                                }
+                            } else {
+                                None
+                            }
+                        } else if c2 == zero && c1 != zero {
                             let p = Simplifier::simplify(graph, graph.div(c0, c1))
                                 .unwrap_or_else(|_| graph.div(c0, c1));
                             let q = Simplifier::simplify(graph, graph.div(graph.neg(base), c1))
@@ -2586,19 +2962,66 @@ impl OperationExecutor {
                                 graph, p, q, x_sym,
                             )
                             .ok()
-                        } else if c2 != zero && base == zero {
-                            if let (Ok(a_v), Ok(b_v), Ok(c_v)) = (
-                                graph.evalf(c2, &eval_ctx).map(|v| v.to_f64()),
-                                graph.evalf(c1, &eval_ctx).map(|v| v.to_f64()),
-                                graph.evalf(c0, &eval_ctx).map(|v| v.to_f64()),
-                            ) && a_v.is_finite()
+                            .map(|s| vec![s])
+                        } else if c2 != zero {
+                            // The coefficients are constants, but an unsimplified `exp(x) - exp(x)` can leave `x` inside
+                            // one: evaluate at two values of x and require them to agree.
+                            let constant_value = |c: ExprId| -> Option<f64> {
+                                let at = |xv: f64| {
+                                    let ctx = EvalContext::with_bindings(
+                                        50,
+                                        std::collections::HashMap::from([(
+                                            indep_name.to_string(),
+                                            xv,
+                                        )]),
+                                    );
+                                    graph.evalf(c, &ctx).ok().map(|v| v.to_f64())
+                                };
+                                let (first, second) = (at(0.5)?, at(1.7)?);
+                                ((first - second).abs() <= 1e-9 * (1.0 + first.abs()))
+                                    .then_some(first)
+                            };
+                            if let (Some(a_v), Some(b_v), Some(c_v)) =
+                                (constant_value(c2), constant_value(c1), constant_value(c0))
+                                && a_v.is_finite()
                                 && b_v.is_finite()
                                 && c_v.is_finite()
                             {
-                                crate::ode::SymbolicOdeSolver::solve_second_order_const_coeff_homogeneous(
+                                let homogeneous = crate::ode::SymbolicOdeSolver::solve_second_order_const_coeff_homogeneous(
                                     graph, a_v, b_v, c_v, x_sym,
                                 )
-                                .ok()
+                                .ok();
+                                if base == zero {
+                                    homogeneous.map(|s| vec![s])
+                                } else if let Some(h) = homogeneous {
+                                    // a y'' + b y' + c y = -base: variation of parameters from the basis.
+                                    let c1_sym = graph.symbols.get_or_intern("C1");
+                                    let c2_sym = graph.symbols.get_or_intern("C2");
+                                    let (zero_n, one_n) = (graph.integer(0), graph.integer(1));
+                                    let basis = |keep1: bool| {
+                                        let e = graph.substitute(
+                                            graph.substitute(
+                                                h,
+                                                c1_sym,
+                                                if keep1 { one_n } else { zero_n },
+                                            ),
+                                            c2_sym,
+                                            if keep1 { zero_n } else { one_n },
+                                        );
+                                        Simplifier::simplify(graph, e).unwrap_or(e)
+                                    };
+                                    crate::ode::classical::variation_of_parameters(
+                                        graph,
+                                        c2,
+                                        graph.neg(base),
+                                        basis(true),
+                                        basis(false),
+                                        x_sym,
+                                    )
+                                    .map(|s| vec![s])
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -2606,14 +3029,67 @@ impl OperationExecutor {
                             None
                         };
 
-                        if let Some(sol_id) = solved_opt {
-                            let simp_sol = Simplifier::simplify(graph, sol_id).unwrap_or(sol_id);
-                            let u_sol = unicode_fmt.format(graph, simp_sol).unwrap_or_default();
-                            let l_sol = latex_fmt.format(graph, simp_sol).unwrap_or_default();
-                            let out = format!("{}({}) = {}", dep_name, indep_name, u_sol);
-                            let latex = format!("{}({}) = {}", dep_name, indep_name, l_sol);
+                        // Bernoulli equations, and homogeneous linear equations of any order (constant
+                        // coefficients, or Euler equations), solved exactly from the characteristic polynomial.
+                        let mut solved_list = solved_list;
+                        if solved_list.is_none() && implicit_solution.is_none() {
+                            if max_order <= 1 && !linear {
+                                solved_list = crate::ode::classical::solve_bernoulli_form(
+                                    graph, ode_res, d1_sym, d0_sym, x_sym,
+                                )
+                                .map(|sol| vec![sol]);
+                            }
+                            if solved_list.is_none() && max_order >= 2 {
+                                let derivative_symbols: Vec<algebra_core::SymbolId> = (1
+                                    ..=max_order)
+                                    .map(|k| graph.symbols.get_or_intern(format!("__ode_d{k}")))
+                                    .collect();
+                                solved_list = crate::ode::classical::solve_linear_homogeneous(
+                                    graph,
+                                    ode_res,
+                                    &derivative_symbols,
+                                    d0_sym,
+                                    x_sym,
+                                )
+                                .map(|sol| vec![sol]);
+                            }
+                        }
+                        if let Some((g, f)) = implicit_solution {
+                            // No closed form for y: report the implicit solution, honestly labelled.
+                            let g_text = unicode_fmt.format(graph, g).unwrap_or_default();
+                            let f_text = unicode_fmt.format(graph, f).unwrap_or_default();
+                            let out = format!(
+                                "{g_text} = {f_text} + C1  (implicit solution: {dep_name} cannot be isolated in closed form)"
+                            );
+                            let mut res = OperationResult::success(out.clone(), out.clone(), out);
+                            res.metadata.insert("form".into(), "implicit".into());
+                            return res;
+                        }
+                        if let Some(solutions) = solved_list {
+                            let simp: Vec<ExprId> = solutions
+                                .iter()
+                                .map(|&sol| Simplifier::simplify(graph, sol).unwrap_or(sol))
+                                .collect();
+                            let texts: Vec<String> = simp
+                                .iter()
+                                .map(|&sol| unicode_fmt.format(graph, sol).unwrap_or_default())
+                                .collect();
+                            let latexes: Vec<String> = simp
+                                .iter()
+                                .map(|&sol| latex_fmt.format(graph, sol).unwrap_or_default())
+                                .collect();
+                            let out = texts
+                                .iter()
+                                .map(|u| format!("{}({}) = {}", dep_name, indep_name, u))
+                                .collect::<Vec<_>>()
+                                .join("  or  ");
+                            let latex = latexes
+                                .iter()
+                                .map(|l| format!("{}({}) = {}", dep_name, indep_name, l))
+                                .collect::<Vec<_>>()
+                                .join(" \\text{ or } ");
                             let mut res = OperationResult::success(out.clone(), latex, out);
-                            res.root_expr = Some(simp_sol);
+                            res.root_expr = simp.first().copied();
                             return res;
                         }
                     }
@@ -3173,6 +3649,14 @@ fn execute_symbolic_sum(
             "Finite sum span ({} terms) exceeds direct evaluation cap (10000)",
             span + 1
         ));
+    }
+
+    // Infinite sums with a closed form: telescoping rational functions, `x^k / k!`, classical series.
+    if is_inf_expr(up_id)
+        && let Some(a) = as_int(low_id)
+        && let Some(value) = crate::series_sums::infinite_sum(graph, expr_id, var_sym, a)
+    {
+        return Ok(value);
     }
 
     Err(format!(
@@ -4130,5 +4614,51 @@ fn execute_solve_system(
                 }
             }
         }
+    }
+}
+
+/// `(b^p)^n` with an integer `n` and a rational `p` as `b^(p n)`, everywhere in `expr` (so that the terms of an
+/// expansion in `1/x` print as `x^(-2)`, not `(x^(-1))^2`).
+fn merge_negative_powers(graph: &ExprGraph, expr: ExprId) -> ExprId {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Pow(base, exponent) => {
+            let base = merge_negative_powers(graph, base);
+            if let ExprKind::Pow(inner_base, inner_exp) = graph.get(base).kind.clone()
+                && let Ok(Some(n)) = crate::numeric::try_eval_exact(
+                    graph,
+                    exponent,
+                    &std::collections::HashMap::new(),
+                )
+                && n.is_integer()
+                && let Ok(Some(p)) = crate::numeric::try_eval_exact(
+                    graph,
+                    inner_exp,
+                    &std::collections::HashMap::new(),
+                )
+            {
+                return graph.pow(inner_base, crate::poly::expr_from_rational(graph, &(p * n)));
+            }
+            graph.pow(base, exponent)
+        }
+        ExprKind::Add(ts) => graph.add(
+            ts.iter()
+                .map(|&t| merge_negative_powers(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Mul(fs) => graph.mul(
+            fs.iter()
+                .map(|&t| merge_negative_powers(graph, t))
+                .collect::<Vec<_>>(),
+        ),
+        ExprKind::Sub(a, b) => graph.sub(
+            merge_negative_powers(graph, a),
+            merge_negative_powers(graph, b),
+        ),
+        ExprKind::Neg(a) => graph.neg(merge_negative_powers(graph, a)),
+        ExprKind::Div(a, b) => graph.div(
+            merge_negative_powers(graph, a),
+            merge_negative_powers(graph, b),
+        ),
+        _ => expr,
     }
 }

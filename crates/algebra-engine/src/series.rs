@@ -5,7 +5,8 @@
 //! **Holonomic D-finite Functions**, and **Linear Recurrence Solvers**.
 
 use crate::calculus::SymbolicCalculus;
-use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, SymbolId};
+use algebra_core::{AlgebraError, AlgebraResult, ExprGraph, ExprId, ExprKind, SymbolId};
+use num_traits::Zero as _;
 
 /// Series expansion and reversion algorithms extension trait.
 pub trait SymbolicSeries {
@@ -129,7 +130,68 @@ impl SymbolicSeries for ExprGraph {
         regular_order: u32,
     ) -> AlgebraResult<ExprId> {
         if pole_order == 0 {
-            return Ok(self.taylor_series(expr, wrt, point, regular_order));
+            if has_vanishing_base_with_variable_exponent(self, expr, wrt, point) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (a power whose base is zero there has an exponent that depends on the variable, as in x^x at 0), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
+            // A pole at the point: exact Laurent coefficients by power-series arithmetic.
+            if let Some((p, coeffs)) = crate::series_fast::laurent_coeffs_fast(
+                self,
+                expr,
+                wrt,
+                point,
+                regular_order as usize,
+            ) {
+                let name = self.symbols.resolve(wrt).unwrap_or_default();
+                let x = self.symbol(&name);
+                let t = if point == self.integer(0) {
+                    x
+                } else {
+                    self.sub(x, point)
+                };
+                let mut terms = Vec::new();
+                for (k, c) in coeffs.iter().enumerate() {
+                    if c.is_zero() {
+                        continue;
+                    }
+                    let c = crate::poly::expr_from_rational(self, c);
+                    let e = k as i64 - p as i64;
+                    terms.push(if e == 0 {
+                        c
+                    } else {
+                        self.mul([c, self.pow(t, self.integer(e))])
+                    });
+                }
+                let sum = if terms.is_empty() {
+                    self.integer(0)
+                } else {
+                    self.add(terms)
+                };
+                return Ok(crate::simplify::Simplifier::simplify(self, sum).unwrap_or(sum));
+            }
+            crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.set(false));
+            crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.set(false));
+            let series = self.taylor_series(expr, wrt, point, regular_order);
+            if crate::calculus::SERIES_NOT_ANALYTIC.with(|f| f.replace(false)) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (a coefficient is singular, such as 0^0, ln(0) or 1/0), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
+            if crate::calculus::SERIES_BUDGET_EXCEEDED.with(|f| f.replace(false)) {
+                return Err(AlgebraError::EvaluationError(format!(
+                    "series: the derivatives of this expression grow too fast for order {regular_order} (the differentiation method is exponential here); try a lower order"
+                )));
+            }
+            if has_singular_term(self, series) {
+                return Err(AlgebraError::EvaluationError(
+                    "series: the function is not analytic at this point (terms such as ln(0) or 1/0 appear), so it has no Taylor series there"
+                        .into(),
+                ));
+            }
+            return Ok(series);
         }
 
         let wrt_name = self.symbols.resolve(wrt).unwrap_or_default();
@@ -292,5 +354,69 @@ impl RecurrenceSolver {
                 "order {order} is not supported (orders 1 and 2 are)"
             ))),
         }
+    }
+}
+
+/// Whether the expression contains a division by the literal zero or `ln(0)`: a sign that a Taylor coefficient was
+/// computed at a singular point.
+fn has_singular_term(graph: &ExprGraph, root: ExprId) -> bool {
+    let zero = graph.integer(0);
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Div(_, d) if *d == zero => return true,
+            ExprKind::Function { name, args }
+                if args.len() == 1
+                    && args[0] == zero
+                    && matches!(graph.symbols.resolve(*name).as_deref(), Some("ln" | "log")) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        stack.extend(node.children());
+    }
+    false
+}
+
+/// True if some power `b^e` inside `expr` has an exponent depending on `wrt` while its base is zero at `point`
+/// (`x^x` at 0, `sin(x)^x` at 0, `(x - 1)^x` at 1): the function has no Taylor series there, and the derivative
+/// method would otherwise read `0^0` as 1 and return a wrong answer.
+fn has_vanishing_base_with_variable_exponent(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    point: ExprId,
+) -> bool {
+    match graph.get(expr).kind.clone() {
+        ExprKind::Pow(base, exponent) => {
+            if graph.has_symbol(exponent, wrt) {
+                let at_point = graph.substitute(base, wrt, point);
+                let value = crate::limits::LimitEngine::simplify_constants(graph, at_point);
+                let value = crate::simplify::Simplifier::simplify(graph, value).unwrap_or(value);
+                if value == graph.integer(0) {
+                    return true;
+                }
+            }
+            has_vanishing_base_with_variable_exponent(graph, base, wrt, point)
+                || has_vanishing_base_with_variable_exponent(graph, exponent, wrt, point)
+        }
+        ExprKind::Add(ts) | ExprKind::Mul(ts) => ts
+            .iter()
+            .any(|&t| has_vanishing_base_with_variable_exponent(graph, t, wrt, point)),
+        ExprKind::Sub(a, b) | ExprKind::Div(a, b) => {
+            has_vanishing_base_with_variable_exponent(graph, a, wrt, point)
+                || has_vanishing_base_with_variable_exponent(graph, b, wrt, point)
+        }
+        ExprKind::Neg(a) => has_vanishing_base_with_variable_exponent(graph, a, wrt, point),
+        ExprKind::Function { args, .. } => args
+            .iter()
+            .any(|&a| has_vanishing_base_with_variable_exponent(graph, a, wrt, point)),
+        _ => false,
     }
 }

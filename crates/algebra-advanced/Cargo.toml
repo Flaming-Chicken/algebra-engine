@@ -8,10 +8,6 @@ repository.workspace = true
 homepage.workspace = true
 description = "Advanced mathematical domains: formal proofs (Lean 4/Coq), category morphisms, quantum algebra, cryptography, stochastic calculus, Galois theory, and AI agent copilot"
 
-[lib]
-test = false
-doctest = false
-
 [lints]
 workspace = true
 
@@ -44,3 +40,10 @@ agent = ["dep:reqwest"]
 
 [dev-dependencies]
 criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "advanced_benchmarks"
+harness = false

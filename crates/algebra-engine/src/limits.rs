@@ -43,6 +43,11 @@ pub enum LimitDirection {
     NegativeInfinity,
 }
 
+thread_local! {
+    /// Set when the last limit was estimated numerically rather than derived, so the command can say so.
+    pub(crate) static NUMERIC_LIMIT_ESTIMATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Multi-Order L'Hôpital and Gruntz Limit Solver.
 pub struct LimitEngine;
 
@@ -73,7 +78,13 @@ impl LimitEngine {
         // 1. Limits at +-oo must run asymptotic / Gruntz analysis BEFORE substitution
         if pos_inf || neg_inf {
             if let Ok(res) = Self::eval_infinity(graph, expr, wrt, neg_inf) {
+                let res = Self::finite_over_infinity_is_zero(graph, res);
                 return Ok(crate::simplify::Simplifier::simplify(graph, res).unwrap_or(res));
+            }
+            // No asymptotic rule applied: estimate numerically, and say so.
+            if let Some(estimate) = Self::numeric_limit_at_infinity(graph, expr, wrt, neg_inf) {
+                NUMERIC_LIMIT_ESTIMATE.with(|f| f.set(true));
+                return Ok(estimate);
             }
         }
 
@@ -166,6 +177,131 @@ impl LimitEngine {
         }
 
         Ok(simplified_sub)
+    }
+
+    /// `c / oo` with a finite numerator is `0` (the asymptotic rules sometimes return the quotient unevaluated).
+    fn finite_over_infinity_is_zero(graph: &ExprGraph, id: ExprId) -> ExprId {
+        if let ExprKind::Div(n, d) = graph.get(id).kind
+            && (Self::is_infinity_node(graph, d) || Self::is_neg_infinity_node(graph, d))
+            && !Self::contains_infinity(graph, n)
+        {
+            return graph.integer(0);
+        }
+        id
+    }
+
+    /// Estimate the limit at plus or minus infinity from values at `10^2 .. 10^5`: a divergent limit when the
+    /// values keep growing, a finite one (identified as a simple rational or constant when it is close to one) when
+    /// the differences shrink geometrically (Aitken extrapolation). `None` when the values neither converge nor
+    /// clearly diverge (oscillation, logarithmic growth).
+    fn numeric_limit_at_infinity(
+        graph: &ExprGraph,
+        expr: ExprId,
+        wrt: SymbolId,
+        neg_inf: bool,
+    ) -> Option<ExprId> {
+        let name = graph.symbols.resolve(wrt)?;
+        let sign = if neg_inf { -1.0 } else { 1.0 };
+        let mut values: Vec<f64> = Vec::new();
+        for k in 2..=5 {
+            let x = sign * 10f64.powi(k);
+            let ctx = crate::numeric::EvalContext::with_bindings(
+                50,
+                std::collections::HashMap::from([(name.clone(), x)]),
+            );
+            let v = graph.evalf(expr, &ctx).ok()?.to_f64();
+            values.push(v);
+        }
+        let diverges = |v: &[f64]| -> Option<bool> {
+            // Growing in magnitude with a ratio of at least 1.5 and ending large, or overflowing after a huge value.
+            let finite: Vec<f64> = v.iter().copied().take_while(|x| x.is_finite()).collect();
+            let overflowed = finite.len() < v.len();
+            if overflowed && finite.last().is_some_and(|x| x.abs() > 1e10) {
+                return Some(finite[finite.len() - 1] > 0.0);
+            }
+            if finite.len() < 2 {
+                return None;
+            }
+            let growing = finite
+                .windows(2)
+                .all(|w| w[1].abs() >= 1.5 * w[0].abs() && w[1].signum() == w[0].signum());
+            let large = finite.last().is_some_and(|x| x.abs() > 1e4);
+            (growing && (large || overflowed)).then(|| finite[0] > 0.0)
+        };
+        if let Some(positive) = diverges(&values) {
+            return Some(graph.constant(if positive {
+                algebra_core::Constant::Infinity
+            } else {
+                algebra_core::Constant::NegInfinity
+            }));
+        }
+        if values.iter().any(|v| !v.is_finite()) {
+            return None;
+        }
+        // The longest prefix (at least three values) whose differences shrink geometrically: the last values can be
+        // noise from cancellation at large arguments.
+        let mut best: Option<(f64, f64)> = None; // (limit, last difference)
+        for len in (3..=values.len()).rev() {
+            let v = &values[..len];
+            let diffs: Vec<f64> = v.windows(2).map(|w| w[1] - w[0]).collect();
+            let shrinking = diffs
+                .windows(2)
+                .all(|d| d[1].abs() <= d[0].abs() / 1.5 + 1e-15);
+            let last = v[len - 1];
+            let last_diff = diffs[diffs.len() - 1];
+            if !shrinking || last_diff.abs() > 1e-3 * (1.0 + last.abs()) {
+                continue;
+            }
+            let prev_diff = diffs[diffs.len() - 2];
+            let limit = if (last_diff - prev_diff).abs() > 1e-300 {
+                last - last_diff * last_diff / (last_diff - prev_diff)
+            } else {
+                last
+            };
+            best = Some((limit, last_diff));
+            break;
+        }
+        let (limit, last_diff) = best?;
+        let tolerance = (3.0 * last_diff.abs()).max(1e-6);
+        Some(Self::identify_number(graph, limit, tolerance))
+    }
+
+    /// The simplest exact value within `tolerance` of `v`: a rational with a small denominator, a multiple of
+    /// `e` or `pi`, `ln 2`, else the decimal itself.
+    fn identify_number(graph: &ExprGraph, v: f64, tolerance: f64) -> ExprId {
+        for den in 1..=24i64 {
+            let num = (v * den as f64).round();
+            if (num / den as f64 - v).abs() <= tolerance {
+                return graph.rational(num as i64, den);
+            }
+        }
+        let constants: [(f64, algebra_core::Constant); 2] = [
+            (std::f64::consts::E, algebra_core::Constant::E),
+            (std::f64::consts::PI, algebra_core::Constant::Pi),
+        ];
+        for (value, c) in constants {
+            for den in 1..=8i64 {
+                for num in 1..=8i64 {
+                    let multiple = (num as f64) * value / den as f64;
+                    if (multiple - v).abs() <= tolerance {
+                        let k = graph.constant(c);
+                        return if num == 1 && den == 1 {
+                            k
+                        } else {
+                            graph.mul([graph.rational(num, den), k])
+                        };
+                    }
+                    if (multiple + v).abs() <= tolerance {
+                        let k = graph.constant(c);
+                        return graph.neg(graph.mul([graph.rational(num, den), k]));
+                    }
+                }
+            }
+        }
+        if (v - std::f64::consts::LN_2).abs() <= tolerance {
+            return graph.function("ln", [graph.integer(2)]);
+        }
+        graph.float(v)
     }
 
     /// Successive L'Hôpital rule evaluation up to `max_order` with cycle detection

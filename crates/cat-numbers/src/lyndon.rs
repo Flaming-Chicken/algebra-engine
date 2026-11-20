@@ -36,7 +36,7 @@ impl LyndonWord {
         }
 
         // Find longest proper suffix that is a Lyndon word
-        for i in (1..n).rev() {
+        for i in 1..n {
             let suffix = &self.0[i..];
             let prefix = &self.0[..i];
             if Self::is_lyndon(suffix) && Self::is_lyndon(prefix) {
@@ -63,7 +63,9 @@ impl LyndonWord {
 /// Free Lie algebra bracket element in the Lyndon basis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LieBracketTree {
+    /// A single generator.
     Generator(u8),
+    /// The Lie bracket of two sub-trees.
     Bracket(Box<LieBracketTree>, Box<LieBracketTree>),
 }
 

@@ -15,3 +15,10 @@ bnum = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
+
+[lib]
+bench = false
+
+[[bench]]
+name = "uint_comparison"
+harness = false

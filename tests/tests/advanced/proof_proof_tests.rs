@@ -14,12 +14,19 @@ fn test_unification_identical() {
 #[test]
 fn test_unification_symbol_and_num() {
     let graph = ExprGraph::new();
+    let x_sym = graph.symbols.get_or_intern("x");
     let x = graph.symbol("x");
     let num = graph.integer(42);
     let engine = UnificationEngine::new();
 
     let subst = engine.unify(&graph, x, num).unwrap();
     assert_eq!(subst.mappings.len(), 1);
+    assert_eq!(subst.mappings.get(&x_sym), Some(&num));
+
+    // Document current limitation: compound ASTs (Add/Mul/Pow) are not recursively unified yet
+    let x_plus_1 = graph.add([x, graph.integer(1)]);
+    let two_plus_1 = graph.add([graph.integer(2), graph.integer(1)]);
+    assert!(engine.unify(&graph, x_plus_1, two_plus_1).is_err());
 }
 
 #[test]
@@ -31,11 +38,14 @@ fn test_proof_trace_export() {
 
     let mut trace = ProofTrace::new();
     trace.add_step("add_zero_identity", x_plus_0, x);
+    assert_eq!(trace.verify_steps(&graph), Ok(1));
 
     let lean = trace.export_lean4();
+    assert!(lean.contains("theorem algebraic_simplification"));
     assert!(lean.contains("add_zero_identity"));
 
     let coq = trace.export_coq();
+    assert!(coq.contains("Theorem algebraic_simplification"));
     assert!(coq.contains("add_zero_identity"));
 }
 

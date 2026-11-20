@@ -722,6 +722,21 @@ impl SymbolicCalculus for ExprGraph {
         };
         let is_inf_bound = |id: ExprId| -> bool { is_pos_inf_bound(id) || is_neg_inf_bound(id) };
 
+        // Gaussian integrals have no elementary antiderivative: c exp(a x^2 + b x + d) over the line or the
+        // half line is sqrt(pi / -a) exp(d - b^2 / (4 a)) (halved for [0, oo) and b = 0).
+        if is_pos_inf_bound(upper)
+            && let Some(value) = gaussian_integral(
+                self,
+                expr,
+                wrt,
+                is_neg_inf_bound(lower),
+                crate::simplify::Simplifier::simplify(self, lower).unwrap_or(lower)
+                    == self.integer(0),
+            )
+        {
+            return Ok(value);
+        }
+
         let mut singular_lower = false;
         let mut singular_upper = false;
 
@@ -818,6 +833,18 @@ impl SymbolicCalculus for ExprGraph {
         let f_a = eval_bound(lower, lower_dir, singular_lower)?;
         let diff = self.sub(f_b, f_a);
         let res = crate::simplify::Simplifier::simplify(self, diff).unwrap_or(diff);
+        // A constant result that is an exact rational (`2/3 4^(3/2) - 2/3 0^(3/2)` is `16/3`).
+        if let Ok(Some(q)) =
+            crate::numeric::try_eval_exact(self, res, &std::collections::HashMap::new())
+        {
+            return Ok(crate::poly::expr_from_rational(self, &q));
+        }
+        // A constant result built from roots of rationals (`2/3 2^(3/2) - 2/3 1^(3/2)` is `(4 sqrt(2) - 2) / 3`).
+        if crate::radical::has_radicals(self, res)
+            && let Some(radical) = crate::radical::evaluate(self, res)
+        {
+            return Ok(radical.to_expr(self));
+        }
 
         // Guard against finite non-convergent values (e.g. NaN / inf after subtraction)
         if let Ok(val) = self.evalf(res, &ctx)
@@ -1457,12 +1484,35 @@ pub(crate) fn taylor_coeffs_vec(
     point: ExprId,
     order: usize,
 ) -> Vec<ExprId> {
+    // Fast path: exact series arithmetic, when the expression and the point allow it.
+    if let Some(fast) = crate::series_fast::taylor_coeffs_fast(graph, expr, wrt, point, order) {
+        return fast;
+    }
     let mut coeffs = Vec::with_capacity(order + 1);
     let mut current_deriv = expr;
     let mut factorial = num_bigint::BigInt::from(1u8);
     let zero = graph.integer(0);
 
+    // Time budget. Each order costs several times the one before when the derivatives swell, so an order that
+    // took long predicts that the next one will take much longer: stop instead of running for minutes. (Debug
+    // builds are about ten times slower.)
+    let slowdown = if cfg!(debug_assertions) { 10.0 } else { 1.0 };
+    let series_started = std::time::Instant::now();
+    let mut last_order_started = series_started;
     for n in 0..=order {
+        let now = std::time::Instant::now();
+        let last_took = now.duration_since(last_order_started).as_secs_f64();
+        last_order_started = now;
+        if n > 1
+            && (last_took > 0.8 * slowdown
+                || series_started.elapsed().as_secs_f64() > 4.0 * slowdown)
+        {
+            SERIES_BUDGET_EXCEEDED.with(|f| f.set(true));
+            while coeffs.len() <= order {
+                coeffs.push(zero);
+            }
+            return coeffs;
+        }
         if n > 0 {
             factorial *= n;
         }
@@ -1475,6 +1525,15 @@ pub(crate) fn taylor_coeffs_vec(
                 crate::limits::LimitEngine::eval_lhopital(graph, num, den, wrt, point, 6)
         {
             eval_deriv = crate::simplify::Simplifier::simplify(graph, lim).unwrap_or(lim);
+        }
+        // A singular value (`0^0`, `ln(0)`, a division by zero) means the function is not analytic at the point:
+        // there is no Taylor series, and carrying on would print nonsense.
+        if has_singular_value(graph, eval_deriv) {
+            SERIES_NOT_ANALYTIC.with(|f| f.set(true));
+            while coeffs.len() <= order {
+                coeffs.push(zero);
+            }
+            return coeffs;
         }
         if eval_deriv == zero {
             coeffs.push(zero);
@@ -1494,9 +1553,82 @@ pub(crate) fn taylor_coeffs_vec(
         }
         if n < order {
             current_deriv = graph.diff(current_deriv, wrt);
+            // Expression swell: derivatives of `x^x`, nested compositions, ... grow exponentially, and the
+            // method then takes minutes. Give up, flag it for the caller, and pad with zeros.
+            if distinct_nodes_exceed(graph, current_deriv, SERIES_NODE_BUDGET) {
+                SERIES_BUDGET_EXCEEDED.with(|f| f.set(true));
+                while coeffs.len() <= order {
+                    coeffs.push(zero);
+                }
+                return coeffs;
+            }
         }
     }
     coeffs
+}
+
+/// The largest derivative expression (in distinct nodes) the differentiation method will work with.
+const SERIES_NODE_BUDGET: usize = 30_000;
+
+thread_local! {
+    /// Set by [`taylor_coeffs_vec`] when a coefficient was singular (`0^0`, `ln(0)`, `1/0`).
+    pub(crate) static SERIES_NOT_ANALYTIC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+
+    /// Set by [`taylor_coeffs_vec`] when it gave up because of expression swell, so a caller that can report an
+    /// error (the series command) does so instead of returning a truncated series.
+    pub(crate) static SERIES_BUDGET_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the value contains `0^0` (or another power of zero with a non-positive exponent), `ln(0)` or a division by
+/// the literal zero.
+fn has_singular_value(graph: &ExprGraph, root: ExprId) -> bool {
+    let zero = graph.integer(0);
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        match &node.kind {
+            ExprKind::Div(_, d) if *d == zero => return true,
+            ExprKind::Pow(base, exp) if *base == zero => {
+                let non_positive = match &graph.get(*exp).kind {
+                    ExprKind::Number(n) => n.as_f64().is_some_and(|v| v <= 0.0),
+                    _ => false,
+                };
+                if non_positive {
+                    return true;
+                }
+            }
+            ExprKind::Function { name, args }
+                if args.len() == 1
+                    && args[0] == zero
+                    && matches!(graph.symbols.resolve(*name).as_deref(), Some("ln" | "log")) =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+        stack.extend(node.children());
+    }
+    false
+}
+
+/// Whether the expression has more than `limit` distinct nodes (counting stops at the limit).
+fn distinct_nodes_exceed(graph: &ExprGraph, root: ExprId, limit: usize) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if seen.len() > limit {
+            return true;
+        }
+        stack.extend(graph.get(id).children());
+    }
+    false
 }
 
 fn taylor_div_coeffs(
@@ -1571,6 +1703,69 @@ fn build_taylor_poly(graph: &ExprGraph, coeffs: &[ExprId], x_minus_a: ExprId) ->
     } else {
         graph.add(terms)
     }
+}
+
+/// `integral of c exp(a x^2 + b x + d)` over `(-oo, oo)` (`whole_line`) or `[0, oo)` (`from_zero`, needs `b = 0`).
+fn gaussian_integral(
+    graph: &ExprGraph,
+    expr: ExprId,
+    wrt: SymbolId,
+    whole_line: bool,
+    from_zero: bool,
+) -> Option<ExprId> {
+    use crate::simplify::SymbolicSimplifier as _;
+    use algebra_core::Constant;
+    use num_traits::Signed;
+    if !whole_line && !from_zero {
+        return None;
+    }
+    let factors: Vec<ExprId> = match graph.get(expr).kind.clone() {
+        ExprKind::Mul(fs) => fs.to_vec(),
+        _ => vec![expr],
+    };
+    let (mut constant, mut exponential) = (Vec::new(), None);
+    for f in factors {
+        if !graph.has_symbol(f, wrt) {
+            constant.push(f);
+        } else if exponential.is_none() {
+            exponential = Some(f);
+        } else {
+            return None;
+        }
+    }
+    let exponential = exponential?;
+    let argument = match graph.get(exponential).kind.clone() {
+        ExprKind::Function { name, args }
+            if graph.symbols.resolve(name).as_deref() == Some("exp") && args.len() == 1 =>
+        {
+            args[0]
+        }
+        _ => return None,
+    };
+    let (a, b, d) = crate::transforms::match_quadratic(graph, argument, wrt)?;
+    let a_value = constant_rational(graph, graph.simplify(a))?;
+    if !a_value.is_negative() {
+        return None;
+    }
+    let b_is_zero = graph.simplify(b) == graph.integer(0);
+    if from_zero && !whole_line && !b_is_zero {
+        return None;
+    }
+    let pi = graph.constant(Constant::Pi);
+    let root = graph.function("sqrt", [graph.div(pi, graph.neg(a))]);
+    let shift = graph.sub(
+        d,
+        graph.div(
+            graph.pow(b, graph.integer(2)),
+            graph.mul([graph.integer(4), a]),
+        ),
+    );
+    let mut value = graph.mul([root, graph.function("exp", [shift])]);
+    if !whole_line {
+        value = graph.div(value, graph.integer(2));
+    }
+    constant.push(value);
+    Some(graph.simplify(graph.mul(constant)))
 }
 
 #[cfg(test)]

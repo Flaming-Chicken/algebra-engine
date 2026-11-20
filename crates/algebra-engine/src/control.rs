@@ -593,8 +593,37 @@ impl StateSpaceSystem {
         res
     }
 
-    /// Compute matrix exponential e^M via Taylor expansion with scaling and squaring.
+    /// Compute matrix exponential e^M by scaling and squaring: `M` is divided by `2^s` until its infinity
+    /// norm is at most 1/2, the Taylor series of the small matrix is summed, and the result is squared `s`
+    /// times. (The unscaled series cancels catastrophically for a matrix with a large negative eigenvalue.)
     pub fn matrix_exponential(m: &[Vec<f64>]) -> Vec<Vec<f64>> {
+        let n = m.len();
+        let norm = m
+            .iter()
+            .map(|r| r.iter().map(|v| v.abs()).sum::<f64>())
+            .fold(0.0_f64, f64::max);
+        if !norm.is_finite() {
+            return vec![vec![f64::NAN; n]; n];
+        }
+        let squarings = if norm > 0.5 {
+            (norm / 0.5).log2().ceil().max(0.0) as u32
+        } else {
+            0
+        };
+        let factor = 0.5_f64.powi(squarings as i32);
+        let scaled: Vec<Vec<f64>> = m
+            .iter()
+            .map(|r| r.iter().map(|v| v * factor).collect())
+            .collect();
+        let mut result = Self::exp_taylor(&scaled);
+        for _ in 0..squarings {
+            result = Self::matmul(&result, &result);
+        }
+        result
+    }
+
+    /// Taylor series of `e^M` for a matrix of small norm.
+    fn exp_taylor(m: &[Vec<f64>]) -> Vec<Vec<f64>> {
         let n = m.len();
         let mut term = vec![vec![0.0; n]; n];
         let mut res = vec![vec![0.0; n]; n];
@@ -605,8 +634,8 @@ impl StateSpaceSystem {
             res[i][i] = 1.0;
         }
 
-        // 25 terms of Taylor series
-        for k in 1..=25 {
+        // At norm <= 1/2, 20 terms reach double precision.
+        for k in 1..=20 {
             term = Self::matmul(&term, m);
             let inv_k = 1.0 / (k as f64);
             let mut max_diff: f64 = 0.0;
@@ -634,43 +663,40 @@ impl StateSpaceSystem {
         let cols = mat[0].len();
         let mut a = mat.to_vec();
 
+        // Tolerance relative to the largest entry, so the rank does not depend on the scale of the matrix.
+        let scale = a
+            .iter()
+            .flat_map(|r| r.iter())
+            .fold(0.0_f64, |m, v| m.max(v.abs()));
+        let tolerance = 1e-11 * scale.max(f64::MIN_POSITIVE);
+
+        // One pivot per column at most; a column with no pivot leaves the row where it is (the previous
+        // version advanced the row as well, which gave rank 0 for [[0, 1], [0, 0]]).
         let mut rank = 0;
-        let mut col = 0;
-        for row in 0..rows {
-            if col >= cols {
+        for col in 0..cols {
+            if rank >= rows {
                 break;
             }
-
-            // Pivot search
-            let mut max_val = a[row][col].abs();
-            let mut pivot_row = row;
-            for r in (row + 1)..rows {
+            let mut pivot_row = rank;
+            let mut max_val = a[rank][col].abs();
+            for r in (rank + 1)..rows {
                 if a[r][col].abs() > max_val {
                     max_val = a[r][col].abs();
                     pivot_row = r;
                 }
             }
-
-            if max_val < 1e-11 {
-                // Column is zero, skip to next column for same row
-                col += 1;
+            if max_val <= tolerance {
                 continue;
             }
-
-            if pivot_row != row {
-                a.swap(row, pivot_row);
-            }
-
-            let pivot = a[row][col];
-            for r in (row + 1)..rows {
+            a.swap(rank, pivot_row);
+            let pivot = a[rank][col];
+            for r in (rank + 1)..rows {
                 let factor = a[r][col] / pivot;
                 for c in col..cols {
-                    a[r][c] -= factor * a[row][c];
+                    a[r][c] -= factor * a[rank][c];
                 }
             }
-
             rank += 1;
-            col += 1;
         }
 
         rank

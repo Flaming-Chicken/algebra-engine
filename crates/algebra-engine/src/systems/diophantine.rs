@@ -37,6 +37,12 @@ pub struct DiophantineSystemSolver;
 #[allow(clippy::needless_range_loop)]
 impl DiophantineSystemSolver {
     /// Computes the Smith Normal Form (SNF) $\mathbf{U}\mathbf{A}\mathbf{V} = \mathbf{D}$ for integer matrix $\mathbf{A} \in \mathbb{Z}^{m \times n}$.
+    ///
+    /// The diagonal satisfies the divisibility chain $d_1 \mid d_2 \mid \dots \mid d_r$: when the pivot
+    /// $d_k$ does not divide an entry of the remaining block, that entry's row is added to the pivot row
+    /// and the block is reduced again (so the form of $\operatorname{diag}(2, 3)$ is $\operatorname{diag}(1, 6)$).
+    /// The work is done in `i128` with checked arithmetic; an intermediate value or a final entry that does
+    /// not fit is an error, not a wrapped number.
     pub fn smith_normal_form(matrix: &[Vec<i64>]) -> AlgebraResult<SmithNormalForm> {
         let m = matrix.len();
         if m == 0 {
@@ -50,112 +56,136 @@ impl DiophantineSystemSolver {
                 "Matrix must have at least one column".into(),
             ));
         }
-
-        let mut a = matrix.to_vec();
-        // Initialize U as m x m identity
-        let mut u = vec![vec![0i64; m]; m];
-        for i in 0..m {
-            u[i][i] = 1;
+        if matrix.iter().any(|row| row.len() != n) {
+            return Err(AlgebraError::EvaluationError(
+                "All rows must have the same length".into(),
+            ));
         }
+        let overflow = || {
+            AlgebraError::EvaluationError(
+                "Smith normal form: integer coefficients grew beyond 128 bits".into(),
+            )
+        };
+        // dst -= q * src, with checked arithmetic.
+        let sub_scaled = |dst: &mut [i128], src: &[i128], q: i128| -> AlgebraResult<()> {
+            for (d, s) in dst.iter_mut().zip(src) {
+                *d = q
+                    .checked_mul(*s)
+                    .and_then(|x| d.checked_sub(x))
+                    .ok_or_else(overflow)?;
+            }
+            Ok(())
+        };
 
-        // Initialize V as n x n identity
-        let mut v = vec![vec![0i64; n]; n];
-        for j in 0..n {
-            v[j][j] = 1;
-        }
+        let mut a: Vec<Vec<i128>> = matrix
+            .iter()
+            .map(|row| row.iter().map(|&x| x as i128).collect())
+            .collect();
+        // U starts as the m x m identity, V as the n x n identity; V is kept transposed (its rows are
+        // the columns of V) so that a column operation on A is a row operation on it.
+        let mut u: Vec<Vec<i128>> = (0..m)
+            .map(|i| (0..m).map(|j| i128::from(i == j)).collect())
+            .collect();
+        let mut vt: Vec<Vec<i128>> = (0..n)
+            .map(|i| (0..n).map(|j| i128::from(i == j)).collect())
+            .collect();
 
         let min_dim = m.min(n);
         let mut rank = 0;
-
-        for k in 0..min_dim {
-            // 1. Pivot selection: find smallest non-zero element in submatrix
+        'pivots: for k in 0..min_dim {
             loop {
-                let mut pivot = None;
-                let mut min_val = i64::MAX;
-
+                // Smallest non-zero entry of the remaining block.
+                let mut pivot: Option<(usize, usize)> = None;
+                let mut best = i128::MAX;
                 for i in k..m {
                     for j in k..n {
-                        let val = a[i][j].abs();
-                        if val != 0 && val < min_val {
-                            min_val = val;
+                        let v = a[i][j].unsigned_abs();
+                        if v != 0 && v < best as u128 {
+                            best = v as i128;
                             pivot = Some((i, j));
                         }
                     }
                 }
-
-                let (pi, pj) = match pivot {
-                    Some(p) => p,
-                    None => break, // Entire remaining submatrix is zero
+                let Some((pi, pj)) = pivot else {
+                    break 'pivots; // the rest is zero
                 };
-
-                // Swap pivot to (k, k)
-                if pi != k {
-                    a.swap(k, pi);
-                    u.swap(k, pi);
-                }
+                a.swap(k, pi);
+                u.swap(k, pi);
                 if pj != k {
-                    for r in 0..m {
-                        a[r].swap(k, pj);
+                    for row in a.iter_mut() {
+                        row.swap(k, pj);
                     }
-                    for r in 0..n {
-                        v[r].swap(k, pj);
-                    }
+                    vt.swap(k, pj);
                 }
-
                 if a[k][k] < 0 {
-                    for j in 0..n {
-                        a[k][j] = -a[k][j];
+                    for x in a[k].iter_mut() {
+                        *x = -*x;
                     }
-                    for j in 0..m {
-                        u[k][j] = -u[k][j];
+                    for x in u[k].iter_mut() {
+                        *x = -*x;
                     }
                 }
+                let d = a[k][k];
 
-                // Eliminate row entries in column k
-                let mut changed = false;
+                // Clear column k below the pivot (row operations), then row k to its right (column operations).
+                let mut residue = false;
+                let pivot_row = a[k].clone();
+                let pivot_u = u[k].clone();
                 for i in (k + 1)..m {
-                    let q = a[i][k] / a[k][k];
+                    let q = a[i][k].div_euclid(d);
                     if q != 0 {
-                        for j in 0..n {
-                            a[i][j] -= q * a[k][j];
-                        }
-                        for j in 0..m {
-                            u[i][j] -= q * u[k][j];
-                        }
-                        if a[i][k] != 0 {
-                            changed = true;
-                        }
+                        sub_scaled(&mut a[i], &pivot_row, q)?;
+                        sub_scaled(&mut u[i], &pivot_u, q)?;
                     }
+                    residue |= a[i][k] != 0;
                 }
-
-                // Eliminate column entries in row k
                 for j in (k + 1)..n {
-                    let q = a[k][j] / a[k][k];
+                    let q = a[k][j].div_euclid(d);
                     if q != 0 {
-                        for i in 0..m {
-                            a[i][j] -= q * a[i][k];
+                        for row in a.iter_mut() {
+                            row[j] = q
+                                .checked_mul(row[k])
+                                .and_then(|x| row[j].checked_sub(x))
+                                .ok_or_else(overflow)?;
                         }
-                        for i in 0..n {
-                            v[i][j] -= q * v[i][k];
-                        }
-                        if a[k][j] != 0 {
-                            changed = true;
-                        }
+                        let src = vt[k].clone();
+                        sub_scaled(&mut vt[j], &src, q)?;
                     }
+                    residue |= a[k][j] != 0;
                 }
-
-                if !changed {
-                    rank += 1;
-                    break;
+                if residue {
+                    continue; // a smaller non-zero entry now exists: pick it as the pivot
                 }
+                // The row and column of the pivot are clear. The divisibility chain needs the pivot to
+                // divide every remaining entry; if it does not, fold that entry's row into the pivot row.
+                let offender = (k + 1..m).find(|&i| (k + 1..n).any(|j| a[i][j] % d != 0));
+                if let Some(i) = offender {
+                    let (row, urow) = (a[i].clone(), u[i].clone());
+                    for (x, y) in a[k].iter_mut().zip(&row) {
+                        *x = x.checked_add(*y).ok_or_else(overflow)?;
+                    }
+                    for (x, y) in u[k].iter_mut().zip(&urow) {
+                        *x = x.checked_add(*y).ok_or_else(overflow)?;
+                    }
+                    continue;
+                }
+                rank += 1;
+                break;
             }
         }
 
-        // Extract diagonal entries
-        let mut diagonal = Vec::with_capacity(rank);
-        for i in 0..rank {
-            diagonal.push(a[i][i]);
-        }
+        let to_i64 = |x: i128| i64::try_from(x).map_err(|_| overflow());
+        let diagonal = (0..rank)
+            .map(|i| to_i64(a[i][i]))
+            .collect::<AlgebraResult<Vec<i64>>>()?;
+        let u = u
+            .iter()
+            .map(|row| row.iter().map(|&x| to_i64(x)).collect())
+            .collect::<AlgebraResult<Vec<Vec<i64>>>>()?;
+        // V has the stored rows as its columns.
+        let v = (0..n)
+            .map(|i| (0..n).map(|j| to_i64(vt[j][i])).collect())
+            .collect::<AlgebraResult<Vec<Vec<i64>>>>()?;
 
         Ok(SmithNormalForm {
             diagonal,

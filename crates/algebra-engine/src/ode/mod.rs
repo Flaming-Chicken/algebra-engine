@@ -12,6 +12,7 @@
 //! - Hairer, E., Nørsett, S. P., & Wanner, G. (1993/1996). *Solving Ordinary Differential Equations I & II*. Springer.
 //! - Butcher, J. C. (2016). *Numerical Methods for Ordinary Differential Equations* (3rd ed.). Wiley.
 
+pub(crate) mod classical;
 pub mod numerical;
 pub mod symbolic;
 

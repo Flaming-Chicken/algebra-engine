@@ -714,6 +714,12 @@ fn solve_transcendental(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Opti
         return Some(roots);
     }
 
+    // A polynomial of degree two or more in one function of the unknown (`cos(x)^2 = 1/4`, `sin(x)^2 + sin(x) - 2`,
+    // `ln(x)^2 - 3 ln(x) + 2`): solve for the function, then invert it.
+    if let Some(roots) = solve_by_substitution(graph, eq, target) {
+        return Some(roots);
+    }
+
     let node = graph.get(eq);
     let wrt_name = graph.symbols.resolve(target)?;
     let x_sym = graph.symbol(&wrt_name);
@@ -2479,6 +2485,119 @@ fn extract_exact_symbolic_sqrt(graph: &ExprGraph, id: ExprId) -> Option<ExprId> 
     }
     let factored = crate::simplify::AlgebraicTransformations::factor(graph, id);
     sqrt_monomial(graph, factored)
+}
+
+/// `expr` with every occurrence of `from` replaced by `to`; `None` for node kinds this does not rebuild that contain
+/// `from`.
+fn replace_subexpression(
+    graph: &ExprGraph,
+    expr: ExprId,
+    from: ExprId,
+    to: ExprId,
+) -> Option<ExprId> {
+    if expr == from {
+        return Some(to);
+    }
+    Some(match graph.get(expr).kind.clone() {
+        ExprKind::Number(_) | ExprKind::Symbol(_) => expr,
+        ExprKind::Add(terms) => {
+            let mapped: Option<Vec<ExprId>> = terms
+                .iter()
+                .map(|&t| replace_subexpression(graph, t, from, to))
+                .collect();
+            graph.add(mapped?)
+        }
+        ExprKind::Mul(factors) => {
+            let mapped: Option<Vec<ExprId>> = factors
+                .iter()
+                .map(|&t| replace_subexpression(graph, t, from, to))
+                .collect();
+            graph.mul(mapped?)
+        }
+        ExprKind::Sub(a, b) => graph.sub(
+            replace_subexpression(graph, a, from, to)?,
+            replace_subexpression(graph, b, from, to)?,
+        ),
+        ExprKind::Div(a, b) => graph.div(
+            replace_subexpression(graph, a, from, to)?,
+            replace_subexpression(graph, b, from, to)?,
+        ),
+        ExprKind::Pow(a, b) => graph.pow(
+            replace_subexpression(graph, a, from, to)?,
+            replace_subexpression(graph, b, from, to)?,
+        ),
+        ExprKind::Neg(a) => graph.neg(replace_subexpression(graph, a, from, to)?),
+        ExprKind::Function { name, args } => {
+            let mapped: Option<Vec<ExprId>> = args
+                .iter()
+                .map(|&a| replace_subexpression(graph, a, from, to))
+                .collect();
+            let name = graph.symbols.resolve(name)?;
+            graph.function(&name, mapped?)
+        }
+        _ => return None,
+    })
+}
+
+/// The distinct function calls in `expr` whose argument contains `target`.
+fn function_generators(graph: &ExprGraph, expr: ExprId, target: SymbolId) -> Vec<ExprId> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack = vec![expr];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = graph.get(id);
+        if matches!(node.kind, ExprKind::Function { .. }) && graph.has_symbol(id, target) {
+            out.push(id);
+        }
+        stack.extend(node.children());
+    }
+    out
+}
+
+/// Solve `P(g(x)) = 0` for a polynomial `P` of degree at least two and one function `g` of the unknown: the roots of
+/// `P` in a fresh variable, each then inverted through `g(x) = root`.
+fn solve_by_substitution(graph: &ExprGraph, eq: ExprId, target: SymbolId) -> Option<Vec<ExprId>> {
+    let u_sym = graph.symbols.get_or_intern("_u_subst");
+    let u = graph.symbol("_u_subst");
+    for g in function_generators(graph, eq, target) {
+        let Some(replaced) = replace_subexpression(graph, eq, g, u) else {
+            continue;
+        };
+        if graph.has_symbol(replaced, target) {
+            continue; // other occurrences of the unknown remain: not a polynomial in g alone
+        }
+        let Ok(poly) = crate::poly::UniPoly::from_expr(graph, replaced, u_sym) else {
+            continue;
+        };
+        if poly.degree() < 2 {
+            continue; // no gain (and the inversion below would recurse forever)
+        }
+        let Ok(u_roots) = graph.solveset(replaced, u_sym) else {
+            continue;
+        };
+        let mut roots: Vec<ExprId> = Vec::new();
+        let mut complete = true;
+        for r in u_roots {
+            let inverted = graph.solveset(graph.sub(g, r), target);
+            match inverted {
+                Ok(xs) => {
+                    for x in xs {
+                        if !roots.contains(&x) {
+                            roots.push(x);
+                        }
+                    }
+                }
+                Err(_) => complete = false,
+            }
+        }
+        if complete && !roots.is_empty() {
+            return Some(roots);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

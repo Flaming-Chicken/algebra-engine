@@ -4,8 +4,60 @@
 
 #[path = "engine/analysis_tests.rs"]
 mod analysis_tests;
+#[path = "engine/bigfloat_tests.rs"]
+mod bigfloat_tests;
+#[path = "engine/discrete_function_tests.rs"]
+mod discrete_function_tests;
+#[path = "engine/factoring_speed_tests.rs"]
+mod factoring_speed_tests;
+#[path = "engine/integer_function_tests.rs"]
+mod integer_function_tests;
+#[path = "engine/integration_exp_trig_tests.rs"]
+mod integration_exp_trig_tests;
+#[path = "engine/limit_tests.rs"]
+mod limit_tests;
 #[path = "engine/limits_series_audit_tests.rs"]
 mod limits_series_audit_tests;
+#[path = "engine/linalg_oracle_tests.rs"]
+mod linalg_oracle_tests;
+#[path = "engine/m1_wrong_answer_tests.rs"]
+mod m1_wrong_answer_tests;
+#[path = "engine/natural_spelling_tests.rs"]
+mod natural_spelling_tests;
+#[path = "engine/numeric_command_tests.rs"]
+mod numeric_command_tests;
+#[path = "engine/ode_residual_tests.rs"]
+mod ode_residual_tests;
+#[path = "engine/panic_hunt_tests.rs"]
+mod panic_hunt_tests;
+#[path = "engine/poly_factor_tests.rs"]
+mod poly_factor_tests;
+#[path = "engine/polynomial_system_branching_tests.rs"]
+mod polynomial_system_branching_tests;
+#[path = "engine/radical_integrals_tests.rs"]
+mod radical_integrals_tests;
+#[path = "engine/series_fast_tests.rs"]
+mod series_fast_tests;
+#[path = "engine/simplify_conditions_tests.rs"]
+mod simplify_conditions_tests;
+#[path = "engine/solve_known_roots_tests.rs"]
+mod solve_known_roots_tests;
+#[path = "engine/solver_domain_tests.rs"]
+mod solver_domain_tests;
+#[path = "engine/solver_residual_tests.rs"]
+mod solver_residual_tests;
+#[path = "engine/special_function_tests.rs"]
+mod special_function_tests;
+#[path = "engine/special_functions_tests.rs"]
+mod special_functions_tests;
+#[path = "engine/topology_betti_tests.rs"]
+mod topology_betti_tests;
+#[path = "engine/usability_probe_tests.rs"]
+mod usability_probe_tests;
+#[path = "engine/workspace_command_tests.rs"]
+mod workspace_command_tests;
+#[path = "engine/zeilberger_proof_tests.rs"]
+mod zeilberger_proof_tests;
 
 #[path = "engine/branch_tests.rs"]
 mod branch_tests;

@@ -537,6 +537,132 @@ fn gcd_biguint(mut a: BigUint, mut b: BigUint) -> BigUint {
     a
 }
 
+/// The 256-bit product of two `u128`s as `(high, low)`.
+fn mul_wide_u128(a: u128, b: u128) -> (u128, u128) {
+    let mask = u64::MAX as u128;
+    let (a0, a1, b0, b1) = (a & mask, a >> 64, b & mask, b >> 64);
+    let p00 = a0 * b0;
+    let p01 = a0 * b1;
+    let p10 = a1 * b0;
+    let p11 = a1 * b1;
+    let mid = (p00 >> 64) + (p01 & mask) + (p10 & mask);
+    let lo = (p00 & mask) | (mid << 64);
+    let hi = p11 + (p01 >> 64) + (p10 >> 64) + (mid >> 64);
+    (hi, lo)
+}
+
+/// Montgomery arithmetic modulo an odd `n < 2^128` with `R = 2^128`: values are kept as `x R mod n`
+/// and a product costs two 128 x 128 -> 256 bit multiplications instead of a division.
+struct Montgomery {
+    n: u128,
+    /// `-n^(-1) mod 2^128`.
+    n_inv_neg: u128,
+}
+
+impl Montgomery {
+    fn new(n: u128) -> Self {
+        debug_assert!(n % 2 == 1);
+        // Newton iteration for the inverse modulo 2^128 (each step doubles the correct bits).
+        let mut inv = n;
+        for _ in 0..7 {
+            inv = inv.wrapping_mul(2u128.wrapping_sub(n.wrapping_mul(inv)));
+        }
+        Self {
+            n,
+            n_inv_neg: inv.wrapping_neg(),
+        }
+    }
+
+    /// `a b R^(-1) mod n` for `a, b < n`.
+    fn mul(&self, a: u128, b: u128) -> u128 {
+        let (hi, lo) = mul_wide_u128(a, b);
+        let m = lo.wrapping_mul(self.n_inv_neg);
+        let (m_hi, m_lo) = mul_wide_u128(m, self.n);
+        // lo + m_lo is divisible by 2^128; only its carry matters.
+        let carry = lo.overflowing_add(m_lo).1 as u128;
+        let (s1, c1) = hi.overflowing_add(m_hi);
+        let (s2, c2) = s1.overflowing_add(carry);
+        if c1 || c2 || s2 >= self.n {
+            s2.wrapping_sub(self.n)
+        } else {
+            s2
+        }
+    }
+
+    fn add(&self, a: u128, b: u128) -> u128 {
+        let (s, overflow) = a.overflowing_add(b);
+        if overflow || s >= self.n {
+            s.wrapping_sub(self.n)
+        } else {
+            s
+        }
+    }
+}
+
+fn gcd_u128(mut a: u128, mut b: u128) -> u128 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a
+}
+
+/// Brent's variant of Pollard's rho for an odd composite `n < 2^128`, with every step done in
+/// Montgomery form. The iteration `x -> x^2 + c` and the differences it is tested on are all
+/// multiplied by the same unit `R`, which changes no gcd with `n`. Gives up (`None`) after
+/// about `2^27` steps per starting constant.
+fn pollard_rho_u128(n: u128) -> Option<u128> {
+    let ctx = Montgomery::new(n);
+    for c_init in [1u128, 3, 5, 7, 11, 13, 17, 19, 23, 29] {
+        let c = c_init % n;
+        let f = |v: u128| ctx.add(ctx.mul(v, v), c);
+        let mut y = 2u128 % n;
+        let mut x = y;
+        let mut ys = y;
+        let mut q = 1u128;
+        let mut d = 1u128;
+        let mut r = 1u64;
+        'outer: while d == 1 {
+            x = y;
+            for _ in 0..r {
+                y = f(y);
+            }
+            let mut k = 0u64;
+            while k < r && d == 1 {
+                ys = y;
+                let lim = (r - k).min(256);
+                for _ in 0..lim {
+                    y = f(y);
+                    let diff = x.abs_diff(y);
+                    q = ctx.mul(q, diff);
+                }
+                d = gcd_u128(q, n);
+                k += lim;
+            }
+            r <<= 1;
+            if r > (1 << 27) {
+                break 'outer;
+            }
+        }
+        if d == n {
+            // The batch overshot (several factors at once): redo it one step at a time.
+            for _ in 0..(1u32 << 20) {
+                ys = f(ys);
+                let diff = x.abs_diff(ys);
+                d = gcd_u128(diff, n);
+                if d > 1 {
+                    break;
+                }
+            }
+        }
+        if d > 1 && d < n {
+            return Some(d);
+        }
+    }
+    None
+}
+
 fn pollard_rho_big(n: &BigUint) -> BigUint {
     use num_traits::{ToPrimitive as _, Zero as _};
     if let Some(u) = n.to_u64() {
@@ -545,6 +671,15 @@ fn pollard_rho_big(n: &BigUint) -> BigUint {
     let two = BigUint::from(2u8);
     if (n % &two).is_zero() {
         return two;
+    }
+    // Up to 127 bits the whole iteration fits in machine words (Montgomery form).
+    if let Some(small) = n.to_u128()
+        && small < (1u128 << 127)
+    {
+        return match pollard_rho_u128(small) {
+            Some(d) => BigUint::from(d),
+            None => n.clone(),
+        };
     }
     let one = BigUint::from(1u8);
     for c_init in [1u64, 3, 5, 7, 11, 13, 17, 19, 23, 29] {
@@ -609,6 +744,13 @@ fn factor_big_recursive(n: BigUint, counts: &mut BTreeMap<BigUint, u32>) {
     }
     if is_prime_big(&n) {
         *counts.entry(n).or_insert(0) += 1;
+        return;
+    }
+    let root = n.sqrt();
+    if &root * &root == n {
+        // Rho cannot split p^2 (the walk mod p and mod p^2 collide together).
+        factor_big_recursive(root.clone(), counts);
+        factor_big_recursive(root, counts);
         return;
     }
     let d = pollard_rho_big(&n);
@@ -1987,4 +2129,245 @@ pub fn decompose_universal(
         )
     })?;
     Ok(decompose_bigint(&n))
+}
+
+/// All positive divisors of `n` in increasing order, from its prime factorisation.
+pub fn divisors_of(n: u64) -> Vec<u64> {
+    let mut divisors = vec![1u64];
+    for (p, e) in integer_prime_factors(n) {
+        let len = divisors.len();
+        let mut power = 1u64;
+        for _ in 0..e {
+            power *= p;
+            for i in 0..len {
+                divisors.push(divisors[i] * power);
+            }
+        }
+    }
+    divisors.sort_unstable();
+    divisors
+}
+
+/// Euler's totient $\varphi(n) = n \prod_{p \mid n} (1 - 1/p)$.
+pub fn euler_totient(n: u64) -> u64 {
+    integer_prime_factors(n)
+        .into_iter()
+        .fold(n, |acc, (p, _)| acc / p * (p - 1))
+}
+
+/// The Möbius function: 0 if `n` has a squared prime factor, else $(-1)^k$ for `k` distinct primes.
+pub fn mobius(n: u64) -> i32 {
+    let factors = integer_prime_factors(n);
+    if factors.iter().any(|&(_, e)| e > 1) {
+        0
+    } else if factors.len().is_multiple_of(2) {
+        1
+    } else {
+        -1
+    }
+}
+
+/// Evaluate a named integer function. The text is the answer, written as an equation.
+pub fn arithmetic_function(name: &str, args: &[i64]) -> Result<String, String> {
+    let need = |k: usize| -> Result<(), String> {
+        if args.len() == k {
+            Ok(())
+        } else {
+            Err(format!(
+                "{name} takes {k} argument{}, got {}",
+                if k == 1 { "" } else { "s" },
+                args.len()
+            ))
+        }
+    };
+    let positive = |v: i64| -> Result<u64, String> {
+        u64::try_from(v)
+            .ok()
+            .filter(|&n| n >= 1)
+            .ok_or_else(|| format!("{name} needs a positive integer, got {v}"))
+    };
+    match name {
+        "totient" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("totient({n}) = {}", euler_totient(n)))
+        }
+        "next_prime" => {
+            need(1)?;
+            let mut n = u64::try_from(args[0]).unwrap_or(1).max(1);
+            loop {
+                n = n
+                    .checked_add(1)
+                    .ok_or("the next prime does not fit in 64 bits")?;
+                if is_prime(n) {
+                    return Ok(format!("next_prime({}) = {n}", args[0]));
+                }
+            }
+        }
+        "prev_prime" => {
+            need(1)?;
+            let mut n = u64::try_from(args[0]).unwrap_or(0);
+            while n > 2 {
+                n -= 1;
+                if is_prime(n) {
+                    return Ok(format!("prev_prime({}) = {n}", args[0]));
+                }
+            }
+            Err(format!("there is no prime below {}", args[0]))
+        }
+        "divisors" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            let d = divisors_of(n);
+            Ok(format!(
+                "divisors({n}) = [{}]",
+                d.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+            ))
+        }
+        "sigma" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            let sum: u128 = divisors_of(n).iter().map(|&d| d as u128).sum();
+            Ok(format!("sigma({n}) = {sum}"))
+        }
+        "tau" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("tau({n}) = {}", divisors_of(n).len()))
+        }
+        "mobius" => {
+            need(1)?;
+            let n = positive(args[0])?;
+            Ok(format!("mobius({n}) = {}", mobius(n)))
+        }
+        "mod_inverse" => {
+            need(2)?;
+            let m = positive(args[1])?;
+            if m < 2 {
+                return Err("the modulus must be at least 2".into());
+            }
+            let (mut old_r, mut r) = (args[0].rem_euclid(m as i64) as i128, m as i128);
+            let (mut old_s, mut s) = (1i128, 0i128);
+            while r != 0 {
+                let q = old_r / r;
+                (old_r, r) = (r, old_r - q * r);
+                (old_s, s) = (s, old_s - q * s);
+            }
+            if old_r != 1 {
+                return Err(format!(
+                    "{} has no inverse modulo {m}: gcd is {old_r}",
+                    args[0]
+                ));
+            }
+            Ok(format!(
+                "mod_inverse({}, {m}) = {}",
+                args[0],
+                old_s.rem_euclid(m as i128)
+            ))
+        }
+        "pow_mod" => {
+            need(3)?;
+            let (b, e, m) = (
+                args[0],
+                positive(args[1]).or_else(|_| {
+                    if args[1] == 0 {
+                        Ok(0)
+                    } else {
+                        Err("pow_mod needs a non-negative exponent".to_string())
+                    }
+                })?,
+                positive(args[2])?,
+            );
+            let base = b.rem_euclid(m as i64) as u64;
+            Ok(format!(
+                "pow_mod({b}, {e}, {m}) = {}",
+                pow_mod_u64(base, e, m)
+            ))
+        }
+        "primitive_root" => {
+            need(1)?;
+            let p = positive(args[0])?;
+            if !is_prime(p) {
+                return Err(format!("primitive_root needs a prime, got {p}"));
+            }
+            if p == 2 {
+                return Ok("primitive_root(2) = 1".into());
+            }
+            let prime_factors: Vec<u64> = integer_prime_factors(p - 1)
+                .into_iter()
+                .map(|(q, _)| q)
+                .collect();
+            let g = (2..p)
+                .find(|&g| {
+                    prime_factors
+                        .iter()
+                        .all(|&q| pow_mod_u64(g, (p - 1) / q, p) != 1)
+                })
+                .ok_or("no primitive root found")?;
+            Ok(format!("primitive_root({p}) = {g}"))
+        }
+        other => Err(format!("unknown integer function {other}")),
+    }
+}
+
+#[cfg(test)]
+mod montgomery_tests {
+    use super::{Montgomery, gcd_u128, mul_wide_u128};
+    use num_bigint::BigUint;
+
+    /// A deterministic stream of 128-bit values (xorshift).
+    fn values(seed: u64, count: usize) -> Vec<u128> {
+        let mut state = seed;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        (0..count)
+            .map(|_| ((next() as u128) << 64) | next() as u128)
+            .collect()
+    }
+
+    #[test]
+    fn the_wide_product_matches_big_integer_arithmetic() {
+        let vs = values(0x9e37_79b9_7f4a_7c15, 200);
+        for pair in vs.chunks(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let (hi, lo) = mul_wide_u128(a, b);
+            let want = BigUint::from(a) * BigUint::from(b);
+            let got = (BigUint::from(hi) << 128) + BigUint::from(lo);
+            assert_eq!(got, want);
+        }
+    }
+
+    #[test]
+    fn montgomery_multiplication_matches_modular_arithmetic() {
+        let r = BigUint::from(1u8) << 128;
+        for (i, n) in values(42, 60).into_iter().enumerate() {
+            // An odd modulus of every size from 3 to 127 bits.
+            let n = (n >> (1 + (i as u32 * 2) % 124)) | 1;
+            if n < 3 {
+                continue;
+            }
+            let ctx = Montgomery::new(n);
+            let nb = BigUint::from(n);
+            for pair in values(7 + i as u64, 20).chunks(2) {
+                let (a, b) = (pair[0] % n, pair[1] % n);
+                let to_mont = |x: u128| -> u128 {
+                    u128::try_from((BigUint::from(x) * &r) % &nb).expect("fits")
+                };
+                let product = ctx.mul(to_mont(a), to_mont(b));
+                let want =
+                    u128::try_from((BigUint::from(a) * BigUint::from(b) * &r) % &nb).expect("fits");
+                assert_eq!(product, want, "n = {n}, a = {a}, b = {b}");
+                let sum = ctx.add(a, b);
+                let want_sum =
+                    u128::try_from((BigUint::from(a) + BigUint::from(b)) % &nb).expect("fits");
+                assert_eq!(sum, want_sum);
+            }
+        }
+        assert_eq!(gcd_u128(0, 7), 7);
+        assert_eq!(gcd_u128(48, 18), 6);
+    }
 }

@@ -104,3 +104,92 @@ fn test_interactive_keystroke_to_estimate_latency() {
         elapsed.as_millis()
     );
 }
+
+fn var(n: &str) -> Box<CatExpr> {
+    Box::new(CatExpr::Variable(n.into()))
+}
+
+fn num(v: f64) -> Box<CatExpr> {
+    Box::new(CatExpr::Number(v))
+}
+
+fn bin(op: &str, l: Box<CatExpr>, r: Box<CatExpr>) -> CatExpr {
+    CatExpr::BinaryOp {
+        op: op.into(),
+        lhs: l,
+        rhs: r,
+    }
+}
+
+fn call(f: &str, args: Vec<CatExpr>) -> CatExpr {
+    CatExpr::Call {
+        func: f.into(),
+        args,
+    }
+}
+
+#[test]
+fn powers_scale_the_dimension_by_the_exponent() {
+    let mut elab = Elaborator::new();
+    elab.bind("l", DimVector::length());
+    elab.bind("t", DimVector::time());
+    // l^2 is an area, l^3 a volume, t^-1 a frequency.
+    let area = elab.infer_dimension(&bin("^", var("l"), num(2.0))).unwrap();
+    assert_eq!(area, DimVector::length() * DimVector::length());
+    let inv = elab
+        .infer_dimension(&bin("^", var("t"), num(-1.0)))
+        .unwrap();
+    assert_eq!(inv, DimVector::DIMENSIONLESS / DimVector::time());
+    // A fractional exponent, written as a quotient: l^(1/2) is the square root of a length.
+    let half = elab
+        .infer_dimension(&bin("^", var("l"), Box::new(bin("/", num(1.0), num(2.0)))))
+        .unwrap();
+    assert_eq!(half, DimVector::length().sqrt().unwrap());
+    // A pure number to any power stays a pure number.
+    assert!(
+        elab.infer_dimension(&bin("^", num(2.0), num(0.5)))
+            .unwrap()
+            .is_dimensionless()
+    );
+    // The exponent of a quantity with units must be a literal.
+    assert!(elab.infer_dimension(&bin("^", var("l"), var("t"))).is_err());
+    assert!(
+        elab.infer_dimension(&bin("^", var("l"), num(0.123_456_789)))
+            .is_err()
+    );
+}
+
+#[test]
+fn functions_respect_dimensions() {
+    let mut elab = Elaborator::new();
+    elab.bind("l", DimVector::length());
+    elab.bind("t", DimVector::time());
+    elab.bind("x", DimVector::DIMENSIONLESS);
+    // sin of a length is meaningless; sin of a number is a number.
+    assert!(elab.infer_dimension(&call("sin", vec![*var("l")])).is_err());
+    assert!(elab.infer_dimension(&call("exp", vec![*var("t")])).is_err());
+    assert!(
+        elab.infer_dimension(&call("sin", vec![*var("x")]))
+            .unwrap()
+            .is_dimensionless()
+    );
+    // sqrt halves the dimension, abs keeps it, max needs agreeing arguments.
+    let area = bin("*", var("l"), var("l"));
+    assert_eq!(
+        elab.infer_dimension(&call("sqrt", vec![area])).unwrap(),
+        DimVector::length()
+    );
+    assert_eq!(
+        elab.infer_dimension(&call("abs", vec![*var("l")])).unwrap(),
+        DimVector::length()
+    );
+    assert!(
+        elab.infer_dimension(&call("max", vec![*var("l"), *var("t")]))
+            .is_err()
+    );
+    assert_eq!(
+        elab.infer_dimension(&call("max", vec![*var("l"), *var("l")]))
+            .unwrap(),
+        DimVector::length()
+    );
+}

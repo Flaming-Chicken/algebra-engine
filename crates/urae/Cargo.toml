@@ -29,3 +29,10 @@ cli = ["dep:urae-cli"]
 
 [dev-dependencies]
 criterion.workspace = true
+
+[lib]
+bench = false
+
+[[bench]]
+name = "urae_benchmarks"
+harness = false

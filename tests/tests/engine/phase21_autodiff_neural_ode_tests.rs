@@ -156,3 +156,39 @@ fn test_phase21_dsl_macros() {
     let res = pinn_burgers_residual!(u_linear, x = 3.0, t = 0.0, nu = 0.1);
     assert!((res - 3.0).abs() < 1e-10);
 }
+
+#[test]
+fn test_pinn_heat_2d_and_poisson_2d_residuals() {
+    use algebra_engine::pinn::PinnResidual;
+    use std::f64::consts::PI;
+
+    // 1. Exact eigenmode of 2D heat equation u_t = alpha * (u_xx + u_yy):
+    // u(x, y, t) = sin(pi * x) * sin(pi * y) * exp(-2 * pi^2 * alpha * t)
+    let alpha = 0.05;
+    let heat_mode = |x: HyperDual<f64>, y: HyperDual<f64>, t: HyperDual<f64>| -> HyperDual<f64> {
+        let decay = HyperDual::constant(-2.0 * PI * PI * alpha);
+        (x * HyperDual::constant(PI)).sin()
+            * (y * HyperDual::constant(PI)).sin()
+            * (t * decay).exp()
+    };
+    let heat_res = PinnResidual::heat_2d_residual(heat_mode, 0.3, 0.7, 0.2, alpha);
+    assert!(
+        heat_res.abs() < 1e-11,
+        "Exact heat eigenmode residual must vanish, got {heat_res}"
+    );
+
+    // 2. 2D Poisson equation: u(x, y) = x^2 + 2*y^2 + x*y => Laplacian(u) = 2 + 4 = 6
+    let poisson_u = |x: HyperDual<f64>, y: HyperDual<f64>| -> HyperDual<f64> {
+        x * x + y * y * HyperDual::constant(2.0) + x * y
+    };
+    let poisson_exact = PinnResidual::poisson_2d_residual(poisson_u, 1.5, -0.5, 6.0);
+    assert!(
+        poisson_exact.abs() < 1e-12,
+        "Exact Poisson source residual must vanish, got {poisson_exact}"
+    );
+    let poisson_homog = PinnResidual::poisson_2d_residual(poisson_u, 1.5, -0.5, 0.0);
+    assert!(
+        (poisson_homog - 6.0).abs() < 1e-12,
+        "Laplacian(x^2 + 2y^2 + xy) must equal 6.0, got {poisson_homog}"
+    );
+}

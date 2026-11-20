@@ -8,11 +8,15 @@
 //!   connected, disjoint, sign-invariant semi-algebraic cells $\mathbb{R}^n = \bigcup_{i} C_i$
 //!   for a set of polynomials $\mathcal{F} = \{f_1, \dots, f_m\} \subset \mathbb{Q}[x_1, \dots, x_n]$.
 //! - **Projection Phase (McCallum)**:
-//!   For one and two variables the projection is exact ([`projection`]): the leading coefficient,
+//!   For one, two and three variables the projection is exact ([`projection`]): the leading coefficient,
 //!   the discriminant $\operatorname{disc}(f, y)$ of each polynomial and the resultant
-//!   $\operatorname{res}(f, g, y)$ of each pair, over $\mathbb{Q}[x]$. Three or more variables are
-//!   rejected with an error (the multivariate projection is not implemented), as are inputs with a
-//!   repeated or common factor in $y$ (their discriminant or resultant vanishes identically).
+//!   $\operatorname{res}(f, g, y)$ of each pair, over $\mathbb{Q}[x]$. With three variables $z$ is
+//!   eliminated first (resultants interpolated on an integer grid), giving polynomials in $(x, y)$
+//!   that are projected again for the $x$ cuts and cut the $y$ line over each $x$ sample. Four or more
+//!   variables are rejected with an error, as are inputs with a repeated or common factor in the
+//!   eliminated variable (their discriminant or resultant vanishes identically). Like all McCallum
+//!   projections this assumes the input is well oriented: no polynomial vanishes identically on a
+//!   cell of the lower dimension.
 //! - **Base & Lifting Phase**:
 //!   Real roots are isolated exactly with Sturm sequences; the base cells are cut at the roots of
 //!   the projection polynomials, and each fibre is decomposed at the real roots of the polynomials
@@ -236,14 +240,20 @@ impl CadEngine {
             ));
         }
 
-        if n > 2 {
+        if n > 3 {
             return Err(AlgebraError::EvaluationError(format!(
-                "CAD with {n} variables is not supported: the exact projection phase is implemented \
-                 for one and two variables, and lifting without a projection is unsound"
+                "CAD with {n} variables is not supported: the exact projection phase is implemented                  for one, two and three variables, and lifting without a projection is unsound"
             )));
         }
+        // Three variables: eliminate z once; the (x, y) polynomials are projected again for the
+        // x cuts and cut the y line over each x sample.
+        let plane = if n == 3 {
+            Self::project_to_plane(polys)?
+        } else {
+            Vec::new()
+        };
         // Recursive cylindrical construction starting from base 1D space
-        Self::decompose_recursive(polys, vars, 0, &[], precision_eps)
+        Self::decompose_recursive(polys, vars, 0, &[], precision_eps, &plane)
     }
 
     fn decompose_recursive(
@@ -252,6 +262,7 @@ impl CadEngine {
         level: usize,
         current_sample: &[f64],
         eps: f64,
+        plane: &[projection::BiPoly],
     ) -> AlgebraResult<CadCell> {
         let target_dim = level + 1;
 
@@ -275,8 +286,14 @@ impl CadEngine {
         }
 
         // 1. Project polynomials to find univariate roots in current level variable x_{level}
-        let roots =
-            Self::isolate_cross_section_roots(polys, vars.len(), level, current_sample, eps)?;
+        let roots = Self::isolate_cross_section_roots(
+            polys,
+            vars.len(),
+            level,
+            current_sample,
+            eps,
+            plane,
+        )?;
 
         // 2. Form interleaved Sections and Sectors along the coordinate line
         let mut sample_coords = Vec::new();
@@ -312,7 +329,8 @@ impl CadEngine {
             let mut next_sample = current_sample.to_vec();
             next_sample.push(coord);
 
-            let mut child = Self::decompose_recursive(polys, vars, level + 1, &next_sample, eps)?;
+            let mut child =
+                Self::decompose_recursive(polys, vars, level + 1, &next_sample, eps, plane)?;
             child.id = idx;
             child.cell_type = ctype;
             children.push(child);
@@ -335,6 +353,46 @@ impl CadEngine {
         })
     }
 
+    /// The polynomials of three variables as polynomials in `z` over `Q[x, y]`, projected onto the
+    /// `(x, y)` plane (leading coefficients, discriminants, resultants).
+    fn project_to_plane(polys: &[CadPolynomial]) -> AlgebraResult<Vec<projection::BiPoly>> {
+        use num_bigint::BigInt;
+        use num_rational::BigRational;
+        let zero = || BigRational::from_integer(BigInt::from(0));
+        let mut tripolys = Vec::new();
+        for p in polys {
+            // grid[ez][ey][ex]
+            let mut grid: Vec<Vec<Vec<BigRational>>> = Vec::new();
+            for (exp, &c) in &p.terms {
+                let at = |i: usize| exp.get(i).copied().unwrap_or(0);
+                let (ex, ey, ez) = (at(0), at(1), at(2));
+                let coefficient = BigRational::from_float(c).ok_or_else(|| {
+                    AlgebraError::EvaluationError("CAD polynomials need finite coefficients".into())
+                })?;
+                while grid.len() <= ez {
+                    grid.push(Vec::new());
+                }
+                while grid[ez].len() <= ey {
+                    grid[ez].push(Vec::new());
+                }
+                while grid[ez][ey].len() <= ex {
+                    grid[ez][ey].push(zero());
+                }
+                grid[ez][ey][ex] += coefficient;
+            }
+            tripolys.push(projection::TriPoly {
+                coeffs: grid
+                    .into_iter()
+                    .map(|by_y| projection::BiPoly {
+                        coeffs: by_y.into_iter().map(crate::gosper::QPoly::new).collect(),
+                    })
+                    .collect(),
+            });
+        }
+        projection::project3(&tripolys)
+            .map_err(|e| AlgebraError::EvaluationError(format!("CAD projection: {e}")))
+    }
+
     /// Sorted, distinct real roots that cut the coordinate line of variable `var_idx` into cells.
     ///
     /// For the base variable of a two-variable decomposition these are the roots of the McCallum
@@ -349,6 +407,7 @@ impl CadEngine {
         var_idx: usize,
         base_sample: &[f64],
         eps: f64,
+        plane: &[projection::BiPoly],
     ) -> AlgebraResult<Vec<f64>> {
         use num_bigint::BigInt;
         use num_rational::BigRational;
@@ -360,7 +419,23 @@ impl CadEngine {
         };
         let mut roots: Vec<f64> = Vec::new();
 
-        if n_vars == 2 && var_idx == 0 {
+        if n_vars == 3 && var_idx == 0 {
+            // x cuts: the projection of the (x, y) polynomials.
+            let projected = projection::project(plane)
+                .map_err(|e| AlgebraError::EvaluationError(format!("CAD projection: {e}")))?;
+            for p in projection::coprime_basis(&projected) {
+                roots.extend(projection::real_roots(&p).iter().filter_map(|r| r.to_f64()));
+            }
+        } else if n_vars == 3 && var_idx == 1 {
+            // y cuts over the x sample: the real roots of the (x, y) polynomials there.
+            let x0 = exact(base_sample.first().copied().unwrap_or(0.0))?;
+            for b in plane {
+                let q = projection::squarefree_part(&b.at_x(&x0));
+                if q.degree().is_some_and(|d| d > 0) {
+                    roots.extend(projection::real_roots(&q).iter().filter_map(|r| r.to_f64()));
+                }
+            }
+        } else if n_vars == 2 && var_idx == 0 {
             // Projection phase: the polynomials as polynomials in y (variable 1) over Q[x].
             let mut bipolys = Vec::new();
             for p in polys {

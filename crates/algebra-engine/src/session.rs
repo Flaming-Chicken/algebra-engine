@@ -55,6 +55,51 @@ impl SymbolSessionMeta {
     }
 }
 
+/// A command hook: `Some(result)` when the line is one of its commands, `None` to pass it on.
+type CommandHook = fn(&mut UraeSession, &str) -> Option<Result<String, String>>;
+
+/// The command hooks tried on every line, in this order, before the general parser: the order is part of the behaviour
+/// (the first hook that recognises the line wins), so a new hook goes where it cannot shadow an older one. A hook returns
+/// `None` quickly for lines that are not its commands.
+const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
+    (
+        "list utilities (sum, cumsum, sort, linspace, ...)",
+        crate::list_utils::run,
+    ),
+    (
+        "binomial equations (solve(x^8 = 1))",
+        crate::binomial_roots::run,
+    ),
+    (
+        "graphs (spanning_trees, chromatic_polynomial, ...)",
+        |_, line| crate::graph_commands::run(line),
+    ),
+    (
+        "propositional logic (truth_table, tautology, ...)",
+        |_, line| crate::logic_commands::run(line),
+    ),
+    (
+        "complex numbers, transforms, units, rewrites (arg, fft, residue, subs, round, ...)",
+        crate::complex_funcs::run,
+    ),
+    (
+        "fixed-step ODE methods (rk4, euler_method, ...)",
+        crate::ode_numeric::run,
+    ),
+    (
+        "stationary points (critical_points, extrema)",
+        crate::stationary::run,
+    ),
+    (
+        "inverse Laplace transforms (inverse_laplace, ilaplace)",
+        crate::inverse_laplace::run,
+    ),
+    (
+        "linear systems of ODEs (dsolve([x' = y, y' = -x]))",
+        crate::ode_system::run,
+    ),
+];
+
 /// Centralized stateful execution engine session for URAE.
 #[derive(Debug)]
 pub struct UraeSession {
@@ -76,6 +121,10 @@ pub struct UraeSession {
     pub user_functions: HashMap<String, (Vec<String>, String)>,
     /// Symbolic variable aliases `name -> rhs_expr_str` (e.g. `p = (x + 1)^2`).
     pub user_aliases: HashMap<String, String>,
+    /// Matrix and vector variables `name -> [[1,2],[3,4]]` (from `A = [[1,2],[3,4]]` or `B = A*A`).
+    pub matrix_vars: HashMap<String, String>,
+    /// Set while an internal evaluation runs: results carry no appended floating-point value.
+    plain_results: bool,
     /// Most recent successfully computed AST node (used for `ans`).
     pub last_result_expr: Option<ExprId>,
     /// Most recent parseable mathematical result string (used for `ans`).
@@ -105,6 +154,8 @@ impl UraeSession {
             symbol_metadata: HashMap::new(),
             user_functions: HashMap::new(),
             user_aliases: HashMap::new(),
+            matrix_vars: HashMap::new(),
+            plain_results: false,
             last_result_expr: None,
             last_result_text: None,
             context: MathContext::default(),
@@ -123,6 +174,7 @@ impl UraeSession {
         self.symbol_metadata.clear();
         self.user_functions.clear();
         self.user_aliases.clear();
+        self.matrix_vars.clear();
         self.last_result_expr = None;
         self.last_result_text = None;
         self.context = MathContext::default();
@@ -301,7 +353,10 @@ impl UraeSession {
 
     /// Evaluate any URAE expression or command and return its Unicode result string.
     pub fn eval(&mut self, input: &str) -> Result<String, String> {
+        // An evaluation made on behalf of a command stays exact: the floating-point tail is for the user's own line.
+        let previous = std::mem::replace(&mut self.plain_results, true);
         let res = self.execute_line(input);
+        self.plain_results = previous;
         if res.is_error {
             Err(res.error_msg.unwrap_or(res.output_text))
         } else {
@@ -371,14 +426,386 @@ impl UraeSession {
         cur
     }
 
+    /// Every defined name with its value, one per line.
+    fn list_variables(&self) -> OperationResult {
+        let mut lines: Vec<(String, String)> = Vec::new();
+        for (name, value) in &self.matrix_vars {
+            lines.push((name.clone(), format!("{name} = {value}")));
+        }
+        for (name, value) in &self.user_aliases {
+            lines.push((name.clone(), format!("{name} = {value}")));
+        }
+        for (name, value) in &self.bindings {
+            if !self.user_aliases.contains_key(name) && !self.matrix_vars.contains_key(name) {
+                lines.push((
+                    name.clone(),
+                    format!("{name} = {}", format_clean_float(*value)),
+                ));
+            }
+        }
+        for (name, (args, body)) in &self.user_functions {
+            lines.push((
+                name.clone(),
+                format!("{name}({}) = {body}", args.join(", ")),
+            ));
+        }
+        let text = if lines.is_empty() {
+            "No variables defined.".to_string()
+        } else {
+            lines.sort();
+            lines.into_iter().map(|(_, l)| l).collect::<Vec<_>>().join(
+                "
+",
+            )
+        };
+        OperationResult::success(text.clone(), text.clone(), text)
+    }
+
+    /// `who`, `reset`, `clear x y`, `delete a`, `show a`: inspect and manage the workspace.
+    fn try_session_command(&mut self, input: &str) -> Option<OperationResult> {
+        let lower = input.to_ascii_lowercase();
+        let done = |text: String| Some(OperationResult::success(text.clone(), text.clone(), text));
+        match lower.as_str() {
+            "who" | "whos" | "variables" | "list variables" | "show variables" | "list vars"
+            | "show vars" | "workspace" => return Some(self.list_variables()),
+            "reset" | "restart" | "clear all" | "clear everything" | "reset all"
+            | "new session" => {
+                self.reset();
+                return done("Workspace reset.".into());
+            }
+            _ => {}
+        }
+        let identifiers = |rest: &str| -> Option<Vec<String>> {
+            let names: Vec<String> = rest
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .collect();
+            let valid = !names.is_empty()
+                && names.iter().all(|n| {
+                    n.chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphabetic() || c == '_')
+                        && n.chars().all(|c| c.is_alphanumeric() || c == '_')
+                });
+            valid.then_some(names)
+        };
+        for verb in ["clear ", "delete ", "del ", "unset ", "forget "] {
+            if lower.starts_with(verb)
+                && let Some(names) = identifiers(&input[verb.len()..])
+            {
+                let (mut removed, mut missing) = (Vec::new(), Vec::new());
+                for name in names {
+                    let mut found = self.bindings.remove(&name).is_some();
+                    found |= self.uncertainties.remove(&name).is_some();
+                    found |= self.intervals.remove(&name).is_some();
+                    found |= self.symbol_metadata.remove(&name).is_some();
+                    found |= self.user_aliases.remove(&name).is_some();
+                    found |= self.matrix_vars.remove(&name).is_some();
+                    found |= self.user_functions.remove(&name).is_some();
+                    if found {
+                        removed.push(name);
+                    } else {
+                        missing.push(name);
+                    }
+                }
+                let mut parts = Vec::new();
+                if !removed.is_empty() {
+                    parts.push(format!("cleared {}", removed.join(", ")));
+                }
+                if !missing.is_empty() {
+                    parts.push(format!("{} not defined", missing.join(", ")));
+                }
+                return done(parts.join("; "));
+            }
+        }
+        for verb in ["show ", "print ", "display "] {
+            if lower.starts_with(verb)
+                && let Some(names) = identifiers(&input[verb.len()..])
+                && let [name] = names.as_slice()
+            {
+                if let Some(v) = self
+                    .matrix_vars
+                    .get(name)
+                    .or_else(|| self.user_aliases.get(name))
+                {
+                    return done(format!("{name} = {v}"));
+                }
+                if let Some((args, body)) = self.user_functions.get(name) {
+                    return done(format!("{name}({}) = {body}", args.join(", ")));
+                }
+                if let Some(v) = self.bindings.get(name) {
+                    return done(format!("{name} = {}", format_clean_float(*v)));
+                }
+            }
+        }
+        None
+    }
+
+    /// `A = [[1,2],[3,4]]`, `v = [1,2]`, `B = A*A`, `C = inverse(A)`: store a matrix variable. `None` when the line is not a
+    /// matrix assignment (and then forgets an older matrix of that name, because the name is being reassigned).
+    fn try_matrix_assignment(&mut self, input: &str) -> Option<OperationResult> {
+        let (lhs, rhs) = input.split_once('=')?;
+        if rhs.starts_with('=') || lhs.ends_with(['<', '>', '!', '=']) {
+            return None;
+        }
+        let lhs = lhs.trim();
+        let valid = lhs
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && lhs != "ans";
+        if !valid {
+            return None;
+        }
+        let rhs = rhs.trim();
+        let expanded = subst_identifiers(rhs, &self.matrix_vars);
+        let literal = crate::executor::is_single_bracket_group(&expanded);
+        if !literal && expanded == rhs && !rhs.contains('[') {
+            self.matrix_vars.remove(lhs);
+            return None;
+        }
+        let evaluated = crate::matexpr::evaluate(&self.graph, &expanded);
+        let shown = match evaluated {
+            Some(Ok(text)) if text.trim_start().starts_with('[') => text,
+            Some(Err(e)) => return Some(OperationResult::error(e)),
+            _ if literal => expanded.clone(),
+            _ => {
+                self.matrix_vars.remove(lhs);
+                return None;
+            }
+        };
+        // The display form `[ a, b ; c, d ]` back to nested lists `[[a,b],[c,d]]`.
+        let compact: String = shown.split_whitespace().collect();
+        let stored = if shown.contains(';') {
+            let inner = shown
+                .trim()
+                .strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .unwrap_or(&shown);
+            let rows: Vec<String> = inner
+                .split(';')
+                .map(|row| format!("[{}]", split_top_commas(row).join(",")))
+                .collect();
+            format!("[{}]", rows.join(","))
+        } else if compact.starts_with("[[") {
+            compact
+        } else {
+            let inner = shown
+                .trim()
+                .strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .unwrap_or(&shown);
+            format!("[{}]", split_top_commas(inner).join(","))
+        };
+        self.matrix_vars.insert(lhs.to_string(), stored);
+        self.bindings.remove(lhs);
+        self.user_aliases.remove(lhs);
+        let out = format!("{lhs} = {shown}");
+        Some(OperationResult::success(out.clone(), out.clone(), out))
+    }
+
     /// Parse and execute a single line of input against this session, updating state.
     pub fn execute_line(&mut self, input: &str) -> OperationResult {
+        let mut result = self.execute_line_inner(input);
+        // `2 x`, `a x^2 + b x + c`: a parse failure is retried with a space between two factors read as a product.
+        if result.is_error
+            && result
+                .error_msg
+                .as_deref()
+                .is_some_and(|m| m.contains("Parse failed"))
+            && let Some(starred) = implicit_product_spaces(input.trim())
+        {
+            let retry = self.execute_line_inner(&starred);
+            if !retry.is_error {
+                result = retry;
+            }
+        }
+        if !result.is_error && !self.plain_results {
+            self.append_float_for_decimal_input(input.trim(), &mut result);
+        }
+        result
+    }
+
+    /// A constant typed with a decimal literal (`sin(0.5)`, `ln(2.0)`, `normal_cdf(1.96)`) asks for a floating-point
+    /// answer: when the exact answer is not already a plain number, append its value (`sin(1/2) ≈ 0.4794...`).
+    fn append_float_for_decimal_input(&self, input: &str, result: &mut OperationResult) {
+        let bytes = input.as_bytes();
+        let has_decimal = bytes
+            .windows(3)
+            .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2].is_ascii_digit());
+        if !has_decimal || input.contains('=') || input.contains('[') || input.contains('{') {
+            return;
+        }
+        let shown = result.output_unicode.trim();
+        let plain_number = !shown.is_empty()
+            && shown
+                .chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | '/' | '-' | ' ' | 'e' | '+'));
+        // A rational with a long denominator (`16679880978201/10240000000`) is unreadable: it gets the value too.
+        let long_fraction = plain_number
+            && shown
+                .split_once('/')
+                .is_some_and(|(_, denominator)| denominator.trim().len() >= 5);
+        if (plain_number && !long_fraction) || shown.contains('≈') {
+            return;
+        }
+        if long_fraction && let Some((numerator, denominator)) = shown.split_once('/') {
+            use num_traits::ToPrimitive as _;
+            if let (Ok(n), Ok(d)) = (
+                numerator.trim().parse::<num_bigint::BigInt>(),
+                denominator.trim().parse::<num_bigint::BigInt>(),
+            ) && d != num_bigint::BigInt::from(0)
+                && let Some(value) = num_rational::BigRational::new(n, d).to_f64()
+                && value.is_finite()
+            {
+                let tail = format!(" ≈ {value}");
+                result.output_text.push_str(&tail);
+                result.output_unicode.push_str(&tail);
+                result.output_latex.push_str(&format!(r" pprox {value}"));
+                return;
+            }
+        }
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        // `sin(10.5°)` does not parse as typed: use the rewritten form the engine actually evaluated.
+        let rewritten = crate::input_text::normalise(input).unwrap_or_else(|| input.to_string());
+        // The printed result is a constant expression more often than the input is one (`subs(f, t, 0.3)`, `normal_cdf(1.96)`).
+        let Ok(id) = parser.parse(shown).or_else(|_| parser.parse(&rewritten)) else {
+            return;
+        };
+        let mut symbols = std::collections::BTreeSet::new();
+        crate::poly::collect_expr_symbols(&self.graph, id, &mut symbols);
+        if symbols
+            .iter()
+            .filter_map(|s| self.graph.symbols.resolve(*s))
+            .any(|n| !matches!(n.as_str(), "pi" | "π" | "e" | "i"))
+        {
+            return;
+        }
+        let Ok(value) = self.graph.evalf(id, &EvalContext::default()) else {
+            return;
+        };
+        let (re, im) = value.as_complex();
+        if !re.is_finite() || im.abs() > 1e-12 * (1.0 + re.abs()) {
+            return;
+        }
+        let tail = format!(" ≈ {re}");
+        result.output_text.push_str(&tail);
+        result.output_unicode.push_str(&tail);
+        result.output_latex.push_str(&format!(r" \approx {re}"));
+    }
+
+    fn execute_line_inner(&mut self, input: &str) -> OperationResult {
         let trimmed = input.trim();
         if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') {
             return OperationResult::success("", "", "");
         }
 
         self.history.push(trimmed.to_string());
+
+        // `%` is the previous result (`% + 1`) when it stands where an operand should; `17 % 5` stays a remainder.
+        if trimmed == "%" {
+            return self.execute_line_inner("ans");
+        }
+        if let Some(rest) = trimmed.strip_prefix('%')
+            && rest.trim_start().starts_with(['+', '-', '*', '/', '^'])
+        {
+            return self.execute_line_inner(&format!("ans{rest}"));
+        }
+        // Variable management: `who`, `clear x`, `delete a`, `show a`, `reset`.
+        if let Some(result) = self.try_session_command(trimmed) {
+            return result;
+        }
+
+        // Command hooks on the raw line, in the order of `COMMAND_HOOKS`: the first that recognises the line answers it.
+        for (_, hook) in COMMAND_HOOKS {
+            if let Some(outcome) = hook(self, trimmed) {
+                return match outcome {
+                    Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                    Err(e) => OperationResult::error(e),
+                };
+            }
+        }
+
+        // `maximize 3x + 2y subject to x + y <= 4, ...`: exact linear programming.
+        if let Some(outcome) = crate::simplex_exact::solve_text(&self.graph, trimmed) {
+            // Not a linear program (a nonlinear objective or constraint): try Lagrange multipliers.
+            let nonlinear = matches!(&outcome, Err(e) if e.contains("linear"));
+            if nonlinear && let Some(lagrange) = crate::constrained::run(self, trimmed) {
+                return match lagrange {
+                    Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                    Err(e) => OperationResult::error(e),
+                };
+            }
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
+        // LaTeX (an integral written with a backslash int, a backslash frac derivative) and plain English (`what is 2 plus 3`) are rewritten first.
+        if let Some(plain) = crate::input_text::normalise(trimmed)
+            && plain != trimmed
+        {
+            return self.execute_line(&plain);
+        }
+
+        // Commands inside the arguments of another command (`factor(expand((x+1)^3 - 1))`,
+        // `integrate(simplify(...), x)`) are evaluated first and replaced by their results.
+        // Element assignment `A[1,2] = 7`, `v[2] = 99` on a stored matrix or vector.
+        if let Some(outcome) = crate::indexing::assign(self, trimmed) {
+            return match outcome {
+                Ok((name, stored, shown)) => {
+                    self.matrix_vars.insert(name.clone(), stored);
+                    let out = format!("{name} = {shown}");
+                    OperationResult::success(out.clone(), out.clone(), out)
+                }
+                Err(e) => OperationResult::error(e),
+            };
+        }
+        // Matrix variables: `A = [[1,2],[3,4]]`, `B = A*A`; later `A^-1`, `det(A)`, `A*v` see the stored matrix.
+        if let Some(result) = self.try_matrix_assignment(trimmed) {
+            return result;
+        }
+        let matrix_expanded = if self.matrix_vars.is_empty() {
+            None
+        } else {
+            let expanded = subst_identifiers(trimmed, &self.matrix_vars);
+            (expanded != trimmed).then_some(expanded)
+        };
+        let trimmed = matrix_expanded.as_deref().unwrap_or(trimmed);
+        // `A[1,2]`, `v[3]`, `A[:,2]`, `row(A, 1)`, `size(A)`, `diag(A)`: indexing and shape queries on matrices.
+        if let Some(outcome) = crate::indexing::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
+        let resolved = self.resolve_nested_commands(trimmed);
+        let trimmed = resolved.as_deref().unwrap_or(trimmed);
+
+        // Matrix arithmetic typed as plain input (`A + B`, `2*A`, `A * v`, `det(inverse(A))`, `identity(3)`).
+        if (trimmed.contains('[')
+            || crate::matexpr::is_geometry_call(trimmed)
+            || ["identity(", "eye(", "zeros(", "ones("]
+                .iter()
+                .any(|f| trimmed.starts_with(f)))
+            && let Some(outcome) = crate::matexpr::evaluate(&self.graph, trimmed)
+        {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
+        // A finite set expression (`2 in {1, 2}`, `{1,2} union {3}`) before the `x in Domain` declaration syntax.
+        if trimmed.contains('{')
+            && let Some(text) = crate::set_expr::evaluate(trimmed)
+        {
+            return OperationResult::success(text.clone(), text.clone(), text);
+        }
 
         // Check for domain declaration e.g. `a in Reals [0, 100]`
         if let Some(bound) = parse_domain_declaration(trimmed) {
@@ -478,7 +905,8 @@ impl UraeSession {
                     let has_unc_nodes =
                         crate::numeric::expr_has_uncertainty_nodes(&self.graph, rhs_id);
                     let all_bound = syms.iter().all(|s| {
-                        self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
+                        self.bindings.contains_key(s)
+                            || matches!(s.as_str(), "pi" | "π" | "e" | "i" | "I")
                     }) && !syms.iter().any(|s| s == lhs);
 
                     if all_bound && (has_unc_syms || has_unc_nodes) {
@@ -563,17 +991,50 @@ impl UraeSession {
             }
         }
 
+        // `dsolve(y' = 2*y, y(0) = 1)`: a general solution with initial conditions.
+        if let Some(result) = self.try_rsolve(trimmed) {
+            return result;
+        }
+        if let Some(result) = self.try_dsolve_with_conditions(trimmed) {
+            return result;
+        }
+
         // Expand user functions, symbolic aliases, and `ans` before parsing/evaluation
         let expanded_input = self.expand_definitions(trimmed);
         let parsed_op = parse_operation(&expanded_input);
 
         // Evaluate pure expressions (constants, exact rationals, or all-bound expressions/uncertainties)
-        if matches!(parsed_op, MathOperation::Expression { .. }) {
+        // A bare matrix literal is displayed by the executor as a grid, not simplified as a scalar expression.
+        let bare_matrix = crate::executor::is_single_bracket_group(&expanded_input);
+        // A finite set expression typed as plain input (`{1,2,3} union {3,4}`, `2 in {1,2}`).
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && let Some(text) = crate::set_expr::evaluate(&expanded_input)
+        {
+            return OperationResult::success(text.clone(), text.clone(), text);
+        }
+        // A propositional formula typed as plain input (`a and not a`, `p implies q`): classify it.
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && algebra_core::parser::ExprParser::new(&self.graph)
+                .parse(&expanded_input)
+                .is_err()
+            && let Some(result) = Self::classify_formula(&expanded_input)
+        {
+            return result;
+        }
+        if matches!(parsed_op, MathOperation::Expression { .. }) && !bare_matrix {
             let parser = algebra_core::parser::ExprParser::new(&self.graph);
             if let Ok(expr_id) = parser.parse(&expanded_input) {
+                // `0/0`, `1/0`, `oo - oo`, `0 * oo`: undefined, whatever the simplifier's rules would say.
+                if crate::indeterminate::is_undefined(&self.graph, expr_id) {
+                    let text = "Undefined (division by zero or an indeterminate form)".to_string();
+                    return OperationResult::success(text.clone(), text.clone(), text);
+                }
                 let syms = self.extract_symbols(expr_id);
                 let all_bound = syms.iter().all(|s| {
-                    self.bindings.contains_key(s) || matches!(s.as_str(), "pi" | "π" | "e")
+                    self.bindings.contains_key(s)
+                        || matches!(s.as_str(), "pi" | "π" | "e" | "i" | "I")
                 });
                 let has_user_bound = syms.iter().any(|s| self.bindings.contains_key(s));
                 let has_unc_syms = syms.iter().any(|s| {
@@ -595,7 +1056,30 @@ impl UraeSession {
                         let latex = u.format_latex();
                         return OperationResult::success(out.clone(), latex, out);
                     }
-                } else if (has_user_bound && all_bound) || syms.is_empty() {
+                } else if all_bound || syms.is_empty() {
+                    if !has_user_bound
+                        && crate::radical::has_radicals(&self.graph, expr_id)
+                        && let Some(r) = crate::radical::evaluate(&self.graph, expr_id)
+                    {
+                        let text = r.format();
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
+                    // A distribution function of numbers (`chi2_cdf(3.2, 4)`, `t_quantile(0.975, 10)`): its value.
+                    if let algebra_core::ExprKind::Function { name, .. } =
+                        self.graph.get(expr_id).kind.clone()
+                        && let Some(fname) = self.graph.symbols.resolve(name)
+                        && crate::distributions_f64::is_distribution_function(&fname)
+                        && let Ok(value) = self.graph.evalf(expr_id, &EvalContext::default())
+                    {
+                        let text = format_clean_float(value.to_f64());
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
+                    if let Some(text) = crate::complex_exact::simplify_text(&self.graph, expr_id) {
+                        self.last_result_text = Some(text.clone());
+                        return OperationResult::success(text.clone(), text.clone(), text);
+                    }
                     let exec_ctx = self.execution_context();
                     let simp_id = crate::simplify::Simplifier::simplify_with_assumptions(
                         &self.graph,
@@ -652,7 +1136,344 @@ impl UraeSession {
             }
         }
 
+        // A plain expression with symbols (`x^2*x^3`, `x^5/x^2`, `sqrt(x)*sqrt(x)`): show the simplified form when it
+        // is strictly shorter than the expression as typed, so that obvious reductions are not left undone.
+        if matches!(parsed_op, MathOperation::Expression { .. })
+            && !bare_matrix
+            && let Some(result) = self.shorter_form(&expanded_input)
+        {
+            return result;
+        }
         self.execute_op(&parsed_op)
+    }
+
+    /// Replace each inner `expand(...)`, `simplify(...)`, `factor(...)`, ... call that sits inside another call by its
+    /// result (as parseable text). `None` if there is nothing to replace.
+    fn resolve_nested_commands(&mut self, input: &str) -> Option<String> {
+        const INNER: [&str; 12] = [
+            "expand",
+            "simplify",
+            "cancel",
+            "together",
+            "factor",
+            "diff",
+            "apart",
+            "trigsimp",
+            "expand_trig",
+            "collect",
+            "sum",
+            "product",
+        ];
+        let chars: Vec<char> = input.chars().collect();
+        let mut replaced = false;
+        let mut result = String::new();
+        let mut i = 0;
+        let mut depth = 0i32;
+        while i < chars.len() {
+            let c = chars[i];
+            if matches!(c, '(' | '[' | '{') {
+                depth += 1;
+            } else if matches!(c, ')' | ']' | '}') {
+                depth -= 1;
+            }
+            // A call inside another call, or one that is only part of an arithmetic expression (`sum(...) + 1`).
+            let in_arithmetic = i > 0
+                || chars
+                    .iter()
+                    .any(|&ch| matches!(ch, '+' | '-' | '*' | '/' | '^'));
+            if (depth >= 1 || in_arithmetic)
+                && (c.is_ascii_alphabetic() || c == '_')
+                && (i == 0 || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_'))
+            {
+                let start = i;
+                let mut j = i;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                let name: String = chars[start..j].iter().collect();
+                if j < chars.len() && chars[j] == '(' && INNER.contains(&name.as_str()) {
+                    // The matching bracket.
+                    let mut k = j;
+                    let mut d = 0i32;
+                    while k < chars.len() {
+                        match chars[k] {
+                            '(' => d += 1,
+                            ')' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        k += 1;
+                    }
+                    // The whole input is one call: it is the command itself, not a nested one.
+                    if k < chars.len() && !(start == 0 && k + 1 == chars.len()) {
+                        let inner: String = chars[start..=k].iter().collect();
+                        let outcome = self.execute_line(&inner);
+                        if !outcome.is_error
+                            && !outcome.output_text.contains("w.r.t")
+                            && !outcome.output_text.is_empty()
+                            && outcome.output_text != inner
+                        {
+                            let text = outcome
+                                .output_text
+                                .replace('·', "*")
+                                .replace('√', "sqrt")
+                                .replace('π', "pi");
+                            result.push_str(&format!("({text})"));
+                            replaced = true;
+                            i = k + 1;
+                            // The brackets of the replaced call were counted by the scan above only up to `(`.
+                            continue;
+                        }
+                    }
+                }
+            }
+            result.push(c);
+            i += 1;
+        }
+        replaced.then_some(result)
+    }
+
+    /// `a and not a` is a contradiction, `a or not a` a tautology; otherwise a satisfying assignment.
+    fn classify_formula(input: &str) -> Option<OperationResult> {
+        use crate::logic::{BoolExpr, SatSolver};
+        let lowered = format!(" {} ", input.to_ascii_lowercase());
+        let keywords = [
+            " and ",
+            " or ",
+            " not ",
+            " xor ",
+            " implies ",
+            " iff ",
+            "->",
+            "=>",
+            "<->",
+            "<=>",
+            "&",
+            "|",
+            "~",
+            "!",
+            "¬",
+            "∧",
+            "∨",
+        ];
+        if !keywords.iter().any(|k| lowered.contains(k)) {
+            return None;
+        }
+        let (expr, vars) = SatSolver::parse_formula(input).ok()?;
+        if vars
+            .iter()
+            .any(|(_, n)| !n.chars().next().is_some_and(|c| c.is_alphabetic()))
+        {
+            return None;
+        }
+        let describe = |model: &std::collections::HashMap<u32, bool>| -> String {
+            vars.iter()
+                .map(|(id, name)| format!("{name}={}", model.get(id).copied().unwrap_or(false)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let satisfying = SatSolver::solve_model(&expr);
+        let refuting = SatSolver::solve_model(&BoolExpr::Not(Box::new(expr)));
+        let text = match (satisfying, refuting) {
+            (None, _) => format!(
+                "{}: contradiction (false for every assignment)",
+                input.trim()
+            ),
+            (Some(_), None) => format!("{}: tautology (true for every assignment)", input.trim()),
+            (Some(yes), Some(no)) => format!(
+                "{}: contingent; true for {}, false for {}",
+                input.trim(),
+                describe(&yes.into_iter().collect()),
+                describe(&no.into_iter().collect())
+            ),
+        };
+        Some(OperationResult::success(text.clone(), text.clone(), text))
+    }
+
+    /// The simplified form of `input` if it is shorter than the formatted input; `None` otherwise.
+    fn shorter_form(&mut self, input: &str) -> Option<OperationResult> {
+        use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        let expr_id = parser.parse(input).ok()?;
+        // Relations are not simplified here.
+        if matches!(
+            self.graph.get(expr_id).kind,
+            algebra_core::ExprKind::Relational { .. }
+        ) {
+            return None;
+        }
+        let exec_ctx = self.execution_context();
+        let simplified = crate::simplify::Simplifier::simplify_with_assumptions(
+            &self.graph,
+            expr_id,
+            &exec_ctx.assumptions,
+        )
+        .ok()?;
+        let original = UnicodeFormatter.format(&self.graph, expr_id).ok()?;
+        let reduced = UnicodeFormatter.format(&self.graph, simplified).ok()?;
+        if reduced.chars().count() > original.chars().count() {
+            return None;
+        }
+        let latex = LatexFormatter
+            .format(&self.graph, simplified)
+            .unwrap_or_default();
+        self.last_result_expr = Some(simplified);
+        self.last_result_text = Some(reduced.clone());
+        let mut res = OperationResult::success(reduced.clone(), latex, reduced);
+        res.root_expr = Some(simplified);
+        Some(res)
+    }
+
+    /// `rsolve a(n+2) = a(n+1) + a(n), a(0) = 0, a(1) = 1`: the closed form of a linear recurrence.
+    fn try_rsolve(&mut self, input: &str) -> Option<OperationResult> {
+        let body = [
+            "rsolve",
+            "solve_recurrence",
+            "recurrence",
+            "recurrence_solve",
+        ]
+        .iter()
+        .find_map(|name| {
+            input
+                .strip_prefix(&format!("{name}("))
+                .and_then(|b| b.strip_suffix(')'))
+                .or_else(|| input.strip_prefix(&format!("{name} ")))
+        })?;
+        let mut parts = Vec::new();
+        let (mut depth, mut current) = (0i32, String::new());
+        for c in body.chars() {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+            if c == ',' && depth == 0 {
+                parts.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        parts.push(current);
+        let parser = algebra_core::parser::ExprParser::new(&self.graph);
+        let mut initial = Vec::new();
+        let mut equation = None;
+        for part in &parts {
+            match crate::ode_ic::parse_condition(part) {
+                // `a(0) = 1` is an initial value; `a(n+2) = ...` (a non-numeric index) is the recurrence itself.
+                Some(condition)
+                    if condition.order == 0
+                        && condition
+                            .point
+                            .trim()
+                            .trim_start_matches('-')
+                            .chars()
+                            .all(|c| c.is_ascii_digit())
+                        && !condition.point.trim().is_empty() =>
+                {
+                    let index = condition.point.trim().parse::<i64>().ok().or_else(|| {
+                        parser
+                            .parse(&condition.point)
+                            .ok()
+                            .and_then(|id| {
+                                crate::numeric::try_eval_exact(
+                                    &self.graph,
+                                    id,
+                                    &std::collections::HashMap::new(),
+                                )
+                                .ok()
+                                .flatten()
+                            })
+                            .filter(|q| q.is_integer())
+                            .and_then(|q| num_traits::ToPrimitive::to_i64(&q.to_integer()))
+                    });
+                    match index {
+                        Some(i) => initial.push((i, condition.value)),
+                        None => {
+                            return Some(OperationResult::error(
+                                "the index of an initial value must be an integer",
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    if equation.is_none() {
+                        equation = Some(part.trim().to_string());
+                    }
+                }
+            }
+        }
+        let equation = equation?;
+        Some(
+            match crate::recurrence::solve(&self.graph, &equation, &initial) {
+                Ok((name, text)) => {
+                    let out = format!("{name}(n) = {text}");
+                    OperationResult::success(out.clone(), out.clone(), out)
+                }
+                Err(e) => OperationResult::error(e),
+            },
+        )
+    }
+
+    /// `dsolve <equation>, y(x0) = v, y'(x0) = w, ...`: solve, then fix the constants from the conditions.
+    fn try_dsolve_with_conditions(&mut self, input: &str) -> Option<OperationResult> {
+        let body = input
+            .strip_prefix("dsolve(")
+            .and_then(|b| b.strip_suffix(')'))
+            .or_else(|| input.strip_prefix("dsolve "))?;
+        let mut parts = Vec::new();
+        let (mut depth, mut current) = (0i32, String::new());
+        for c in body.chars() {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => depth -= 1,
+                _ => {}
+            }
+            if c == ',' && depth == 0 {
+                parts.push(std::mem::take(&mut current));
+            } else {
+                current.push(c);
+            }
+        }
+        parts.push(current);
+        let conditions: Vec<crate::ode_ic::Condition> = parts
+            .iter()
+            .filter_map(|p| crate::ode_ic::parse_condition(p))
+            .collect();
+        if conditions.is_empty() {
+            return None;
+        }
+        let equation = parts
+            .iter()
+            .find(|p| crate::ode_ic::parse_condition(p).is_none())?
+            .trim()
+            .to_string();
+        let general = self.execute_line(&format!("dsolve {equation}"));
+        if general.is_error {
+            return Some(general);
+        }
+        let Some(rhs) = general.root_expr else {
+            return Some(general);
+        };
+        Some(match crate::ode_ic::apply(&self.graph, rhs, &conditions) {
+            Ok(solution) => {
+                use algebra_core::format::{Formatter, LatexFormatter, UnicodeFormatter};
+                let unicode = UnicodeFormatter
+                    .format(&self.graph, solution)
+                    .unwrap_or_default();
+                let latex = LatexFormatter
+                    .format(&self.graph, solution)
+                    .unwrap_or_default();
+                let out = format!("{}(x) = {unicode}", conditions[0].name);
+                let mut res = OperationResult::success(out.clone(), latex, out);
+                res.root_expr = Some(solution);
+                res
+            }
+            Err(e) => OperationResult::error(e),
+        })
     }
 
     /// Execute a parsed `MathOperation` against this session.
@@ -917,4 +1738,148 @@ fn expand_fn_calls(input: &str, fn_name: &str, params: &[String], body: &str) ->
 
     result.push_str(&input[cursor..]);
     result
+}
+
+/// `input` with a `*` in place of each space that separates two factors (`a x^2 + b x` is `a*x^2 + b*x`), or `None`
+/// when there is no such space. English connecting words are never treated as factors.
+fn implicit_product_spaces(input: &str) -> Option<String> {
+    const WORDS: [&str; 22] = [
+        "to",
+        "in",
+        "as",
+        "of",
+        "and",
+        "or",
+        "mod",
+        "union",
+        "intersect",
+        "intersection",
+        "minus",
+        "subject",
+        "such",
+        "that",
+        "where",
+        "if",
+        "for",
+        "with",
+        "at",
+        "by",
+        "from",
+        "is",
+    ];
+    // A bare function name (`sin x cos x`) would be read as a symbol: leave such input alone.
+    const FUNCTIONS: [&str; 24] = [
+        "sin",
+        "cos",
+        "tan",
+        "sec",
+        "csc",
+        "cot",
+        "asin",
+        "acos",
+        "atan",
+        "sinh",
+        "cosh",
+        "tanh",
+        "ln",
+        "log",
+        "exp",
+        "sqrt",
+        "abs",
+        "floor",
+        "ceil",
+        "gamma",
+        "erf",
+        "det",
+        "inverse",
+        "transpose",
+    ];
+    let chars: Vec<char> = input.chars().collect();
+    let mut k = 0;
+    while k < chars.len() {
+        if chars[k].is_alphabetic() {
+            let end = chars[k..]
+                .iter()
+                .position(|c| !c.is_alphabetic())
+                .map_or(chars.len(), |p| k + p);
+            let word: String = chars[k..end].iter().collect();
+            let next = chars[end..].iter().find(|c| **c != ' ');
+            if FUNCTIONS.contains(&word.as_str()) && next != Some(&'(') {
+                return None;
+            }
+            // A multi-letter word that is not a call (`5 xor 3`) is not a product of single-letter symbols.
+            if word.chars().count() >= 2
+                && next != Some(&'(')
+                && !matches!(word.as_str(), "pi" | "oo" | "inf")
+            {
+                return None;
+            }
+            k = end;
+        } else {
+            k += 1;
+        }
+    }
+    let word_before = |end: usize| -> String {
+        let start = chars[..end]
+            .iter()
+            .rposition(|c| !c.is_alphabetic())
+            .map_or(0, |p| p + 1);
+        chars[start..end].iter().collect()
+    };
+    let word_after = |start: usize| -> String {
+        chars[start..]
+            .iter()
+            .take_while(|c| c.is_alphabetic())
+            .collect()
+    };
+    let (mut out, mut i, mut changed) = (String::new(), 0usize, false);
+    while i < chars.len() {
+        if chars[i] == ' ' {
+            let mut j = i;
+            while j < chars.len() && chars[j] == ' ' {
+                j += 1;
+            }
+            if i > 0 && j < chars.len() {
+                let (p, n) = (chars[i - 1], chars[j]);
+                let left = p.is_alphanumeric() || p == ')';
+                let right = n.is_alphanumeric() || n == '(';
+                if left
+                    && right
+                    && !(p.is_ascii_digit() && n.is_ascii_digit())
+                    && !WORDS.contains(&word_before(i).to_ascii_lowercase().as_str())
+                    && !WORDS.contains(&word_after(j).to_ascii_lowercase().as_str())
+                {
+                    out.push('*');
+                    changed = true;
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    changed.then_some(out)
+}
+
+/// Split `a, b(c, d), e` at the commas outside brackets, trimmed.
+fn split_top_commas(text: &str) -> Vec<String> {
+    let (mut depth, mut cur, mut out) = (0i32, String::new(), Vec::new());
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth == 0 {
+            out.push(cur.trim().to_string());
+            cur.clear();
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
 }

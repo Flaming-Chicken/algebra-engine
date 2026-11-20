@@ -164,6 +164,45 @@ pub fn normalize_latex_input(input: &str) -> String {
     s
 }
 
+/// The deepest bracket nesting the recursive-descent parser accepts. Each level costs several stack frames, so an
+/// unbounded depth is a stack overflow (which aborts the process); 64 is far beyond what is written by hand.
+pub const MAX_NESTING_DEPTH: usize = 64;
+
+/// An estimate of the recursion depth the text will need: the maximum bracket nesting (`(`, `[`, `{`) plus the
+/// longest run of prefix signs plus the longest chain of right-associative `^` operators.
+fn bracket_depth(text: &str) -> usize {
+    let (mut depth, mut max) = (0usize, 0usize);
+    let (mut signs, mut max_signs) = (0usize, 0usize);
+    let (mut carets, mut max_carets) = (0usize, 0usize);
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if c == '-' || c == '+' {
+            signs += 1;
+            max_signs = max_signs.max(signs);
+        } else if !c.is_whitespace() {
+            signs = 0;
+        }
+        match c {
+            '^' => {
+                carets += 1;
+                max_carets = max_carets.max(carets);
+            }
+            '+' | '-' | '*' | '/' | '=' | '<' | '>' | ',' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                carets = 0
+            }
+            _ => {}
+        }
+    }
+    max + max_signs + max_carets
+}
+
 /// Parser converting mathematical expression and LaTeX strings into [`ExprGraph`] nodes.
 pub struct ExprParser<'a> {
     graph: &'a ExprGraph,
@@ -177,6 +216,12 @@ impl<'a> ExprParser<'a> {
     /// Parse input text or LaTeX string into an [`ExprId`] in the expression graph.
     pub fn parse(&self, input: &str) -> ParseResult<ExprId> {
         let normalized = normalize_latex_input(input);
+        let depth = bracket_depth(&normalized);
+        if depth > MAX_NESTING_DEPTH {
+            return Err(ParseError::InvalidSyntax(format!(
+                "the input is nested {depth} brackets deep; the limit is {MAX_NESTING_DEPTH}"
+            )));
+        }
         let (rem, expr) = self.parse_relation(normalized.trim()).map_err(|e| {
             ParseError::InvalidSyntax(format!("Failed to parse input '{input}': {e}"))
         })?;
@@ -328,7 +373,10 @@ impl<'a> ExprParser<'a> {
         let (mut input, mut base) = self.parse_primary(input)?;
         loop {
             let after_ws = input.trim_start();
-            if after_ws.starts_with('!') && !after_ws.starts_with("!=") {
+            if let Some(rest) = after_ws.strip_prefix("!!") {
+                base = self.graph.function("double_factorial", [base]);
+                input = rest;
+            } else if after_ws.starts_with('!') && !after_ws.starts_with("!=") {
                 base = self.graph.function("factorial", [base]);
                 input = &after_ws[1..];
             } else {
@@ -1174,6 +1222,16 @@ pub fn parse_permissive_intent(input: &str) -> Option<PermissiveIntent> {
                 upper = Some(u.trim().to_string());
             }
             clean_body = clean_body[..idx].trim().to_string();
+        } else if !clean_body.starts_with("sum")
+            && !clean_body.starts_with("suma")
+            && let Some((body, bounds)) = clean_body.split_once(" from ")
+            && let Some((l, u)) = bounds.split_once(" to ")
+        {
+            // `integrate f(x) from a to b`: definite integral. (Dropping the bounds, as this branch once did,
+            // returned the antiderivative as if it were the answer.)
+            lower = Some(l.trim().to_string());
+            upper = Some(u.trim().to_string());
+            clean_body = body.trim().to_string();
         } else if clean_body.contains("_{")
             && clean_body.contains("}^{")
             && let Some(lower_start) = clean_body.find("_{")
@@ -1552,7 +1610,278 @@ pub fn parse_domain_declaration(line: &str) -> Option<DomainBound> {
 }
 
 /// Parse raw text string into a strongly-typed `MathOperation`.
+/// Rewrite the call spellings people reach for first (`series(f, x, 0, 5)`, `isprime(97)`, `factorint(360)`,
+/// `inverse(M)`, `limit(f, x, 0)`, `17 mod 5`) into the command forms the parser knows. Without this they were
+/// parsed as an expression and echoed back unevaluated, which looks like an answer but is not one.
+/// The canonical name of an integer function, if `name` is one of its spellings.
+fn arithmetic_function_name(name: &str) -> Option<&'static str> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "totient" | "euler_phi" | "eulerphi" | "phi" => "totient",
+        "nextprime" | "next_prime" => "next_prime",
+        "prevprime" | "prev_prime" | "previousprime" => "prev_prime",
+        "divisors" => "divisors",
+        "sigma" | "divisor_sum" => "sigma",
+        "tau" | "num_divisors" | "divisor_count" => "tau",
+        "mobius" | "moebius" => "mobius",
+        "modinv" | "mod_inverse" | "invmod" => "mod_inverse",
+        "powmod" | "pow_mod" | "modpow" => "pow_mod",
+        "primitive_root" | "primitiveroot" => "primitive_root",
+        _ => return None,
+    })
+}
+
+/// The canonical name of a numerical or statistical command, if `name` is one of its spellings.
+fn numeric_command_name(name: &str) -> Option<&'static str> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "nsolve" | "findroot" | "find_root" | "newton_method" | "newton" | "secant"
+        | "bisection" | "bisect" | "regula_falsi" => "nsolve",
+        "simpson" | "simpsons" | "simpson_rule" => "simpson",
+        "trapezoid" | "trapezoidal" | "trapezium" | "trapezoid_rule" => "trapezoid",
+        "midpoint" | "midpoint_rule" => "midpoint",
+        "nintegrate" | "nint" | "numeric_integrate" => "nintegrate",
+        "minimize" | "argmin" => "minimize",
+        "maximize" | "argmax" => "maximize",
+        "interpolate" | "lagrange" | "interp" => "interpolate",
+        "fit" | "polyfit" | "linfit" | "linear_regression" | "linreg" | "regression" => "fit",
+        "mean" | "average" => "mean",
+        "median" => "median",
+        "variance" => "variance",
+        "pvariance" => "pvariance",
+        "stddev" => "stddev",
+        "pstddev" => "pstddev",
+        "product" | "prod" => "product",
+        "next_term" | "nth_term" | "find_pattern" | "sequence_rule" | "guess_sequence" => {
+            "next_term"
+        }
+        "percentile" => "percentile",
+        "quantile" => "quantile",
+        "quartiles" => "quartiles",
+        "iqr" => "iqr",
+        "skewness" => "skewness",
+        "kurtosis" => "kurtosis",
+        "zscore" => "zscore",
+        "dec2bin" | "bin" | "to_binary" | "binary" | "tobinary" => "dec2bin",
+        "bin2dec" | "from_binary" | "frombinary" => "bin2dec",
+        "dec2hex" | "hex" | "to_hex" | "tohex" | "hexadecimal" => "dec2hex",
+        "hex2dec" | "from_hex" | "fromhex" => "hex2dec",
+        "dec2oct" | "oct" | "to_octal" | "tooctal" | "octal" => "dec2oct",
+        "oct2dec" | "from_octal" | "fromoctal" => "oct2dec",
+        "subsets" | "powerset" | "power_set" => "subsets",
+        "permutations_list" | "all_permutations" => "permutations_list",
+        "cycle_type" => "cycle_type",
+        "next_permutation" => "next_permutation",
+        "pell" => "pell",
+        "diophantine" => "diophantine",
+        "mode" => "mode",
+        "range" => "range",
+        "covariance" | "cov" => "covariance",
+        "correlation" | "corr" => "correlation",
+        "gradient" | "grad" => "gradient",
+        "hessian" => "hessian",
+        "jacobian" => "jacobian",
+        "divergence" => "divergence",
+        "curl" => "curl",
+        "laplacian" => "laplacian",
+        "cross" | "cross_product" => "cross",
+        "dot" | "dot_product" => "dot",
+        "norm" => "norm",
+        "trigsimp" | "trig_simplify" => "trigsimp",
+        "expand_trig" | "trigexpand" => "expand_trig",
+        "matpow" | "matrix_power" | "mpow" => "matpow",
+        "lu" | "lu_decomposition" => "lu",
+        "ztransform" | "z_transform" | "ztrans" => "ztransform",
+        "divmod" => "divmod",
+        "floordiv" => "floordiv",
+        "digits" => "digits",
+        "egcd" | "xgcd" => "egcd",
+        "crt" | "chinese_remainder" => "crt",
+        "continued_fraction" | "cfrac" | "contfrac" => "continued_fraction",
+        "convergents" => "convergents",
+        "primes" | "primes_up_to" | "prime_list" | "list_primes" => "primes",
+        "is_square" | "issquare" | "is_perfect_square" => "is_square",
+        "expected_value" | "expectation" => "expected_value",
+        "variance_discrete" | "discrete_variance" => "variance_discrete",
+        _ => return None,
+    })
+}
+
+fn normalize_call_syntax(input: &str) -> Option<String> {
+    let input = input.trim();
+    // `mean [1, 2, 3]`, `nsolve cos(x) - x, 1`: the command spelling (not an assignment such as `mean = 5`).
+    if let Some((name, args)) = input.split_once(' ')
+        && let Some(canonical) = numeric_command_name(name)
+        && !args.trim_start().starts_with('=')
+        && !args.trim_start().starts_with('(')
+    {
+        return Some(format!("numcmd {canonical} {}", args.trim()));
+    }
+    // `totient 36`, `nextprime 100`: the command spelling of an integer function.
+    if let Some((name, args)) = input.split_once(' ')
+        && let Some(canonical) = arithmetic_function_name(name)
+        && !args.trim_start().starts_with('(')
+    {
+        return Some(format!("numfn {canonical} {}", args.trim()));
+    }
+    // `[[1,2],[3,4]] * [[0,1],[1,0]]`: a product of two matrix literals is a matrix product.
+    // `[[1,2],[3,4]]^3`: a matrix literal to an integer power.
+    if input.starts_with("[[") {
+        let mut depth = 0usize;
+        for (i, c) in input.char_indices() {
+            match c {
+                '[' | '(' | '{' => depth += 1,
+                ']' | ')' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let rest = input[i + 1..].trim_start();
+                        if let Some(power) = rest.strip_prefix('^') {
+                            return Some(format!(
+                                "numcmd matpow {}, {}",
+                                &input[..=i],
+                                power.trim()
+                            ));
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if input.starts_with('[') && input.ends_with(']') {
+        let mut depth = 0usize;
+        for (i, c) in input.char_indices() {
+            match c {
+                '[' | '(' | '{' => depth += 1,
+                ']' | ')' | '}' => depth = depth.saturating_sub(1),
+                '*' if depth == 0 => {
+                    let (a, b) = (input[..i].trim(), input[i + 1..].trim());
+                    if a.starts_with("[[")
+                        && a.ends_with(']')
+                        && b.starts_with("[[")
+                        && b.ends_with(']')
+                    {
+                        return Some(format!("matmul {a}, {b}"));
+                    }
+                    return None;
+                }
+                _ => {}
+            }
+        }
+    }
+    // `a // b`: floor division.
+    if let Some((a, b)) = input.split_once(" // ")
+        && !a.trim().is_empty()
+        && !b.trim().is_empty()
+    {
+        return Some(format!("numcmd floordiv {}, {}", a.trim(), b.trim()));
+    }
+    // `a mod b`
+    if let Some((a, b)) = input.split_once(" mod ")
+        && !a.contains(char::is_whitespace)
+        && !b.contains(char::is_whitespace)
+        && !a.is_empty()
+        && !b.is_empty()
+    {
+        return Some(format!("simplify mod({a}, {b})"));
+    }
+    let open = input.find('(')?;
+    let name = &input[..open];
+    if name.is_empty()
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !input.ends_with(')')
+    {
+        return None;
+    }
+    // The call must be a single call: its opening bracket closes at the very end.
+    let mut depth = 0usize;
+    for (i, c) in input[open..].char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 && open + i != input.len() - 1 {
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let args = input[open + 1..input.len() - 1].trim();
+    let canonical = match name.to_ascii_lowercase().as_str() {
+        "series" | "taylor" | "maclaurin" => "series",
+        "is_prime" | "isprime" => "is_prime",
+        "factor" if !args.trim().is_empty() && !args.chars().any(|c| c.is_ascii_alphabetic()) => {
+            "prime_factors"
+        }
+        "factorint"
+        | "factor_integer"
+        | "primefactors"
+        | "prime_factors"
+        | "prime_factorization" => "prime_factors",
+        "partial_fractions" | "apart" | "partfrac" => "partial_fractions",
+        "inv" | "inverse" | "matrix_inverse" => "inv",
+        "det" | "determinant" => "det",
+        "transpose" => "transpose",
+        "rank" => "rank",
+        "dsolve" => "dsolve",
+        // Commands that take their arguments after a space; the call spelling `expand((x+1)^5)` means the same.
+        "expand" | "cancel" | "collect" | "together" | "horner" | "discriminant" | "resultant"
+        | "roots" | "poly_gcd" | "laplace" | "fourier" | "ilt" | "inv_laplace" | "poly_roots" => {
+            return Some(format!("{} {args}", name.to_ascii_lowercase()));
+        }
+        // `factor(x^4 - 1)`: a polynomial (an integer was handled above); `gcd(x^2 - 1, x^3 - 1)`, `lcm(...)`.
+        "factor" if args.chars().any(|c| c.is_ascii_alphabetic()) => {
+            return Some(format!("factor {args}"));
+        }
+        "gcd" if args.chars().any(|c| c.is_ascii_alphabetic()) => {
+            return Some(format!("poly_gcd {args}"));
+        }
+        other if numeric_command_name(other).is_some() => {
+            let canonical = numeric_command_name(other)?;
+            return Some(format!("numcmd {canonical} {args}"));
+        }
+        other if arithmetic_function_name(other).is_some() => {
+            let canonical = arithmetic_function_name(other)?;
+            return Some(format!("numfn {canonical} {args}"));
+        }
+        "limit" | "lim" => {
+            // limit(f, x, a) -> `limit f as x -> a`
+            let parts = split_top_level_commas(args);
+            if parts.len() >= 3 {
+                // An optional fourth argument names a one-sided limit: `limit(f, x, 0, +)`, `limit(f, x, 0, "left")`.
+                let side = match parts
+                    .get(3)
+                    .map(|s| s.trim().trim_matches('"').to_ascii_lowercase())
+                {
+                    Some(s) if matches!(s.as_str(), "+" | "right" | "plus" | "from_right") => "+",
+                    Some(s) if matches!(s.as_str(), "-" | "left" | "minus" | "from_left") => "-",
+                    _ => "",
+                };
+                return Some(format!(
+                    "limit {} as {} -> {}{}",
+                    parts[0].trim(),
+                    parts[1].trim(),
+                    parts[2].trim(),
+                    side
+                ));
+            }
+            return None;
+        }
+        _ => return None,
+    };
+    Some(format!("{canonical} {args}"))
+}
+
+/// Parse one input line into the operation it asks for. Call spellings such as `series(f, x, 0, 5)` are accepted
+/// next to the command spellings `series f, x, 0, 5`.
 pub fn parse_operation(input: &str) -> MathOperation {
+    match normalize_call_syntax(input) {
+        Some(rewritten) => parse_operation_canonical(&rewritten),
+        None => parse_operation_canonical(input),
+    }
+}
+
+fn parse_operation_canonical(input: &str) -> MathOperation {
     let input = input.trim();
     if input.is_empty() {
         return MathOperation::Expression { raw: String::new() };
@@ -2198,25 +2527,42 @@ pub fn parse_operation(input: &str) -> MathOperation {
             bindings: HashMap::new(),
         };
     }
+    // The number of digits may follow after a top-level comma: `N(pi, 50)`, `evalf sqrt(2), 100`.
+    let split_digits = |body: &str| -> (String, usize) {
+        let parts = split_top_level_commas(body);
+        if parts.len() >= 2
+            && let Ok(d) = parts[parts.len() - 1].trim().parse::<usize>()
+        {
+            let expression = parts[..parts.len() - 1].join(",");
+            return (expression.trim().to_string(), d);
+        }
+        (body.trim().to_string(), 15)
+    };
     if let Some(body) = input
         .strip_prefix("evalf ")
         .or_else(|| input.strip_prefix("N "))
         .or_else(|| input.strip_prefix("approx "))
+        .or_else(|| input.strip_prefix("float "))
     {
+        let (expression, digits) = split_digits(body);
         return MathOperation::Evaluate {
-            expression: body.trim().to_string(),
-            precision_digits: Some(15),
+            expression,
+            precision_digits: Some(digits),
             bindings: HashMap::new(),
         };
     }
-    if (input.starts_with("N(") || input.starts_with("evalf(") || input.starts_with("approx("))
+    if (input.starts_with("N(")
+        || input.starts_with("evalf(")
+        || input.starts_with("approx(")
+        || input.starts_with("float("))
         && input.ends_with(')')
         && let Some(open) = input.find('(')
     {
         let inner = &input[open + 1..input.len() - 1];
+        let (expression, digits) = split_digits(inner);
         return MathOperation::Evaluate {
-            expression: inner.trim().to_string(),
-            precision_digits: Some(15),
+            expression,
+            precision_digits: Some(digits),
             bindings: HashMap::new(),
         };
     }
@@ -2486,6 +2832,35 @@ pub fn parse_operation(input: &str) -> MathOperation {
         }
     }
 
+    // 4.4 Integer functions: `numfn totient 36`, `numfn pow_mod 2, 10, 1000`
+    if let Some(body) = input.strip_prefix("numfn ")
+        && let Some((function, args)) = body.trim().split_once(' ')
+    {
+        let parsed: Option<Vec<i64>> = args
+            .split(',')
+            .map(|a| a.trim().parse::<i64>().ok())
+            .collect();
+        if let Some(args) = parsed {
+            return MathOperation::NumberTheory(NumberTheoryOpKind::Arithmetic {
+                function: function.to_string(),
+                args,
+            });
+        }
+    }
+
+    // 14b. Numerical and statistical commands: `numcmd nsolve cos(x) - x, 1`
+    if let Some(body) = input.strip_prefix("numcmd ")
+        && let Some((function, args)) = body.trim().split_once(' ')
+    {
+        return MathOperation::Numeric {
+            function: function.to_string(),
+            args: split_top_level_commas(args)
+                .into_iter()
+                .map(|a| a.trim().to_string())
+                .collect(),
+        };
+    }
+
     // 15. Discrete Combinatorics Commands
     if let Some(body) = input.strip_prefix("factorial ")
         && let Ok(n) = body.trim().parse::<u64>()
@@ -2751,7 +3126,8 @@ pub fn parse_operation(input: &str) -> MathOperation {
                     Some(expr_parts[1].trim().to_string()),
                 )
             } else {
-                (expr_part.trim().to_string(), None)
+                // `integrate x^2 dx from 0 to 1`: the differential names the variable.
+                split_expr_and_var(expr_part.trim())
             };
             let upper_parts = split_top_level_commas(upper_p);
             let upper = if var.is_none() && upper_parts.len() >= 2 {

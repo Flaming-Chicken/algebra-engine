@@ -22,16 +22,53 @@ pub enum SimplifyError {
 /// Specialized Result alias for simplification operations.
 pub type SimplifyResult<T> = Result<T, SimplifyError>;
 
+/// The deepest expression the recursive simplifier accepts. Simplification recurses once per level of nesting, so
+/// an unbounded depth is a stack overflow, which aborts the process; 64 levels is far beyond what is written by
+/// hand and leaves a wide margin on a 1 MiB stack even in an unoptimised build.
+pub const MAX_SIMPLIFY_DEPTH: usize = 64;
+
+/// The nesting depth of an expression (a leaf has depth 1), computed without recursion.
+pub fn expression_depth(graph: &ExprGraph, root: ExprId) -> usize {
+    use std::collections::HashMap;
+    let mut depth: HashMap<ExprId, usize> = HashMap::new();
+    let mut stack = vec![(root, false)];
+    while let Some((id, children_done)) = stack.pop() {
+        if depth.contains_key(&id) {
+            continue;
+        }
+        let children = graph.get(id).children();
+        if children_done || children.is_empty() {
+            let below = children
+                .iter()
+                .map(|c| depth.get(c).copied().unwrap_or(0))
+                .max()
+                .unwrap_or(0);
+            depth.insert(id, below + 1);
+        } else {
+            stack.push((id, true));
+            for c in children {
+                if !depth.contains_key(&c) {
+                    stack.push((c, false));
+                }
+            }
+        }
+    }
+    depth.get(&root).copied().unwrap_or(1)
+}
+
 pub mod bridges;
+pub mod conditions;
 pub mod detector;
 pub mod dynamic;
 pub mod probabilistic;
 pub mod transformations;
+pub mod trig_expand;
 
 pub use bridges::{
     AskeySchemeGroup, BridgeRouter, EulerBridgeGroup, HyperbolicIdentityGroup, IdentityGroup,
     ItoNilpotentBridgeGroup, LieAlgebraGroup, TransformClusterGroup, TrigIdentityGroup,
 };
+pub use conditions::{Condition, ConditionKind, ConditionedResult};
 pub use detector::{DetectedFeatures, DomainFeatureDetector};
 pub use dynamic::{AxiomaticRuleGenerator, DynamicRuleSelector};
 pub use probabilistic::{SCHWARTZ_ZIPPEL_PRIME, SchwartzZippel};
@@ -289,6 +326,15 @@ impl Simplifier {
         goal: algebra_core::domain::GoalDomain,
         assumptions: &crate::logic::AssumptionsContext,
     ) -> SimplifyResult<ExprId> {
+        // The depth check comes first: everything below recurses once per level.
+        let depth = expression_depth(graph, root);
+        if depth > MAX_SIMPLIFY_DEPTH {
+            return Err(SimplifyError::Custom(format!(
+                "the expression is nested {depth} levels deep; the limit is {MAX_SIMPLIFY_DEPTH}"
+            )));
+        }
+        // `gamma(5)` is 24, `gamma(1/2)` is sqrt(pi), `zeta(2)` is pi^2/6: exact values first.
+        let root = crate::special_exact::evaluate(graph, root);
         let node = graph.get(root);
         if let ExprKind::Relational { op, lhs, rhs } = &node.kind {
             let simp_lhs = Self::simplify_with_goal_and_assumptions(graph, *lhs, goal, assumptions)
@@ -505,8 +551,8 @@ impl Simplifier {
                 match name.as_str() {
                     "I" => Ok(rec.add(SymbolicLang::IdentityMatrix)),
                     "i" | "qi" => Ok(rec.add(SymbolicLang::QuaternionI)),
-                    "j" | "qj" => Ok(rec.add(SymbolicLang::QuaternionJ)),
-                    "k" | "qk" => Ok(rec.add(SymbolicLang::QuaternionK)),
+                    "qj" => Ok(rec.add(SymbolicLang::QuaternionJ)),
+                    "qk" => Ok(rec.add(SymbolicLang::QuaternionK)),
                     "dW" | "dW_t" => Ok(rec.add(SymbolicLang::SymbolDW)),
                     "dt" => Ok(rec.add(SymbolicLang::SymbolDT)),
                     _ => Ok(rec.add(SymbolicLang::Symbol(name))),
@@ -602,8 +648,8 @@ impl Simplifier {
             },
             SymbolicLang::IdentityMatrix => Ok(graph.symbol("I")),
             SymbolicLang::QuaternionI => Ok(graph.symbol("i")),
-            SymbolicLang::QuaternionJ => Ok(graph.symbol("j")),
-            SymbolicLang::QuaternionK => Ok(graph.symbol("k")),
+            SymbolicLang::QuaternionJ => Ok(graph.symbol("qj")),
+            SymbolicLang::QuaternionK => Ok(graph.symbol("qk")),
             SymbolicLang::SymbolDW => Ok(graph.symbol("dW")),
             SymbolicLang::SymbolDT => Ok(graph.symbol("dt")),
             SymbolicLang::Add([a, b]) => {
@@ -1201,6 +1247,35 @@ fn pre_simplify_algebraic_with_assumptions(
                     };
                     return rec(g, combined, assumptions);
                 }
+                // exp(a) * exp(b) -> exp(a + b), so that exp(x) * exp(-x) is 1.
+                let exp_argument = |g: &ExprGraph, f: ExprId| -> Option<ExprId> {
+                    if let ExprKind::Function { name, args } = &g.get(f).kind
+                        && args.len() == 1
+                        && g.symbols.resolve(*name).as_deref() == Some("exp")
+                    {
+                        return Some(args[0]);
+                    }
+                    None
+                };
+                let exp_args: Vec<ExprId> =
+                    rest.iter().filter_map(|&f| exp_argument(g, f)).collect();
+                if exp_args.len() >= 2 {
+                    let mut rebuilt: Vec<ExprId> = rest
+                        .iter()
+                        .copied()
+                        .filter(|&f| exp_argument(g, f).is_none())
+                        .collect();
+                    if !coeff.is_one() {
+                        rebuilt.insert(0, crate::poly::expr_from_rational(g, &coeff));
+                    }
+                    rebuilt.push(g.function("exp", [g.add(exp_args)]));
+                    let combined = if rebuilt.len() == 1 {
+                        rebuilt[0]
+                    } else {
+                        g.mul(rebuilt)
+                    };
+                    return rec(g, combined, assumptions);
+                }
                 // Repeated bases with numeric exponents: x * x -> x^2, x^2 * x^3 -> x^5,
                 // x^(1/2) * x^(1/2) -> x. Only rewritten when a base actually repeats, so
                 // products without repeats keep their order.
@@ -1439,6 +1514,14 @@ fn pre_simplify_algebraic_with_assumptions(
                 if is_one_id(g, se) {
                     return sb;
                 }
+                // e^x is exp(x), so that the rules for exp (and exp(i pi) = -1) apply to both spellings.
+                let base_is_e = matches!(
+                    g.get(sb).kind,
+                    ExprKind::Number(algebra_core::Number::Constant(algebra_core::Constant::E))
+                ) || matches!(g.get(sb).kind, ExprKind::Symbol(s) if g.symbols.resolve(s).as_deref() == Some("e"));
+                if base_is_e {
+                    return rec(g, g.function("exp", [se]), assumptions);
+                }
                 // (x^2)^(1/2) under assumptions
                 if as_rat(g, se) == Some(BigRational::new(1.into(), 2.into()))
                     && let ExprKind::Pow(b_in, e_in) = g.get(sb).kind
@@ -1540,6 +1623,12 @@ fn pre_simplify_algebraic_with_assumptions(
                             return g.integer(0);
                         }
                         "cos" | "cosh" | "exp" if is_zero_id(g, a) => return g.integer(1),
+                        // abs(-x) = abs(x), and the odd/even symmetries of the hyperbolic and inverse functions.
+                        "abs" if matches!(g.get(a).kind, ExprKind::Neg(_)) => {
+                            if let ExprKind::Neg(inner) = g.get(a).kind {
+                                return rec(g, g.function("abs", [inner]), assumptions);
+                            }
+                        }
                         "acos" | "arccos" => {
                             let pi = g.constant(algebra_core::Constant::Pi);
                             if is_one_id(g, a) {

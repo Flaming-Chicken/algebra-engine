@@ -224,6 +224,9 @@ pub enum NumberTheoryOpKind {
     LcmExpr { a_str: String, b_str: String },
     /// Legendre symbol $(a/p)$
     Legendre { a: i64, p: u64 },
+    /// An integer function of one to three integer arguments: `totient`, `next_prime`, `prev_prime`, `divisors`,
+    /// `sigma`, `tau`, `mobius`, `mod_inverse`, `pow_mod`, `primitive_root`.
+    Arithmetic { function: String, args: Vec<i64> },
     /// Prime decomposition with algebraic prime classification across number systems
     PrimeDecomposition {
         expr_str: String,
@@ -586,6 +589,16 @@ pub enum MathOperation {
         expression: String,
         precision_digits: Option<usize>,
         bindings: HashMap<String, f64>,
+    },
+
+    /// A numerical or statistical command with textual arguments: `nsolve(cos(x) - x, 1)`, `nintegrate(f, x, 0, 1)`,
+    /// `mean [1, 2, 3]`, `fit [[0, 1], [1, 3]]`. The name is the canonical one (`nsolve`, `nintegrate`, `minimize`,
+    /// `maximize`, `interpolate`, `fit`, `mean`, `median`, `variance`, `pvariance`, `stddev`, `pstddev`).
+    Numeric {
+        /// The canonical command name.
+        function: String,
+        /// The arguments, split at top-level commas.
+        args: Vec<String>,
     },
 
     /// Variable substitution: e.g. `substitute x = 2 in x^2 + 1`

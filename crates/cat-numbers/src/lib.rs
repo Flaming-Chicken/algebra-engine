@@ -2,6 +2,8 @@
 //! Conway Surreal Numbers (\mathbf{No}), Adelic Ring (\mathbb{A}_\mathbb{Q}),
 //! Butler-Portugal tensor canonicalization, Metric Geometry, and Exterior Differential Forms.
 
+#![deny(missing_docs)]
+
 pub mod adele;
 pub mod butler_portugal;
 pub mod cocycle;

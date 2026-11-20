@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `poisson_regress` reports deviance, Pearson chi-square and a dispersion test.
 - `inverse_ztransform(X, z, n, left)`: the left-sided sequence.
 - `mregress` reports AIC and BIC.
 - `lr_test(X_full, X_reduced, y)`: likelihood-ratio tests for nested logistic and Poisson models.

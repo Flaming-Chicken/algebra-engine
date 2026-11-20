@@ -7425,3 +7425,73 @@ fn left_sided_inverse_z_transform_reproduces_the_series_in_positive_powers_of_z(
             .is_error
     );
 }
+
+#[test]
+fn poisson_goodness_of_fit_matches_the_group_closed_forms() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Group model: the fitted means are the group means, so the deviance, Pearson statistic and dispersion have closed forms.
+    let group0 = [2.0f64, 3.0, 1.0, 4.0, 2.0, 3.0];
+    let group1 = [6.0f64, 8.0, 5.0, 9.0, 7.0];
+    let xs = format!(
+        "[{}]",
+        group0
+            .iter()
+            .map(|_| "[0]")
+            .chain(group1.iter().map(|_| "[1]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        group0
+            .iter()
+            .chain(&group1)
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let (mut deviance, mut pearson) = (0.0, 0.0);
+    for group in [&group0[..], &group1[..]] {
+        let mean = group.iter().sum::<f64>() / group.len() as f64;
+        for y in group {
+            deviance += 2.0 * (y * (y / mean).ln() - (y - mean));
+            pearson += (y - mean).powi(2) / mean;
+        }
+    }
+    assert!(
+        (field(&out, "deviance =") - deviance).abs() < 1e-4,
+        "{out}: {deviance}"
+    );
+    assert!(
+        (field(&out, "Pearson chi-square =") - pearson).abs() < 1e-4,
+        "{out}: {pearson}"
+    );
+    assert!(
+        (field(&out, "dispersion =") - pearson / 9.0).abs() < 1e-4,
+        "{out}"
+    );
+    let p: f64 = run(&format!("chi2_cdf({pearson}, 9)"))
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(
+        (field(&out, "overdispersion p =") - (1.0 - p)).abs() < 1e-4,
+        "{out}"
+    );
+    // Strongly overdispersed counts (a mixture of small and large values with the same predictor) give dispersion well above 1.
+    let wild = run("poisson_regress([[0],[0],[0],[0],[1],[1],[1],[1]], [0,1,12,1,2,30,0,5])");
+    assert!(field(&wild, "dispersion =") > 3.0, "{wild}");
+}

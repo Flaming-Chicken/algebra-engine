@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `max_weight_matching(edges)`: maximum weight matching of a general graph.
 - `min_cost_flow(arcs, balances)`: minimum cost flow with capacities.
 - `transportation(supply, demand, costs)`: the transportation problem.
 - d'Alembert equations also report their singular line solutions.

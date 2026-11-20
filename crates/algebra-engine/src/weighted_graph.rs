@@ -348,6 +348,7 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "max_flow" | "maximum_flow" | "min_cut" => "flow",
         "topological_sort" | "topological_order" | "toposort" => "topological",
         "strongly_connected_components" | "scc" | "strong_components" => "scc",
+        "max_weight_matching" | "maximum_weight_matching" | "weighted_matching" => "matching",
         _ => return None,
     };
     let mut args = crate::graph_commands::split_top(&t[open + 1..t.len() - 1]);
@@ -361,6 +362,77 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "mst" => spanning_tree(&g),
         "flow" => max_flow(&g, &args),
         "topological" => topological(&g),
+        "matching" => weighted_matching(&g),
         _ => Ok(strong_components(&g)),
     })
+}
+
+/// Maximum weight matching of a general graph (edges `[a, b, w]`, parallel edges keep the heaviest, negative edges are never used) by
+/// dynamic programming over vertex subsets: up to 20 vertices.
+fn weighted_matching(g: &Edges) -> Result<String, String> {
+    let n = g.names.len();
+    if n > 20 {
+        return Err("max_weight_matching is limited to 20 vertices".into());
+    }
+    let mut weight: Vec<Vec<Option<Q>>> = vec![vec![None; n]; n];
+    for (a, b, w) in &g.list {
+        if a == b {
+            continue;
+        }
+        for (x, y) in [(*a, *b), (*b, *a)] {
+            if weight[x][y].as_ref().is_none_or(|old| w > old) {
+                weight[x][y] = Some(w.clone());
+            }
+        }
+    }
+    let mut best: Vec<Q> = vec![Q::zero(); 1 << n];
+    for mask in 1usize..1 << n {
+        let u = mask.trailing_zeros() as usize;
+        let rest = mask & (mask - 1);
+        let mut value = best[rest].clone();
+        for v in 0..n {
+            if rest >> v & 1 == 1
+                && let Some(w) = &weight[u][v]
+            {
+                let candidate = w + &best[rest & !(1 << v)];
+                if candidate > value {
+                    value = candidate;
+                }
+            }
+        }
+        best[mask] = value;
+    }
+    let (mut mask, mut pairs) = ((1usize << n) - 1, Vec::new());
+    while mask != 0 {
+        let u = mask.trailing_zeros() as usize;
+        let rest = mask & (mask - 1);
+        if best[mask] == best[rest] {
+            mask = rest;
+            continue;
+        }
+        let v = (0..n)
+            .find(|&v| {
+                rest >> v & 1 == 1
+                    && weight[u][v]
+                        .as_ref()
+                        .is_some_and(|w| w + &best[rest & !(1 << v)] == best[mask])
+            })
+            .ok_or("internal error")?;
+        pairs.push(format!(
+            "{}-{} ({})",
+            g.names[u],
+            g.names[v],
+            show(weight[u][v].as_ref().unwrap_or(&Q::zero()))
+        ));
+        mask = rest & !(1 << v);
+    }
+    Ok(format!(
+        "weight {}: {}",
+        show(&best[(1 << n) - 1]),
+        if pairs.is_empty() {
+            "no edges".to_string()
+        } else {
+            pairs.join(", ")
+        }
+    ))
 }

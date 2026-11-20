@@ -86,7 +86,7 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R104` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R110` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
@@ -117,7 +117,7 @@ spellings a new user types first. The open list, by field:
   `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables; amortisation with extra payments,
   `xirr` with dates, bond pricing.
 - **Discrete, logic and sets.** Done: weighted and directed graphs (shortest paths, spanning trees, flows,
-  components, topological order), Euler and Hamilton paths, maximum matching. Isomorphism and automorphism counts are done (`R91`). Planarity is done for small graphs (`R103`). The assignment problem (bipartite weighted matching) is done (`R104`). Missing: weighted matching on general graphs, `pascal_row`,
+  components, topological order), Euler and Hamilton paths, maximum matching. Isomorphism and automorphism counts are done (`R91`). Planarity is done for small graphs (`R103`). The assignment problem (bipartite weighted matching) is done (`R104`). Weighted matching on general graphs (`R110`), transportation (`R108`) and minimum cost flow (`R109`) are done. Missing: blossom matching beyond 20 vertices, `pascal_row`,
   `partitions_list`, normal forms and simplification of formulas, quantifiers, `~a` and `base_convert` in arbitrary
   bases, `multiset_permutations`.
 - **Input forms.** Quantified formulas, LaTeX tables, `align` and `\text{}` in formulas, English with several clauses

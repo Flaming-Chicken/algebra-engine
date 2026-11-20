@@ -375,6 +375,122 @@ impl UraeSession {
         cur
     }
 
+    /// Every defined name with its value, one per line.
+    fn list_variables(&self) -> OperationResult {
+        let mut lines: Vec<(String, String)> = Vec::new();
+        for (name, value) in &self.matrix_vars {
+            lines.push((name.clone(), format!("{name} = {value}")));
+        }
+        for (name, value) in &self.user_aliases {
+            lines.push((name.clone(), format!("{name} = {value}")));
+        }
+        for (name, value) in &self.bindings {
+            if !self.user_aliases.contains_key(name) && !self.matrix_vars.contains_key(name) {
+                lines.push((
+                    name.clone(),
+                    format!("{name} = {}", format_clean_float(*value)),
+                ));
+            }
+        }
+        for (name, (args, body)) in &self.user_functions {
+            lines.push((
+                name.clone(),
+                format!("{name}({}) = {body}", args.join(", ")),
+            ));
+        }
+        let text = if lines.is_empty() {
+            "No variables defined.".to_string()
+        } else {
+            lines.sort();
+            lines.into_iter().map(|(_, l)| l).collect::<Vec<_>>().join(
+                "
+",
+            )
+        };
+        OperationResult::success(text.clone(), text.clone(), text)
+    }
+
+    /// `who`, `reset`, `clear x y`, `delete a`, `show a`: inspect and manage the workspace.
+    fn try_session_command(&mut self, input: &str) -> Option<OperationResult> {
+        let lower = input.to_ascii_lowercase();
+        let done = |text: String| Some(OperationResult::success(text.clone(), text.clone(), text));
+        match lower.as_str() {
+            "who" | "whos" | "variables" | "list variables" | "show variables" | "list vars"
+            | "show vars" | "workspace" => return Some(self.list_variables()),
+            "reset" | "restart" | "clear all" | "clear everything" | "reset all"
+            | "new session" => {
+                self.reset();
+                return done("Workspace reset.".into());
+            }
+            _ => {}
+        }
+        let identifiers = |rest: &str| -> Option<Vec<String>> {
+            let names: Vec<String> = rest
+                .split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .collect();
+            let valid = !names.is_empty()
+                && names.iter().all(|n| {
+                    n.chars()
+                        .next()
+                        .is_some_and(|c| c.is_alphabetic() || c == '_')
+                        && n.chars().all(|c| c.is_alphanumeric() || c == '_')
+                });
+            valid.then_some(names)
+        };
+        for verb in ["clear ", "delete ", "del ", "unset ", "forget "] {
+            if lower.starts_with(verb)
+                && let Some(names) = identifiers(&input[verb.len()..])
+            {
+                let (mut removed, mut missing) = (Vec::new(), Vec::new());
+                for name in names {
+                    let mut found = self.bindings.remove(&name).is_some();
+                    found |= self.uncertainties.remove(&name).is_some();
+                    found |= self.intervals.remove(&name).is_some();
+                    found |= self.symbol_metadata.remove(&name).is_some();
+                    found |= self.user_aliases.remove(&name).is_some();
+                    found |= self.matrix_vars.remove(&name).is_some();
+                    found |= self.user_functions.remove(&name).is_some();
+                    if found {
+                        removed.push(name);
+                    } else {
+                        missing.push(name);
+                    }
+                }
+                let mut parts = Vec::new();
+                if !removed.is_empty() {
+                    parts.push(format!("cleared {}", removed.join(", ")));
+                }
+                if !missing.is_empty() {
+                    parts.push(format!("{} not defined", missing.join(", ")));
+                }
+                return done(parts.join("; "));
+            }
+        }
+        for verb in ["show ", "print ", "display "] {
+            if lower.starts_with(verb)
+                && let Some(names) = identifiers(&input[verb.len()..])
+                && let [name] = names.as_slice()
+            {
+                if let Some(v) = self
+                    .matrix_vars
+                    .get(name)
+                    .or_else(|| self.user_aliases.get(name))
+                {
+                    return done(format!("{name} = {v}"));
+                }
+                if let Some((args, body)) = self.user_functions.get(name) {
+                    return done(format!("{name}({}) = {body}", args.join(", ")));
+                }
+                if let Some(v) = self.bindings.get(name) {
+                    return done(format!("{name} = {}", format_clean_float(*v)));
+                }
+            }
+        }
+        None
+    }
+
     /// `A = [[1,2],[3,4]]`, `v = [1,2]`, `B = A*A`, `C = inverse(A)`: store a matrix variable. `None` when the line is not a
     /// matrix assignment (and then forgets an older matrix of that name, because the name is being reassigned).
     fn try_matrix_assignment(&mut self, input: &str) -> Option<OperationResult> {
@@ -514,6 +630,20 @@ impl UraeSession {
         }
 
         self.history.push(trimmed.to_string());
+
+        // `%` is the previous result (`% + 1`) when it stands where an operand should; `17 % 5` stays a remainder.
+        if trimmed == "%" {
+            return self.execute_line_inner("ans");
+        }
+        if let Some(rest) = trimmed.strip_prefix('%')
+            && rest.trim_start().starts_with(['+', '-', '*', '/', '^'])
+        {
+            return self.execute_line_inner(&format!("ans{rest}"));
+        }
+        // Variable management: `who`, `clear x`, `delete a`, `show a`, `reset`.
+        if let Some(result) = self.try_session_command(trimmed) {
+            return result;
+        }
 
         // `sum([1,2,3])`, `cumsum`, `sort`, `len`, `unique`, `linspace`, `moving_average`, ...: exact list utilities.
         if let Some(outcome) = crate::list_utils::run(self, trimmed) {

@@ -219,9 +219,11 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         | "c_to_f"
         | "f_to_c" => {
             let [x] = args.as_slice() else { return None };
+            // A typed `pi` is the symbol; the rewrite below uses the constant, so make them one.
+            let x = &replace_word(x, "pi", "π");
             let rewritten = match name.as_str() {
-                "degrees" | "rad2deg" => format!("({x})*180/pi"),
-                "radians" | "deg2rad" => format!("({x})*pi/180"),
+                "degrees" | "rad2deg" => format!("({x})*180/π"),
+                "radians" | "deg2rad" => format!("({x})*π/180"),
                 "celsius_to_fahrenheit" | "c_to_f" => format!("({x})*9/5 + 32"),
                 "fahrenheit_to_celsius" | "f_to_c" => format!("(({x}) - 32)*5/9"),
                 "celsius_to_kelvin" => format!("({x}) + 5463/20"),

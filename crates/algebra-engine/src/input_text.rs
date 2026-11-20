@@ -1039,6 +1039,13 @@ fn set_shorthand(s: &str) -> Option<String> {
 
 /// `30°`, `30 deg`, `60 degrees`, `2.5 degree` replaced by `(30*pi/180)`; `None` when the text has none.
 pub fn expand_degrees(s: &str) -> Option<String> {
+    // `convert 180 deg to rad` names the unit degree: leave unit conversions alone.
+    let lowered = s.to_ascii_lowercase();
+    if lowered.starts_with("convert ")
+        || [" to ", " in ", " as "].iter().any(|w| lowered.contains(w))
+    {
+        return None;
+    }
     let chars: Vec<char> = s.chars().collect();
     let (mut out, mut i, mut changed) = (String::new(), 0usize, false);
     while i < chars.len() {
@@ -1067,7 +1074,7 @@ pub fn expand_degrees(s: &str) -> Option<String> {
             };
             if let Some(len) = unit_len {
                 let number: String = chars[i..end].iter().collect();
-                out.push_str(&format!("({number}*pi/180)"));
+                out.push_str(&format!("({number}*π/180)"));
                 i = after + len;
                 changed = true;
                 continue;

@@ -2788,8 +2788,8 @@ fn degrees_temperatures_and_signed_denominators() {
     assert_eq!(run("cos(60 degrees)"), "1/2");
     assert_eq!(run("tan(45 deg)"), "1");
     assert_eq!(run("sin(90°) + cos(0°)"), "2");
-    assert_eq!(run("deg2rad(90)"), "1/2 · pi");
-    assert_eq!(run("radians(180)"), run("pi"));
+    assert_eq!(run("deg2rad(90)"), "1/2 · π");
+    assert_eq!(run("radians(180)"), "π");
     assert_eq!(run("degrees(pi)"), "180");
     assert_eq!(run("rad2deg(pi/2)"), "90");
     // Temperatures: known points and the round trip.

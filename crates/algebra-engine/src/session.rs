@@ -412,7 +412,9 @@ impl UraeSession {
             return;
         }
         let parser = algebra_core::parser::ExprParser::new(&self.graph);
-        let Ok(id) = parser.parse(input) else {
+        // `sin(10.5°)` does not parse as typed: use the rewritten form the engine actually evaluated.
+        let rewritten = crate::input_text::normalise(input).unwrap_or_else(|| input.to_string());
+        let Ok(id) = parser.parse(&rewritten) else {
             return;
         };
         let mut symbols = std::collections::BTreeSet::new();
@@ -420,7 +422,7 @@ impl UraeSession {
         if symbols
             .iter()
             .filter_map(|s| self.graph.symbols.resolve(*s))
-            .any(|n| !matches!(n.as_str(), "pi" | "e" | "i"))
+            .any(|n| !matches!(n.as_str(), "pi" | "π" | "e" | "i"))
         {
             return;
         }

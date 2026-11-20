@@ -329,15 +329,40 @@ pub fn run_z(session: &mut UraeSession, input: &str) -> Option<Result<String, St
     {
         return None;
     }
-    let args = split_top(&t[open + 1..t.len() - 1]);
+    let mut args = split_top(&t[open + 1..t.len() - 1]);
+    // An optional last argument `left` selects the left-sided (anticausal) sequence, the region of convergence |z| < smallest pole.
+    let left = args.len() > 1
+        && matches!(
+            args.last()
+                .map(|a| a.trim().trim_matches('"').to_ascii_lowercase())
+                .as_deref(),
+            Some("left" | "left_sided" | "anticausal")
+        );
+    if left {
+        args.pop();
+    }
     if args.is_empty() || args.len() > 3 {
-        return Some(Err("inverse_ztransform(X, z, n)".into()));
+        return Some(Err("inverse_ztransform(X, z, n[, left])".into()));
     }
     let z_name = args.get(1).cloned().unwrap_or_else(|| "z".into());
     let n_name = args.get(2).cloned().unwrap_or_else(|| "n".into());
     let divided = format!("({})/({z_name})", args[0]);
     Some(
-        invert_mode(session, &divided, &z_name, &n_name, true)
-            .map(|value| format!("Z^-1{{{}}}[{n_name}] = {value}", args[0])),
+        invert_mode(session, &divided, &z_name, &n_name, true).and_then(|value| {
+            if !left {
+                return Ok(format!("Z^-1{{{}}}[{n_name}] = {value}", args[0]));
+            }
+            if value.contains("delta[") {
+                return Err(
+                    "a left-sided sequence needs X(0) = 0 (no pole at zero in X(z)/z)".into(),
+                );
+            }
+            // Each causal term A a^n u[n] of the partial fractions becomes -A a^n u[-n-1].
+            let negated = session.eval(&format!("-({value})"))?;
+            Ok(format!(
+                "Z^-1{{{}}}[{n_name}] = {negated} for {n_name} <= -1 (left-sided)",
+                args[0]
+            ))
+        }),
     )
 }

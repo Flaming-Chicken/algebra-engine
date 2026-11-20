@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `is_planar(G)`: planarity of small graphs.
+- `poisson_regress` reports deviance, Pearson chi-square and a dispersion test.
+- `inverse_ztransform(X, z, n, left)`: the left-sided sequence.
+- `mregress` reports AIC and BIC.
 - `lr_test(X_full, X_reduced, y)`: likelihood-ratio tests for nested logistic and Poisson models.
 - `logit` and `poisson_regress` report AIC and BIC.
 - `inverse_ztransform` handles simple complex poles.

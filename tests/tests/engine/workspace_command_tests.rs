@@ -7311,3 +7311,271 @@ fn information_criteria_follow_from_the_log_likelihood() {
     // The BIC penalty ln n per parameter exceeds the AIC penalty 2 once n >= 8.
     assert!(field(&out, "BIC =") - field(&out, "AIC =") > 0.0, "{out}");
 }
+
+#[test]
+fn linear_regression_information_criteria_follow_from_the_residual_sum_of_squares() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text.split(key).last().unwrap();
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let x: [[i64; 2]; 7] = [[1, 2], [2, 1], [3, 5], [4, 3], [5, 8], [6, 4], [7, 9]];
+    let y = [3i64, 4, 8, 7, 14, 9, 16];
+    let xs = format!(
+        "[{}]",
+        x.iter()
+            .map(|r| format!("[{},{}]", r[0], r[1]))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        y.iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("mregress({xs}, {ys})"));
+    // SSE from R^2: SSE = (1 - R^2) SST.
+    let mean = y.iter().sum::<i64>() as f64 / 7.0;
+    let sst: f64 = y.iter().map(|v| (*v as f64 - mean).powi(2)).sum();
+    let r2 = field(&out, "; R^2 =");
+    let sse = (1.0 - r2) * sst;
+    let n = 7.0f64;
+    let ll = -n / 2.0 * ((2.0 * std::f64::consts::PI).ln() + (sse / n).ln() + 1.0);
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 8.0)).abs() < 1e-3,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 4.0 * n.ln())).abs() < 1e-3,
+        "{out}"
+    );
+    // Exact fits have no finite likelihood and print no criteria.
+    assert!(!run("mregress([[1,0],[0,1],[1,1],[2,1],[3,5]],[3,4,6,8,22])").contains("AIC"));
+}
+
+#[test]
+fn left_sided_inverse_z_transform_reproduces_the_series_in_positive_powers_of_z() {
+    // Numerator and denominator as ascending coefficients of z; the denominator is non-zero at z = 0.
+    let cases: [(&[f64], &[f64]); 4] = [
+        (&[0.0, 1.0], &[-2.0, 1.0]),
+        (&[0.0, 1.0], &[2.0, -3.0, 1.0]),
+        (&[0.0, 0.0, 1.0], &[-1.0, 0.0, 4.0]),
+        (&[0.0, 1.0], &[4.0, -4.0, 1.0]),
+    ];
+    let poly = |c: &[f64]| -> String {
+        c.iter()
+            .enumerate()
+            .map(|(i, v)| format!("({v:?})*z^{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    for (num, den) in cases {
+        let out = run(&format!(
+            "inverse_ztransform(({})/({}), z, k, left)",
+            poly(num),
+            poly(den)
+        ));
+        assert!(out.contains("left-sided"), "{out}");
+        let body = out
+            .split("] = ")
+            .nth(1)
+            .unwrap()
+            .split(" for k <= -1")
+            .next()
+            .unwrap()
+            .to_string();
+        // Ascending division: sum c_m z^m = N / D, so x[-m] = c_m.
+        let mut c = [0.0f64; 9];
+        for m in 0..9 {
+            let mut acc = num.get(m).copied().unwrap_or(0.0);
+            for j in 1..=m.min(den.len() - 1) {
+                acc -= den[j] * c[m - j];
+            }
+            c[m] = acc / den[0];
+        }
+        assert!(c[0].abs() < 1e-12);
+        for m in 1..9 {
+            let value: f64 = run(&format!(
+                "evalf({})",
+                body.replace('k', &format!("({})", -(m as i64)))
+            ))
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{body}"));
+            assert!(
+                (value - c[m]).abs() < 1e-6 * (1.0 + c[m].abs()),
+                "X = ({})/({}), n = -{m}: {value} vs {}: {out}",
+                poly(num),
+                poly(den),
+                c[m]
+            );
+        }
+    }
+    // A pole at zero in X(z)/z would need an impulse at n = 0, so it is refused for the left-sided sequence.
+    assert!(
+        UraeSession::new()
+            .execute_line("inverse_ztransform(1/(z-2), z, n, left)")
+            .is_error
+    );
+}
+
+#[test]
+fn poisson_goodness_of_fit_matches_the_group_closed_forms() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Group model: the fitted means are the group means, so the deviance, Pearson statistic and dispersion have closed forms.
+    let group0 = [2.0f64, 3.0, 1.0, 4.0, 2.0, 3.0];
+    let group1 = [6.0f64, 8.0, 5.0, 9.0, 7.0];
+    let xs = format!(
+        "[{}]",
+        group0
+            .iter()
+            .map(|_| "[0]")
+            .chain(group1.iter().map(|_| "[1]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        group0
+            .iter()
+            .chain(&group1)
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let (mut deviance, mut pearson) = (0.0, 0.0);
+    for group in [&group0[..], &group1[..]] {
+        let mean = group.iter().sum::<f64>() / group.len() as f64;
+        for y in group {
+            deviance += 2.0 * (y * (y / mean).ln() - (y - mean));
+            pearson += (y - mean).powi(2) / mean;
+        }
+    }
+    assert!(
+        (field(&out, "deviance =") - deviance).abs() < 1e-4,
+        "{out}: {deviance}"
+    );
+    assert!(
+        (field(&out, "Pearson chi-square =") - pearson).abs() < 1e-4,
+        "{out}: {pearson}"
+    );
+    assert!(
+        (field(&out, "dispersion =") - pearson / 9.0).abs() < 1e-4,
+        "{out}"
+    );
+    let p: f64 = run(&format!("chi2_cdf({pearson}, 9)"))
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(
+        (field(&out, "overdispersion p =") - (1.0 - p)).abs() < 1e-4,
+        "{out}"
+    );
+    // Strongly overdispersed counts (a mixture of small and large values with the same predictor) give dispersion well above 1.
+    let wild = run("poisson_regress([[0],[0],[0],[0],[1],[1],[1],[1]], [0,1,12,1,2,30,0,5])");
+    assert!(field(&wild, "dispersion =") > 3.0, "{wild}");
+}
+
+#[test]
+fn planarity_counts_match_the_known_numbers_of_labelled_planar_graphs() {
+    // OEIS A066537: the numbers of labelled planar graphs on 4 and 5 vertices are 64 and 1023 (6 vertices: 32071, checked by the ignored test below).
+    let mut session = UraeSession::new();
+    for (n, expected) in [(4usize, 64usize), (5, 1023)] {
+        let pairs: Vec<(usize, usize)> = (0..n)
+            .flat_map(|a| (a + 1..n).map(move |b| (a, b)))
+            .collect();
+        let mut planar = 0;
+        for mask in 0u32..1 << pairs.len() {
+            let edges: Vec<String> = pairs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask >> i & 1 == 1)
+                .map(|(_, (a, b))| format!("[v{a},v{b}]"))
+                .collect();
+            if edges.is_empty() {
+                planar += 1;
+                continue;
+            }
+            let out = session
+                .execute_line(&format!("is_planar([{}])", edges.join(",")))
+                .output_text;
+            assert!(out == "true" || out == "false", "{out}");
+            if out == "true" {
+                planar += 1;
+            }
+        }
+        assert_eq!(planar, expected, "labelled planar graphs on {n} vertices");
+    }
+    // Named and classical graphs.
+    assert_eq!(run("is_planar(K4)"), "true");
+    assert_eq!(run("is_planar(K5)"), "false");
+    assert_eq!(run("is_planar(K6)"), "false");
+    assert_eq!(run("is_planar(C9)"), "true");
+    assert_eq!(run("is_planar(S6)"), "true");
+    let k33 = "[[a1,b1],[a1,b2],[a1,b3],[a2,b1],[a2,b2],[a2,b3],[a3,b1],[a3,b2],[a3,b3]]";
+    assert_eq!(run(&format!("is_planar({k33})")), "false");
+    // The cube and the octahedron are planar; the Petersen graph is not.
+    let cube = "[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]";
+    assert_eq!(run(&format!("is_planar({cube})")), "true");
+    let octahedron = "[[1,2],[1,3],[1,4],[1,5],[6,2],[6,3],[6,4],[6,5],[2,3],[3,4],[4,5],[5,2]]";
+    assert_eq!(run(&format!("is_planar({octahedron})")), "true");
+    let petersen = "[[0,1],[1,2],[2,3],[3,4],[4,0],[0,5],[1,6],[2,7],[3,8],[4,9],[5,7],[7,9],[9,6],[6,8],[8,5]]";
+    assert_eq!(run(&format!("is_planar({petersen})")), "false");
+    // Two disjoint components are tested separately: a planar one next to K5 is not planar.
+    assert_eq!(
+        run(
+            "is_planar([[a,b],[b,c],[c,a],[p,q],[p,r],[p,s],[p,t],[q,r],[q,s],[q,t],[r,s],[r,t],[s,t]])"
+        ),
+        "false"
+    );
+}
+
+/// The exhaustive sweep over all 32768 labelled graphs on 6 vertices takes about twelve minutes in a debug build; run it with
+/// `cargo test -- --ignored planarity_on_six_vertices`. It passed on 20 Nov 2026 (32071, OEIS A066537).
+#[test]
+#[ignore]
+fn planarity_on_six_vertices_matches_oeis_a066537() {
+    let mut session = UraeSession::new();
+    let n = 6usize;
+    let pairs: Vec<(usize, usize)> = (0..n)
+        .flat_map(|a| (a + 1..n).map(move |b| (a, b)))
+        .collect();
+    let mut planar = 0;
+    for mask in 0u32..1 << pairs.len() {
+        let edges: Vec<String> = pairs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask >> i & 1 == 1)
+            .map(|(_, (a, b))| format!("[v{a},v{b}]"))
+            .collect();
+        if edges.is_empty()
+            || session
+                .execute_line(&format!("is_planar([{}])", edges.join(",")))
+                .output_text
+                == "true"
+        {
+            planar += 1;
+        }
+    }
+    assert_eq!(planar, 32071);
+}

@@ -99,7 +99,7 @@ spellings a new user types first. The open list, by field:
 - **Numbers and algebra.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `4^(1/4)` to `sqrt(2)`, symbolic roots
   (`sqrt(x^2*y)`), `exp(x)/exp(y)`, `oo * 0`, `lcm` and `gcd` of multivariate polynomials, `acos(1/sqrt 2)` as a
   plain expression, binomial roots for n = 5, 7, 9, 10, Galois groups of degree 5 and up, `groebner`, the Jordan transformation matrix and
-  irrational eigenvalues (`R93` does the form for rational spectra), `schur`, symbolic `sqrtm` and `logm` (`hessenberg` is done, `R94`; numeric `sqrtm`, `R95`), a simplified `qr`. Done (`R82`): pseudoinverse, least squares, Gram-Schmidt, adjugate, `expm`,
+  irrational eigenvalues (`R93` does the form for rational spectra), `schur`, symbolic `sqrtm` and `logm` (`hessenberg` is done, `R94`; numeric `sqrtm`, `R95`, and `logm`, `R107`), a simplified `qr`. Done (`R82`): pseudoinverse, least squares, Gram-Schmidt, adjugate, `expm`,
   `cond` and the matrix predicates on rational matrices.
 - **Solving.** General solutions of trigonometric equations (`+ 2 pi k`), numerical values beside a `RootOf`,
   inequalities with a nonlinear objective (KKT), integer and quadratic programs, `extrema` of several variables.

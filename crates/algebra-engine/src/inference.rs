@@ -125,6 +125,10 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "chi2_test" | "chisq_test" | "chi_square_test" | "chi2_independence" => "chi2",
         "proportion_test" | "prop_test" | "z_test_proportion" => "proportion",
         "anova" | "anova_oneway" | "oneway_anova" | "f_oneway" => "anova",
+        "fisher_exact" | "fisher_test" | "fisher" => "fisher",
+        "correlation_test" | "pearson_test" | "pearson" => "pearson",
+        "spearman" | "spearman_test" | "spearmanr" => "spearman",
+        "mann_whitney" | "mannwhitney" | "mann_whitney_u" | "wilcoxon_rank_sum" => "mann_whitney",
         _ => return None,
     };
     let mut args = split_top(&t[open + 1..t.len() - 1]);
@@ -134,6 +138,11 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "chi2" => return Some(chi_square(session, &args)),
         "proportion" => return Some(proportion(session, &args, alt)),
         "anova" => return Some(anova(session, &args)),
+        "fisher" => return Some(fisher(session, &args)),
+        "pearson" | "spearman" => {
+            return Some(correlation(session, &args, command == "spearman", alt));
+        }
+        "mann_whitney" => return Some(mann_whitney(session, &args)),
         _ => {}
     }
     let first = list(session, args.first()?)?;
@@ -445,5 +454,231 @@ fn anova(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
         number(p),
         show(&between),
         show(&within)
+    ))
+}
+
+/// `n choose k` as an exact integer.
+fn choose(n: u64, k: u64) -> BigInt {
+    if k > n {
+        return BigInt::zero();
+    }
+    (1..=k.min(n - k)).fold(BigInt::from(1), |acc, i| {
+        acc * BigInt::from(n - i + 1) / BigInt::from(i)
+    })
+}
+
+/// `fisher_exact([[a, b], [c, d]])`: the exact two-sided p-value of a 2x2 table (the sum of the probabilities, under the
+/// hypergeometric distribution with the margins fixed, of the tables no more probable than the observed one).
+fn fisher(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let rows = table(
+        session,
+        args.first().ok_or("fisher_exact([[a, b], [c, d]])")?,
+    )
+    .ok_or("fisher_exact takes a 2x2 table of counts")?;
+    if rows.len() != 2 || rows[0].len() != 2 {
+        return Err("fisher_exact takes a 2x2 table".into());
+    }
+    let counts: Vec<u64> = rows
+        .iter()
+        .flatten()
+        .map(|q| {
+            if q.is_integer() && !q.is_negative() {
+                q.to_integer().to_u64()
+            } else {
+                None
+            }
+        })
+        .collect::<Option<_>>()
+        .ok_or("the counts must be non-negative integers")?;
+    let (a, b, c, d) = (counts[0], counts[1], counts[2], counts[3]);
+    let (row1, row2, col1, n) = (a + b, c + d, a + c, a + b + c + d);
+    if n == 0 {
+        return Err("the table is empty".into());
+    }
+    let denominator = choose(n, col1);
+    let weight = |k: u64| choose(row1, k) * choose(row2, col1 - k.min(col1));
+    let observed = weight(a);
+    let lowest = col1.saturating_sub(row2);
+    let highest = col1.min(row1);
+    let mut total = BigInt::zero();
+    for k in lowest..=highest {
+        let w = weight(k);
+        if w <= observed {
+            total += w;
+        }
+    }
+    let p = Q::new(total, denominator);
+    let odds = if b == 0 || c == 0 {
+        "infinite".to_string()
+    } else {
+        number((a as f64 * d as f64) / (b as f64 * c as f64))
+    };
+    Ok(format!(
+        "p = {} = {} (two-sided, exact); sample odds ratio {}",
+        number(float(&p)),
+        show(&p),
+        odds
+    ))
+}
+
+/// Average ranks (ties share the mean of their positions), from 1.
+fn average_ranks(values: &[Q]) -> Vec<Q> {
+    let mut order: Vec<usize> = (0..values.len()).collect();
+    order.sort_by(|&a, &b| values[a].cmp(&values[b]));
+    let mut ranks = vec![Q::zero(); values.len()];
+    let mut i = 0;
+    while i < order.len() {
+        let mut j = i;
+        while j + 1 < order.len() && values[order[j + 1]] == values[order[i]] {
+            j += 1;
+        }
+        let rank = Q::new(BigInt::from(i + j + 2), BigInt::from(2));
+        for &k in &order[i..=j] {
+            ranks[k] = rank.clone();
+        }
+        i = j + 1;
+    }
+    ranks
+}
+
+/// `pearson(x, y)` / `spearman(x, y)`: the correlation coefficient with the t test of zero correlation.
+fn correlation(
+    session: &mut UraeSession,
+    args: &[String],
+    spearman: bool,
+    alt: Alternative,
+) -> Result<String, String> {
+    let x =
+        list(session, args.first().ok_or("correlation_test(x, y)")?).ok_or("x must be a list")?;
+    let y =
+        list(session, args.get(1).ok_or("correlation_test(x, y)")?).ok_or("y must be a list")?;
+    if x.len() != y.len() || x.len() < 3 {
+        return Err("x and y need the same length, at least 3".into());
+    }
+    let (x, y) = if spearman {
+        (average_ranks(&x), average_ranks(&y))
+    } else {
+        (x, y)
+    };
+    let n = Q::from_integer(BigInt::from(x.len()));
+    let (mean_x, mean_y) = (
+        x.iter().fold(Q::zero(), |s, v| s + v) / &n,
+        y.iter().fold(Q::zero(), |s, v| s + v) / &n,
+    );
+    let sxx = x
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_x) * (v - &mean_x));
+    let syy = y
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_y) * (v - &mean_y));
+    let sxy = x
+        .iter()
+        .zip(&y)
+        .fold(Q::zero(), |s, (a, b)| s + (a - &mean_x) * (b - &mean_y));
+    if sxx.is_zero() || syy.is_zero() {
+        return Err("a variable is constant: the correlation is undefined".into());
+    }
+    // r^2 is rational; r carries the sign of the covariance.
+    let r_squared = &sxy * &sxy / (&sxx * &syy);
+    let r = float(&r_squared).sqrt() * if sxy.is_negative() { -1.0 } else { 1.0 };
+    let df = x.len() as f64 - 2.0;
+    let t = if r_squared == Q::from_integer(BigInt::from(1)) {
+        f64::INFINITY * r.signum()
+    } else {
+        r * (df / (1.0 - r * r)).sqrt()
+    };
+    let p = if t.is_infinite() {
+        0.0
+    } else {
+        p_of_t(t, df, alt)
+    };
+    Ok(format!(
+        "{} = {} (r^2 = {}), t = {}, df = {}, p = {} ({})",
+        if spearman {
+            "Spearman rho"
+        } else {
+            "Pearson r"
+        },
+        number(r),
+        show(&r_squared),
+        number(t),
+        df,
+        number(p),
+        label(alt)
+    ))
+}
+
+/// `mann_whitney(a, b)`: the rank-sum test. The p-value is exact (all assignments of the pooled ranks, ties included) for up
+/// to 40 observations and the normal approximation with a continuity correction beyond that.
+fn mann_whitney(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let a = list(session, args.first().ok_or("mann_whitney(a, b)")?).ok_or("a must be a list")?;
+    let b = list(session, args.get(1).ok_or("mann_whitney(a, b)")?).ok_or("b must be a list")?;
+    if a.is_empty() || b.is_empty() {
+        return Err("both samples need at least one value".into());
+    }
+    let (n1, n2) = (a.len(), b.len());
+    let pooled: Vec<Q> = a.iter().chain(&b).cloned().collect();
+    let ranks = average_ranks(&pooled);
+    let two = Q::from_integer(BigInt::from(2));
+    // Ranks doubled are integers: the sum over the first sample, W, and U = W - n1 (n1 + 1) / 2.
+    let doubled: Vec<usize> = ranks
+        .iter()
+        .map(|r| (r * &two).to_integer().to_usize().unwrap_or(0))
+        .collect();
+    let observed_w2: usize = doubled[..n1].iter().sum();
+    let u = Q::new(BigInt::from(observed_w2), BigInt::from(2))
+        - Q::new(BigInt::from(n1 * (n1 + 1)), BigInt::from(2));
+    let mean_u = Q::new(BigInt::from(n1 * n2), BigInt::from(2));
+    if n1 + n2 <= 40 {
+        // count[k][s]: the number of k-subsets with doubled-rank sum s.
+        let top: usize = doubled.iter().sum();
+        let mut count = vec![vec![BigInt::zero(); top + 1]; n1 + 1];
+        count[0][0] = BigInt::from(1);
+        for &v in &doubled {
+            for k in (0..n1).rev() {
+                for s in (0..=top - v).rev() {
+                    if !count[k][s].is_zero() {
+                        let add = count[k][s].clone();
+                        count[k + 1][s + v] += add;
+                    }
+                }
+            }
+        }
+        let total = choose((n1 + n2) as u64, n1 as u64);
+        let observed_distance = (&u - &mean_u).abs();
+        let mut extreme = BigInt::zero();
+        for s in 0..=top {
+            if count[n1][s].is_zero() {
+                continue;
+            }
+            let candidate = Q::new(BigInt::from(s), BigInt::from(2))
+                - Q::new(BigInt::from(n1 * (n1 + 1)), BigInt::from(2));
+            if (&candidate - &mean_u).abs() >= observed_distance {
+                extreme += &count[n1][s];
+            }
+        }
+        let p = Q::new(extreme, total);
+        return Ok(format!(
+            "U = {}, p = {} = {} (two-sided, exact); U1 = {}, U2 = {}",
+            show(&u),
+            number(float(&p)),
+            show(&p),
+            show(&u),
+            show(&(Q::from_integer(BigInt::from(n1 * n2)) - &u))
+        ));
+    }
+    let (n1f, n2f) = (n1 as f64, n2 as f64);
+    let sigma = (n1f * n2f * (n1f + n2f + 1.0) / 12.0).sqrt();
+    let correction = if float(&(&u - &mean_u)) > 0.0 {
+        -0.5
+    } else {
+        0.5
+    };
+    let z = (float(&(&u - &mean_u)) + correction) / sigma;
+    Ok(format!(
+        "U = {}, z = {}, p = {} (two-sided, normal approximation)",
+        show(&u),
+        number(z),
+        number(normal_p(z, Alternative::Two))
     ))
 }

@@ -128,6 +128,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "fisher_exact" | "fisher_test" | "fisher" => "fisher",
         "correlation_test" | "pearson_test" | "pearson" => "pearson",
         "spearman" | "spearman_test" | "spearmanr" => "spearman",
+        "kendall" | "kendall_tau" | "kendalltau" | "kendall_test" => "kendall",
         "mann_whitney" | "mannwhitney" | "mann_whitney_u" | "wilcoxon_rank_sum" => "mann_whitney",
         "regression_test" | "regress" | "linregress" | "regression_inference" => "regress",
         "wilcoxon" | "wilcoxon_signed_rank" | "wilcoxon_test" => "wilcoxon",
@@ -145,6 +146,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "pearson" | "spearman" => {
             return Some(correlation(session, &args, command == "spearman", alt));
         }
+        "kendall" => return Some(kendall(session, &args)),
         "mann_whitney" => return Some(mann_whitney(session, &args)),
         "regress" => return Some(regress(session, &args)),
         "wilcoxon" => return Some(wilcoxon(session, &args)),
@@ -879,5 +881,124 @@ fn kruskal(session: &mut UraeSession, args: &[String]) -> Result<String, String>
         number(h),
         df,
         number(chi_square_p(h, df))
+    ))
+}
+
+/// Kendall's tau-b of two paired samples: concordant minus discordant pairs over the tie-adjusted pair count.
+fn kendall_stats(x: &[Q], y: &[Q]) -> (i64, f64) {
+    let n = x.len();
+    let mut s = 0i64;
+    for i in 0..n {
+        for j in i + 1..n {
+            let (a, b) = ((&x[i]).cmp(&x[j]), (&y[i]).cmp(&y[j]));
+            use std::cmp::Ordering::Equal;
+            if a != Equal && b != Equal {
+                s += if a == b { 1 } else { -1 };
+            }
+        }
+    }
+    let pairs = (n * (n - 1) / 2) as i64;
+    let ties_x = pairs - tie_pairs(x);
+    let ties_y = pairs - tie_pairs(y);
+    (s, s as f64 / ((ties_x as f64) * (ties_y as f64)).sqrt())
+}
+
+fn tie_pairs(v: &[Q]) -> i64 {
+    // The number of pairs that are not tied.
+    let n = v.len();
+    let mut count = 0;
+    for i in 0..n {
+        for j in i + 1..n {
+            if v[i] != v[j] {
+                count += 1;
+            }
+        }
+    }
+    (n * (n - 1) / 2) as i64 - count
+}
+
+/// `kendall(x, y)`: tau-b with an exact permutation p-value up to 8 pairs and the tie-corrected normal approximation beyond.
+fn kendall(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let x = list(session, args.first().ok_or("kendall(x, y)")?).ok_or("x must be a list")?;
+    let y = list(session, args.get(1).ok_or("kendall(x, y)")?).ok_or("y must be a list")?;
+    let n = x.len();
+    if n != y.len() || n < 3 {
+        return Err("x and y need the same length, at least 3".into());
+    }
+    let (s, tau) = kendall_stats(&x, &y);
+    if tau.is_nan() {
+        return Err("a sample is constant: tau is undefined".into());
+    }
+    if n <= 8 {
+        // Every rearrangement of y against x, counting those at least as extreme.
+        let mut perm: Vec<usize> = (0..n).collect();
+        let (mut extreme, mut total) = (0u64, 0u64);
+        let mut c = vec![0usize; n];
+        let mut check = |perm: &[usize]| {
+            let permuted: Vec<Q> = perm.iter().map(|&i| y[i].clone()).collect();
+            let (s2, _) = kendall_stats(&x, &permuted);
+            total += 1;
+            if s2.abs() >= s.abs() {
+                extreme += 1;
+            }
+        };
+        check(&perm);
+        let mut i = 0;
+        while i < n {
+            if c[i] < i {
+                if i % 2 == 0 {
+                    perm.swap(0, i);
+                } else {
+                    perm.swap(c[i], i);
+                }
+                check(&perm);
+                c[i] += 1;
+                i = 0;
+            } else {
+                c[i] = 0;
+                i += 1;
+            }
+        }
+        return Ok(format!(
+            "tau-b = {}, S = {}, n = {}, p = {} = {}/{} (two-sided, exact)",
+            number(tau),
+            s,
+            n,
+            number(extreme as f64 / total as f64),
+            extreme,
+            total
+        ));
+    }
+    let nf = n as f64;
+    let group = |v: &[Q]| -> (f64, f64, f64) {
+        let mut sorted = v.to_vec();
+        sorted.sort();
+        let (mut a, mut b, mut c, mut i) = (0.0, 0.0, 0.0, 0);
+        while i < sorted.len() {
+            let mut j = i;
+            while j + 1 < sorted.len() && sorted[j + 1] == sorted[i] {
+                j += 1;
+            }
+            let t = (j - i + 1) as f64;
+            a += t * (t - 1.0) * (2.0 * t + 5.0);
+            b += t * (t - 1.0) * (t - 2.0);
+            c += t * (t - 1.0);
+            i = j + 1;
+        }
+        (a, b, c)
+    };
+    let (ax, bx, cx) = group(&x);
+    let (ay, by, cy) = group(&y);
+    let variance = (nf * (nf - 1.0) * (2.0 * nf + 5.0) - ax - ay) / 18.0
+        + bx * by / (9.0 * nf * (nf - 1.0) * (nf - 2.0))
+        + cx * cy / (2.0 * nf * (nf - 1.0));
+    let z = s as f64 / variance.sqrt();
+    Ok(format!(
+        "tau-b = {}, S = {}, n = {}, z = {}, p = {} (two-sided, normal approximation)",
+        number(tau),
+        s,
+        n,
+        number(z),
+        number(normal_p(z, Alternative::Two))
     ))
 }

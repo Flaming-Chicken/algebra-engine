@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-20
+
+A usability release. A probe loop that feeds the engine the plain inputs a first user types (and checks every answer against an
+independent oracle) found and fixed over a dozen wrong answers and dozens of inputs that were echoed back unevaluated.
+Each item below has a test and an entry in `docs/LEDGER.md` (`R14`-`R71`). The wrong answers fixed: `10!!` (was the factorial of
+10!), `5 xor 3` (was `15 · xor`), `0xFF` (was 0), `0b1010 + 1`, `diff(x^2*y^3, x, y)` (dropped the second variable),
+`convert 3 kg + 500 g to g` (dropped a term), `range(5)`, `diff([1,4,9,16])`, `diag(A)` of a matrix, `reset`, and matrix
+variables that stored nothing.
+
 ### Added and fixed
 
 - Added: homogeneous linear systems of ODEs with constant coefficients, `dsolve([x' = y, y' = -x])` and with initial conditions `dsolve([x' = 2*x + y, y' = x + 2*y], x(0) = 1, y(0) = 0)`; it was a parse error.

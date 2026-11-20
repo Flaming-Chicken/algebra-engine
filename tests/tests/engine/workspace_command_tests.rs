@@ -7029,15 +7029,64 @@ fn matrix_square_root_squares_back_and_is_exact_when_the_root_is_rational() {
 }
 
 #[test]
-fn zz_probe_riccati() {
-    for q in [
-        "dsolve(y' = (2/x)*y + 1)",
-        "dsolve(y' = y^2 - 2/x^2)",
-        "dsolve(y' = -(1/x)*y - 1)",
-        "dsolve(y' + (3/x)*y = 1)",
-    ] {
-        let mut session = UraeSession::new();
-        let r = session.execute_line(q);
-        println!("{q} => {} / {}", r.output_text, r.is_error);
+fn riccati_equations_are_solved_by_a_particular_solution_and_satisfy_the_equation() {
+    type Rhs = fn(f64, f64) -> f64;
+    let cases: [(&str, Rhs); 3] = [
+        ("y' = y^2 - 2/x^2", |x, y| y * y - 2.0 / (x * x)),
+        ("y' = y^2 - 2*x*y + x^2 + 1", |x, y| {
+            y * y - 2.0 * x * y + x * x + 1.0
+        }),
+        ("y' = -y^2 + y/x - 1/x^2", |x, y| {
+            -y * y + y / x - 1.0 / (x * x)
+        }),
+    ];
+    for (equation, rhs) in cases {
+        let out = run(&format!("dsolve({equation})"));
+        assert!(out.contains("Riccati"), "{equation}: {out}");
+        let solution = out
+            .strip_prefix("y(x) = ")
+            .unwrap()
+            .split("  (Riccati")
+            .next()
+            .unwrap()
+            .to_string();
+        let value = |x: f64, c: f64| -> f64 {
+            // Replace the variable x only where it is a whole token (not inside exp, for instance).
+            let chars: Vec<char> = solution
+                .replace("C1", &format!("({c:?})"))
+                .chars()
+                .collect();
+            let mut text = String::new();
+            for (i, ch) in chars.iter().enumerate() {
+                let alone = (i == 0 || !chars[i - 1].is_alphanumeric())
+                    && chars.get(i + 1).is_none_or(|n| !n.is_alphanumeric());
+                if *ch == 'x' && alone {
+                    text.push_str(&format!("({x:?})"));
+                } else {
+                    text.push(*ch);
+                }
+            }
+            run(&format!("evalf({text})"))
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("{solution}"))
+        };
+        // y' = f(x, y) at several points for two values of the constant.
+        for c in [0.37, 9.9] {
+            for x in [1.3, 2.1, 3.4] {
+                let h = 1e-5;
+                let derivative = (value(x + h, c) - value(x - h, c)) / (2.0 * h);
+                let y = value(x, c);
+                assert!(
+                    (derivative - rhs(x, y)).abs() < 1e-4 * (1.0 + y.abs().powi(2)),
+                    "{equation}: x = {x}, c = {c}: y' = {derivative}, f = {}: {out}",
+                    rhs(x, y)
+                );
+            }
+        }
+        // The general solution carries a free constant: two constants give different curves.
+        assert!((value(2.0, 0.37) - value(2.0, 9.9)).abs() > 1e-6, "{out}");
     }
+    // A Riccati equation without a power-law particular solution is not claimed to be solved.
+    assert!(!run("dsolve(y' = y^2 + x)").contains("Riccati"));
 }

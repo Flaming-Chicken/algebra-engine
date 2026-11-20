@@ -262,13 +262,15 @@ fn riccati(
     }
     let q1 = substitute(session, &first, y, "0")?;
     let q0 = substitute(session, &f, y, "0")?;
-    let rebuilt = session
-        .eval(&format!(
-            "simplify(({f}) - (({q0}) + ({q1})*{y} + ({q2})*{y}^2))"
-        ))
-        .ok()?;
-    if rebuilt.trim() != "0" {
-        return None;
+    // The equation is quadratic in y exactly when f - (q0 + q1 y + q2 y^2) vanishes; checked at exact sample points because
+    // the simplifier does not always cancel equal terms written in different forms.
+    let difference = format!("({f}) - (({q0}) + ({q1})*{y} + ({q2})*{y}^2)");
+    for (xv, yv) in [("3", "2"), ("5", "-7"), ("2", "1/3")] {
+        let at_x = substitute(session, &difference, x, xv)?;
+        let at_point = substitute(session, &at_x, y, yv)?;
+        if at_point.trim() != "0" {
+            return None;
+        }
     }
     // The residual y_p' - f(x, y_p) of a candidate, as an expression in x (and the constant c).
     let residual_of = |session: &mut UraeSession, shape: &str| -> Option<String> {
@@ -294,7 +296,14 @@ fn riccati(
             }
             let particular = substitute(session, &shape, "c", root)?;
             let check = residual_of(session, &particular)?;
-            if check.trim() != "0" {
+            let mut vanishes = true;
+            for xv in ["3", "5", "7/2"] {
+                if substitute(session, &check, x, xv)?.trim() != "0" {
+                    vanishes = false;
+                    break;
+                }
+            }
+            if !vanishes {
                 continue;
             }
             let coefficient = session

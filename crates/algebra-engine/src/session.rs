@@ -76,6 +76,8 @@ pub struct UraeSession {
     pub user_functions: HashMap<String, (Vec<String>, String)>,
     /// Symbolic variable aliases `name -> rhs_expr_str` (e.g. `p = (x + 1)^2`).
     pub user_aliases: HashMap<String, String>,
+    /// Matrix and vector variables `name -> [[1,2],[3,4]]` (from `A = [[1,2],[3,4]]` or `B = A*A`).
+    pub matrix_vars: HashMap<String, String>,
     /// Most recent successfully computed AST node (used for `ans`).
     pub last_result_expr: Option<ExprId>,
     /// Most recent parseable mathematical result string (used for `ans`).
@@ -105,6 +107,7 @@ impl UraeSession {
             symbol_metadata: HashMap::new(),
             user_functions: HashMap::new(),
             user_aliases: HashMap::new(),
+            matrix_vars: HashMap::new(),
             last_result_expr: None,
             last_result_text: None,
             context: MathContext::default(),
@@ -123,6 +126,7 @@ impl UraeSession {
         self.symbol_metadata.clear();
         self.user_functions.clear();
         self.user_aliases.clear();
+        self.matrix_vars.clear();
         self.last_result_expr = None;
         self.last_result_text = None;
         self.context = MathContext::default();
@@ -371,6 +375,70 @@ impl UraeSession {
         cur
     }
 
+    /// `A = [[1,2],[3,4]]`, `v = [1,2]`, `B = A*A`, `C = inverse(A)`: store a matrix variable. `None` when the line is not a
+    /// matrix assignment (and then forgets an older matrix of that name, because the name is being reassigned).
+    fn try_matrix_assignment(&mut self, input: &str) -> Option<OperationResult> {
+        let (lhs, rhs) = input.split_once('=')?;
+        if rhs.starts_with('=') || lhs.ends_with(['<', '>', '!', '=']) {
+            return None;
+        }
+        let lhs = lhs.trim();
+        let valid = lhs
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && lhs != "ans";
+        if !valid {
+            return None;
+        }
+        let rhs = rhs.trim();
+        let expanded = subst_identifiers(rhs, &self.matrix_vars);
+        let literal = crate::executor::is_single_bracket_group(&expanded);
+        if !literal && expanded == rhs && !rhs.contains('[') {
+            self.matrix_vars.remove(lhs);
+            return None;
+        }
+        let evaluated = crate::matexpr::evaluate(&self.graph, &expanded);
+        let shown = match evaluated {
+            Some(Ok(text)) if text.trim_start().starts_with('[') => text,
+            Some(Err(e)) => return Some(OperationResult::error(e)),
+            _ if literal => expanded.clone(),
+            _ => {
+                self.matrix_vars.remove(lhs);
+                return None;
+            }
+        };
+        // The display form `[ a, b ; c, d ]` back to nested lists `[[a,b],[c,d]]`.
+        let compact: String = shown.split_whitespace().collect();
+        let stored = if shown.contains(';') {
+            let inner = shown
+                .trim()
+                .strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .unwrap_or(&shown);
+            let rows: Vec<String> = inner
+                .split(';')
+                .map(|row| format!("[{}]", split_top_commas(row).join(",")))
+                .collect();
+            format!("[{}]", rows.join(","))
+        } else if compact.starts_with("[[") {
+            compact
+        } else {
+            let inner = shown
+                .trim()
+                .strip_prefix('[')
+                .and_then(|r| r.strip_suffix(']'))
+                .unwrap_or(&shown);
+            format!("[{}]", split_top_commas(inner).join(","))
+        };
+        self.matrix_vars.insert(lhs.to_string(), stored);
+        self.bindings.remove(lhs);
+        self.user_aliases.remove(lhs);
+        let out = format!("{lhs} = {shown}");
+        Some(OperationResult::success(out.clone(), out.clone(), out))
+    }
+
     /// Parse and execute a single line of input against this session, updating state.
     pub fn execute_line(&mut self, input: &str) -> OperationResult {
         let mut result = self.execute_line_inner(input);
@@ -528,6 +596,17 @@ impl UraeSession {
 
         // Commands inside the arguments of another command (`factor(expand((x+1)^3 - 1))`,
         // `integrate(simplify(...), x)`) are evaluated first and replaced by their results.
+        // Matrix variables: `A = [[1,2],[3,4]]`, `B = A*A`; later `A^-1`, `det(A)`, `A*v` see the stored matrix.
+        if let Some(result) = self.try_matrix_assignment(trimmed) {
+            return result;
+        }
+        let matrix_expanded = if self.matrix_vars.is_empty() {
+            None
+        } else {
+            let expanded = subst_identifiers(trimmed, &self.matrix_vars);
+            (expanded != trimmed).then_some(expanded)
+        };
+        let trimmed = matrix_expanded.as_deref().unwrap_or(trimmed);
         let resolved = self.resolve_nested_commands(trimmed);
         let trimmed = resolved.as_deref().unwrap_or(trimmed);
 
@@ -1605,4 +1684,26 @@ fn implicit_product_spaces(input: &str) -> Option<String> {
         i += 1;
     }
     changed.then_some(out)
+}
+
+/// Split `a, b(c, d), e` at the commas outside brackets, trimmed.
+fn split_top_commas(text: &str) -> Vec<String> {
+    let (mut depth, mut cur, mut out) = (0i32, String::new(), Vec::new());
+    for c in text.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth == 0 {
+            out.push(cur.trim().to_string());
+            cur.clear();
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.trim().is_empty() {
+        out.push(cur.trim().to_string());
+    }
+    out
 }

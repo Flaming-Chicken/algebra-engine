@@ -387,6 +387,21 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
             let denominator = &joint + (Q::one() - prior) * false_positive;
             (!denominator.is_zero()).then(|| joint / denominator)
         }
+        ("arithmetic_sum", [first, difference, n]) if n.is_integer() && *n >= Q::zero() => {
+            // n terms a, a + d, ...: n (2a + (n - 1) d) / 2
+            Some(
+                n * (first * Q::from_integer(2.into()) + (n - Q::one()) * difference)
+                    / Q::from_integer(2.into()),
+            )
+        }
+        ("geometric_sum", [first, ratio, n]) if n.is_integer() && *n >= Q::zero() => {
+            let count = n.to_integer().to_u64().filter(|c| *c <= 5000)?;
+            if *ratio == Q::one() {
+                return Some(first * n);
+            }
+            let power = (0..count).fold(Q::one(), |acc, _| acc * ratio);
+            Some(first * (power - Q::one()) / (ratio - Q::one()))
+        }
         ("tribonacci", [n]) => {
             let n = as_u64(n, 100_000)?;
             let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());

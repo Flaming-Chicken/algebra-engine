@@ -447,6 +447,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `solve(x^8 = 1)`, `roots(x^6 - 64)`: exact roots of a binomial equation.
+        if let Some(outcome) = crate::binomial_roots::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // `spanning_trees(K4)`, `chromatic_polynomial(C5)`, `shortest_path(G, a, b)`: finite graphs.
         if let Some(outcome) = crate::graph_commands::run(trimmed) {
             return match outcome {

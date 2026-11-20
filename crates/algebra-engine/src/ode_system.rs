@@ -99,6 +99,7 @@ fn solve(
     let n = unknowns.len();
     // The matrix A: a_ij = d(rhs_i) / d(v_j), which must be a number, and rhs_i = sum a_ij v_j exactly.
     let mut a: Vec<Vec<String>> = Vec::new();
+    let mut forcing: Vec<Option<String>> = Vec::new();
     for rhs in right_sides {
         let mut row = Vec::new();
         let mut rebuilt = Vec::new();
@@ -123,13 +124,35 @@ fn solve(
             rebuilt.push(format!("({derivative})*{v}"));
             row.push(derivative);
         }
-        // Nothing may remain once the linear part is removed (no forcing terms).
+        // What remains once the linear part is removed is the forcing term: it may depend on t only.
         let remainder = session.eval(&format!("({rhs}) - ({})", rebuilt.join(" + ")))?;
         if remainder.trim() != "0" {
-            return Err(
-                "only homogeneous linear systems are supported: the right side has a term that is not linear in the unknowns"
-                    .into(),
-            );
+            let id = ExprParser::new(&session.graph)
+                .parse(&remainder)
+                .map_err(|e| e.to_string())?;
+            let mut symbols = std::collections::BTreeSet::new();
+            crate::poly::collect_expr_symbols(&session.graph, id, &mut symbols);
+            let only_t = symbols.iter().all(|s| {
+                matches!(
+                    session.graph.symbols.resolve(*s).as_deref(),
+                    Some("t" | "pi" | "π" | "e" | "i")
+                )
+            });
+            if !only_t {
+                return Err(
+                    "only linear systems are supported: the right side has a term that is not linear in the unknowns and not a function of t"
+                        .into(),
+                );
+            }
+            // Its Laplace transform, a rational function of s for constants, powers, exponentials, sines and cosines.
+            let transformed = session.eval(&format!("laplace({remainder}, t, s)"))?;
+            // `eval` returns the value; keep the part after "(s) = " should a prefix be present.
+            let value = transformed
+                .split_once("(s) = ")
+                .map_or(transformed.clone(), |(_, v)| v.trim().to_string());
+            forcing.push(Some(value));
+        } else {
+            forcing.push(None);
         }
         a.push(row);
     }
@@ -180,7 +203,20 @@ fn solve(
         let terms: Vec<String> = (0..n)
             .map(|j| format!("({})*{}", phi[i][j], constants[j]))
             .collect();
-        let value = session.eval(&terms.join(" + "))?;
+        let mut value = session.eval(&terms.join(" + "))?;
+        // The particular solution: the inverse transform of sum_j R_ij F_j(s) (zero initial state).
+        let driven: Vec<String> = (0..n)
+            .filter_map(|j| {
+                forcing[j]
+                    .as_ref()
+                    .map(|f| format!("({})*({f})", entries[i][j]))
+            })
+            .collect();
+        if !driven.is_empty() {
+            let particular =
+                crate::inverse_laplace::invert(session, &driven.join(" + "), "s", "t")?;
+            value = session.eval(&format!("({value}) + ({particular})"))?;
+        }
         lines.push(format!("{name}(t) = {value}"));
     }
     Ok(lines.join(", "))

@@ -104,6 +104,9 @@ pub fn invert(
 ) -> Result<String, String> {
     // The rational function as numerator / denominator polynomials in s.
     let together = session.eval(&format!("cancel(together({f_text}))"))?;
+    if together.trim() == "0" {
+        return Ok("0".into());
+    }
     let (numerator, denominator) = {
         let graph = &session.graph;
         let id = ExprParser::new(graph)

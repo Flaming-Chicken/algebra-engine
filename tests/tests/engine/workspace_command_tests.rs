@@ -1577,3 +1577,76 @@ fn linear_recurrences_have_closed_forms_that_reproduce_the_sequence() {
             .is_error
     );
 }
+
+#[test]
+fn sequence_rules_predict_the_true_continuation() {
+    // For each sequence, the next five terms printed by the finder equal the terms computed here from the true rule.
+    type Rule = fn(usize) -> i64;
+    let polynomial_cases: [(&str, Rule); 6] = [
+        ("squares", |n| (n * n) as i64),
+        ("cubes", |n| (n * n * n) as i64),
+        ("triangular", |n| (n * (n + 1) / 2) as i64),
+        ("odd", |n| 2 * n as i64 - 1),
+        ("quartic", |n| {
+            (n * n * n * n) as i64 - 3 * (n * n) as i64 + 7
+        }),
+        ("shifted", |n| 5 * n as i64 + 11),
+    ];
+    for (name, rule) in polynomial_cases {
+        let given: Vec<String> = (1..=7).map(|n| rule(n).to_string()).collect();
+        let out = run(&format!("next_term {}", given.join(", ")));
+        let next: Vec<i64> = out
+            .rsplit("next terms: ")
+            .next()
+            .unwrap()
+            .split(", ")
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(
+            next,
+            (8..=12).map(rule).collect::<Vec<_>>(),
+            "{name}: {out}"
+        );
+    }
+    // Linear recurrences with constant coefficients, from 2r + 1 terms (one confirming term).
+    type Recurrence<'a> = (&'a str, Vec<i64>, Vec<i64>);
+    let recurrences: [Recurrence; 5] = [
+        ("fibonacci", vec![1, 1], vec![1, 1]),
+        ("lucas", vec![2, 1], vec![1, 1]),
+        ("affine", vec![1], vec![3]),
+        ("pell", vec![0, 1], vec![1, 2]),
+        ("third order", vec![1, 2, 4], vec![1, 0, 1]),
+    ];
+    for (name, start, coefficients) in recurrences {
+        let order = coefficients.len();
+        // The affine rule a(n) = 3 a(n-1) + 1 satisfies a homogeneous recurrence of order 2.
+        let minimal_order = order + usize::from(name == "affine");
+        let mut terms = start.clone();
+        while terms.len() < 2 * minimal_order + 6 {
+            let n = terms.len();
+            let value: i64 = (0..order)
+                .map(|i| coefficients[i] * terms[n - 1 - i])
+                .sum::<i64>()
+                + if name == "affine" { 1 } else { 0 };
+            terms.push(value);
+        }
+        let given = &terms[..terms.len() - 5];
+        let text: Vec<String> = given.iter().map(i64::to_string).collect();
+        let out = run(&format!("find_pattern {}", text.join(", ")));
+        let next: Vec<i64> = out
+            .rsplit("next terms: ")
+            .next()
+            .unwrap()
+            .split(", ")
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(next, terms[terms.len() - 5..].to_vec(), "{name}: {out}");
+    }
+    // Nothing is invented for the primes.
+    assert!(
+        UraeSession::new()
+            .execute_line("find_pattern 2, 3, 5, 7, 11, 13, 17, 19")
+            .is_error
+    );
+    assert!(run("next_term 1, 4, 9, 16").starts_with("a(n) = n^2"));
+}

@@ -1643,6 +1643,9 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "stddev" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "next_term" | "nth_term" | "find_pattern" | "sequence_rule" | "guess_sequence" => {
+            "next_term"
+        }
         "percentile" => "percentile",
         "quantile" => "quantile",
         "quartiles" => "quartiles",

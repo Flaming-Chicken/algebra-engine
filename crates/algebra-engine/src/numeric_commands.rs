@@ -1264,12 +1264,29 @@ fn percentile_command(
     )))
 }
 
+/// `next_term 1, 4, 9, 16` and `find_pattern`: the rule of a sequence and its next terms.
+fn sequence_rule_command(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    let items: Vec<String> = if args.len() == 1 {
+        list_items(&args[0])
+    } else {
+        split_args(args)
+    };
+    let terms: Vec<Q> = items
+        .iter()
+        .map(|i| exact(graph, i))
+        .collect::<Result<_, _>>()?;
+    crate::sequence_rule::describe(graph, &terms, 5).map(NumericOutput::Text)
+}
+
 /// Run a numerical command by name.
 pub fn run(graph: &ExprGraph, name: &str, args: &[String]) -> Result<NumericOutput, String> {
     match name {
         "gradient" | "hessian" | "jacobian" | "divergence" | "curl" | "laplacian" | "cross"
         | "dot" | "norm" => crate::vectorcalc::run(graph, name, args),
         "product" => product(graph, args),
+        "next_term" | "find_pattern" | "nth_term" | "sequence_rule" | "guess_sequence" => {
+            sequence_rule_command(graph, args)
+        }
         "percentile" | "quantile" => percentile_command(graph, name, args),
         "dec2bin" | "bin2dec" | "dec2hex" | "hex" | "hex2dec" | "dec2oct" | "oct" | "oct2dec"
         | "subsets" | "powerset" | "power_set" | "permutations_list" | "cycle_type"
@@ -1332,6 +1349,9 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "stddev" | "std" | "sd" => "stddev",
         "pstddev" => "pstddev",
         "product" | "prod" => "product",
+        "next_term" | "nth_term" | "find_pattern" | "sequence_rule" | "guess_sequence" => {
+            "next_term"
+        }
         "percentile" => "percentile",
         "quantile" => "quantile",
         "quartiles" => "quartiles",

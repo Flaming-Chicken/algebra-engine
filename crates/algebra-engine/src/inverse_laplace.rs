@@ -102,6 +102,18 @@ pub fn invert(
     s_name: &str,
     t_name: &str,
 ) -> Result<String, String> {
+    invert_mode(session, f_text, s_name, t_name, false)
+}
+
+/// With `z_mode` the function is `X(z) / z` and the terms are those of the inverse Z-transform: `A / (z - a)^j` gives
+/// `A C(n, j-1) a^(n-j+1)`, and the poles at zero give unit impulses.
+fn invert_mode(
+    session: &mut UraeSession,
+    f_text: &str,
+    s_name: &str,
+    t_name: &str,
+    z_mode: bool,
+) -> Result<String, String> {
     // The rational function as numerator / denominator polynomials in s.
     let together = session.eval(&format!("cancel(together({f_text}))"))?;
     if together.trim() == "0" {
@@ -175,6 +187,7 @@ pub fn invert(
     let solution = solve(matrix, rhs).ok_or("the partial-fraction system is singular")?;
     // Invert each term.
     let mut terms: Vec<String> = Vec::new();
+    let mut impulses: Vec<String> = Vec::new();
     for (i, (qi, ki)) in factors.iter().enumerate() {
         for j in 1..=*ki {
             let coefficient = |c: usize| -> Q {
@@ -192,6 +205,26 @@ pub fn invert(
                         continue;
                     }
                     let factorial: BigInt = (1..j as i64).map(BigInt::from).product();
+                    if z_mode {
+                        let m = j as i64 - 1;
+                        if a.is_zero() {
+                            impulses.push(format!("{}*delta[{t_name}-{m}]", q(&big_a)));
+                        } else {
+                            let falling: Vec<String> =
+                                (0..m).map(|r| format!("({t_name}-{r})")).collect();
+                            let binomial = if m == 0 {
+                                "1".to_string()
+                            } else {
+                                format!("{}/{factorial}", falling.join("*"))
+                            };
+                            terms.push(format!(
+                                "{}*{binomial}*{}^({t_name}-{m})",
+                                q(&big_a),
+                                q(&a)
+                            ));
+                        }
+                        continue;
+                    }
                     terms.push(format!(
                         "{}*{t_name}^{}/{factorial}*exp({}*{t_name})",
                         q(&big_a),
@@ -200,6 +233,11 @@ pub fn invert(
                     ));
                 }
                 2 => {
+                    if z_mode {
+                        return Err(
+                            "complex poles are not supported by the inverse Z-transform yet".into(),
+                        );
+                    }
                     if j > 1 {
                         return Err(
                             "repeated irreducible quadratic factors are not supported".into()
@@ -246,8 +284,50 @@ pub fn invert(
             }
         }
     }
-    if terms.is_empty() {
+    if terms.is_empty() && impulses.is_empty() {
         return Ok("0".into());
     }
-    session.eval(&terms.join(" + "))
+    let body = if terms.is_empty() {
+        None
+    } else {
+        Some(session.eval(&terms.join(" + "))?)
+    };
+    if !z_mode {
+        return Ok(body.unwrap_or_else(|| "0".into()));
+    }
+    // Impulses are printed as delta[n-k] (an impulse at n = k).
+    let tail: Vec<String> = impulses
+        .iter()
+        .map(|i| i.replace("*delta", " delta").replace("-0]", "]"))
+        .collect();
+    Ok(match body {
+        Some(b) if tail.is_empty() => b,
+        Some(b) => format!("{b} + {}", tail.join(" + ")),
+        None => tail.join(" + "),
+    })
+}
+
+/// `inverse_ztransform(X(z), z, n)`: the sequence of a rational `X(z)` (right-sided, real poles).
+pub fn run_z(session: &mut UraeSession, input: &str) -> Option<Result<String, String>> {
+    let t = input.trim();
+    let open = t.find('(')?;
+    let name = t[..open].trim().to_ascii_lowercase();
+    if !matches!(
+        name.as_str(),
+        "inverse_ztransform" | "iztransform" | "inverse_z" | "izt" | "inverse_z_transform"
+    ) || !t.ends_with(')')
+    {
+        return None;
+    }
+    let args = split_top(&t[open + 1..t.len() - 1]);
+    if args.is_empty() || args.len() > 3 {
+        return Some(Err("inverse_ztransform(X, z, n)".into()));
+    }
+    let z_name = args.get(1).cloned().unwrap_or_else(|| "z".into());
+    let n_name = args.get(2).cloned().unwrap_or_else(|| "n".into());
+    let divided = format!("({})/({z_name})", args[0]);
+    Some(
+        invert_mode(session, &divided, &z_name, &n_name, true)
+            .map(|value| format!("Z^-1{{{}}}[{n_name}] = {value}", args[0])),
+    )
 }

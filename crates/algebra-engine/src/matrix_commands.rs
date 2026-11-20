@@ -350,6 +350,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "logit",
         "poisson_regress",
         "poisson_regression",
+        "lr_test",
+        "likelihood_ratio_test",
     ];
     if !known.contains(&name.as_str()) {
         return None;
@@ -374,6 +376,7 @@ fn evaluate(
         }
         "poisson_regress" | "poisson_regression" => poisson_regression(session, a, args),
         "jordan" | "jordan_form" => jordan(session, a),
+        "lr_test" | "likelihood_ratio_test" => likelihood_ratio(session, a, args),
         "hessenberg" => hessenberg(session, a),
         "sqrtm" | "matrix_sqrt" => sqrtm(session, a),
         "rowspace" | "row_space" => {
@@ -1178,4 +1181,58 @@ fn sqrtm(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
         })
         .collect();
     Ok(format!("[ {} ]", rows.join(" ; ")))
+}
+
+/// `lr_test(X_full, X_reduced, y[, "logistic" | "poisson"])`: the likelihood-ratio test of the extra predictors of `X_full` over
+/// `X_reduced` (`none` for the intercept-only model): `2 (ll_full - ll_reduced)` against a chi-square with the difference in
+/// the number of predictors as its degrees of freedom.
+fn likelihood_ratio(
+    session: &mut UraeSession,
+    full: &Matrix,
+    args: &[String],
+) -> Result<String, String> {
+    let reduced_text = args.get(1).ok_or("lr_test(X_full, X_reduced, y)")?.clone();
+    let y_text = args.get(2).ok_or("lr_test(X_full, X_reduced, y)")?.clone();
+    let family = args
+        .get(3)
+        .map(|f| f.trim().trim_matches('"').to_ascii_lowercase())
+        .unwrap_or_else(|| "logistic".into());
+    let reduced: Matrix = if reduced_text.trim().eq_ignore_ascii_case("none") {
+        vec![Vec::new(); full.len()]
+    } else {
+        parse(session, &reduced_text).ok_or("X_reduced must be a matrix or none")?
+    };
+    if reduced.len() != full.len() {
+        return Err("the two models need the same observations".into());
+    }
+    if reduced[0].len() >= full[0].len() {
+        return Err("the reduced model must have fewer predictors than the full model".into());
+    }
+    let fit = |session: &mut UraeSession, x: &Matrix| -> Result<f64, String> {
+        let text = match family.as_str() {
+            "logistic" | "logit" | "binomial" => {
+                logistic_regression(session, x, &[String::new(), y_text.clone()])?
+            }
+            "poisson" => poisson_regression(session, x, &[String::new(), y_text.clone()])?,
+            other => return Err(format!("unknown family {other}: use logistic or poisson")),
+        };
+        text.split("log-likelihood = ")
+            .nth(1)
+            .and_then(|t| t.trim().parse().ok())
+            .ok_or_else(|| "could not read the log-likelihood".to_string())
+    };
+    let (ll_full, ll_reduced) = (fit(session, full)?, fit(session, &reduced)?);
+    let statistic = (2.0 * (ll_full - ll_reduced)).max(0.0);
+    let df = (full[0].len() - reduced[0].len()) as f64;
+    let p = 1.0 - crate::distributions_f64::eval("chi2_cdf", &[statistic, df]).unwrap_or(f64::NAN);
+    let num = |v: f64| {
+        let t = format!("{v:.6}");
+        t.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    Ok(format!(
+        "LR = {}, df = {}, p = {}",
+        num(statistic),
+        df,
+        num(p.clamp(0.0, 1.0))
+    ))
 }

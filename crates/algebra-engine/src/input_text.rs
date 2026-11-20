@@ -871,7 +871,27 @@ pub fn shorthand(input: &str) -> Option<String> {
     if let Some(rest) = t.strip_prefix("nth_root(") {
         return Some(format!("root({rest}"));
     }
-    derivative_shorthand(t)
+    choose_shorthand(t)
+        .or_else(|| bars_shorthand(t))
+        .or_else(|| derivative_shorthand(t))
         .or_else(|| limit_shorthand(t))
         .or_else(|| function_space_shorthand(t))
+}
+
+/// `10 choose 3` as `choose(10, 3)`.
+fn choose_shorthand(s: &str) -> Option<String> {
+    let (n, k) = s.split_once(" choose ")?;
+    let atom = |t: &str| {
+        let t = t.trim();
+        !t.is_empty()
+            && t.chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    };
+    (atom(n) && atom(k)).then(|| format!("choose({}, {})", n.trim(), k.trim()))
+}
+
+/// `|x - 3|` as `abs(x - 3)` (one pair of bars around the whole input).
+fn bars_shorthand(s: &str) -> Option<String> {
+    let inner = s.strip_prefix('|')?.strip_suffix('|')?;
+    (!inner.is_empty() && !inner.contains('|')).then(|| format!("abs({inner})"))
 }

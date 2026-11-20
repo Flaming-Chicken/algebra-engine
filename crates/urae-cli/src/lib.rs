@@ -92,7 +92,10 @@ pub fn run_repl() {
             break;
         }
 
-        if input.starts_with('{') || input.starts_with('[') {
+        // Only real JSON is a JSON request: `[[1,2],[3,4]] * A` and `{1, 2} union {3}` are ordinary input.
+        if (input.starts_with('{') || input.starts_with('['))
+            && serde_json::from_str::<serde_json::Value>(input).is_ok()
+        {
             let resp_json = process_json_request(&session.graph, input);
             println!("= {}\n", resp_json);
             continue;

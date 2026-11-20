@@ -27,7 +27,7 @@ impl Graph {
     }
 }
 
-fn split_top(text: &str) -> Vec<String> {
+pub(crate) fn split_top(text: &str) -> Vec<String> {
     let (mut depth, mut cur, mut out) = (0i32, String::new(), Vec::new());
     for c in text.chars() {
         match c {

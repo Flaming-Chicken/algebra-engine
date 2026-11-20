@@ -5689,3 +5689,288 @@ fn clairaut_equations_give_the_family_of_lines_and_a_valid_singular_envelope() {
     // Not Clairaut: the coefficient of x differs from y'.
     assert!(!run("dsolve(y = 2*x*y' + (y')^2)").contains("Clairaut"));
 }
+
+#[test]
+fn weighted_and_directed_graph_commands_match_brute_force() {
+    let mut state = 0x2468_ACE1_1357_9BDFu64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    let edge_list = |edges: &[(usize, usize, i64)]| {
+        format!(
+            "[{}]",
+            edges
+                .iter()
+                .map(|(a, b, w)| format!("[v{a},v{b},{w}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let first_number = |text: &str, key: &str| -> i64 {
+        text.split(key)
+            .nth(1)
+            .unwrap()
+            .trim()
+            .split([':', ',', ' '])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    for _ in 0..12 {
+        let n = 5 + next(2) as usize;
+        let m = n + 2 + next(4) as usize;
+        // Undirected positive weights: shortest paths against Floyd-Warshall.
+        let mut edges: Vec<(usize, usize, i64)> = (0..m)
+            .map(|_| {
+                (
+                    next(n as u64) as usize,
+                    next(n as u64) as usize,
+                    1 + next(9) as i64,
+                )
+            })
+            .filter(|(a, b, _)| a != b)
+            .collect();
+        // Keep the graph connected through a path of heavy edges.
+        for i in 0..n - 1 {
+            edges.push((i, i + 1, 10 + next(5) as i64));
+        }
+        let inf = i64::MAX / 4;
+        let mut d = vec![vec![inf; n]; n];
+        for i in 0..n {
+            d[i][i] = 0;
+        }
+        for &(a, b, w) in &edges {
+            d[a][b] = d[a][b].min(w);
+            d[b][a] = d[b][a].min(w);
+        }
+        for k in 0..n {
+            for i in 0..n {
+                for j in 0..n {
+                    d[i][j] = d[i][j].min(d[i][k] + d[k][j]);
+                }
+            }
+        }
+        let text = edge_list(&edges);
+        for (a, b) in [(0, n - 1), (1, n - 2), (2, 0)] {
+            let out = run(&format!("dijkstra({text}, v{a}, v{b})"));
+            assert_eq!(
+                first_number(&out, "length"),
+                d[a][b],
+                "{text} {a}->{b}: {out}"
+            );
+        }
+        // Minimum spanning tree against every (n-1)-subset of edges that connects the graph.
+        let mut best = i64::MAX;
+        for mask in 0u32..(1 << edges.len()) {
+            if mask.count_ones() as usize != n - 1 {
+                continue;
+            }
+            let mut root: Vec<usize> = (0..n).collect();
+            fn find(root: &mut Vec<usize>, x: usize) -> usize {
+                if root[x] == x {
+                    x
+                } else {
+                    let r = find(root, root[x]);
+                    root[x] = r;
+                    r
+                }
+            }
+            let mut ok = true;
+            let mut weight = 0;
+            for (i, &(a, b, w)) in edges.iter().enumerate() {
+                if mask >> i & 1 == 1 {
+                    let (ra, rb) = (find(&mut root, a), find(&mut root, b));
+                    if ra == rb {
+                        ok = false;
+                        break;
+                    }
+                    root[ra] = rb;
+                    weight += w;
+                }
+            }
+            if ok {
+                best = best.min(weight);
+            }
+        }
+        assert_eq!(
+            first_number(&run(&format!("minimum_spanning_tree({text})")), "weight"),
+            best,
+            "{text}"
+        );
+        // Directed forward edges (so there are no cycles) with negative weights allowed: Bellman-Ford against Floyd-Warshall.
+        let dag: Vec<(usize, usize, i64)> = (0..m)
+            .map(|_| {
+                let a = next(n as u64 - 1) as usize;
+                let b = a + 1 + next((n - a - 1) as u64) as usize;
+                (a, b, next(11) as i64 - 4)
+            })
+            .collect();
+        let mut f = vec![vec![inf; n]; n];
+        for i in 0..n {
+            f[i][i] = 0;
+        }
+        for &(a, b, w) in &dag {
+            f[a][b] = f[a][b].min(w);
+        }
+        for k in 0..n {
+            for i in 0..n {
+                for j in 0..n {
+                    if f[i][k] < inf && f[k][j] < inf {
+                        f[i][j] = f[i][j].min(f[i][k] + f[k][j]);
+                    }
+                }
+            }
+        }
+        let dag_text = edge_list(&dag);
+        for b in 1..n {
+            if !dag.iter().any(|(x, y, _)| *x == 0 || *y == 0)
+                || !dag.iter().any(|(x, y, _)| *x == b || *y == b)
+            {
+                continue;
+            }
+            let out = run(&format!("dijkstra({dag_text}, v0, v{b}, directed)"));
+            if out.contains("not a vertex") {
+                continue;
+            }
+            if f[0][b] >= inf {
+                assert!(
+                    out == "no path" || out.contains("not a vertex"),
+                    "{dag_text}: {out}"
+                );
+            } else {
+                assert_eq!(
+                    first_number(&out, "length"),
+                    f[0][b],
+                    "{dag_text} v0->v{b}: {out}"
+                );
+            }
+        }
+        // Topological order respects every edge.
+        let order = run(&format!("topological_sort({dag_text})"));
+        let position: Vec<&str> = order.split(", ").collect();
+        for &(a, b, _) in &dag {
+            let (pa, pb) = (
+                position.iter().position(|v| *v == format!("v{a}")),
+                position.iter().position(|v| *v == format!("v{b}")),
+            );
+            assert!(pa < pb, "{dag_text}: {order}");
+        }
+        // Max flow equals the minimum capacity over every cut; the reported cut has that capacity.
+        let capacity: Vec<(usize, usize, i64)> = (0..m + 3)
+            .map(|_| {
+                (
+                    next(n as u64) as usize,
+                    next(n as u64) as usize,
+                    1 + next(8) as i64,
+                )
+            })
+            .filter(|(a, b, _)| a != b)
+            .collect();
+        let (s, t) = (0usize, n - 1);
+        let mut mincut = i64::MAX;
+        for mask in 0u32..(1 << n) {
+            if mask >> s & 1 == 1 && mask >> t & 1 == 0 {
+                mincut = mincut.min(
+                    capacity
+                        .iter()
+                        .filter(|(a, b, _)| mask >> a & 1 == 1 && mask >> b & 1 == 0)
+                        .map(|(_, _, w)| w)
+                        .sum(),
+                );
+            }
+        }
+        if !capacity.iter().any(|(a, _, _)| *a == s) || !capacity.iter().any(|(_, b, _)| *b == t) {
+            continue;
+        }
+        let cap_text = edge_list(&capacity);
+        let out = run(&format!("max_flow({cap_text}, v{s}, v{t})"));
+        if out.contains("not a vertex") {
+            continue;
+        }
+        assert_eq!(first_number(&out, "max flow"), mincut, "{cap_text}: {out}");
+        let reported: i64 = out
+            .split("minimum cut:")
+            .nth(1)
+            .unwrap()
+            .split(", ")
+            .filter(|p| p.contains("->"))
+            .map(|p| {
+                let (a, b) = p.trim().split_once("->").unwrap();
+                let (a, b): (usize, usize) = (a[1..].parse().unwrap(), b[1..].parse().unwrap());
+                capacity
+                    .iter()
+                    .filter(|(x, y, _)| *x == a && *y == b)
+                    .map(|(_, _, w)| w)
+                    .sum::<i64>()
+            })
+            .sum();
+        assert_eq!(reported, mincut, "{cap_text}: {out}");
+        // Strongly connected components against mutual reachability.
+        let mut r = vec![vec![false; n]; n];
+        for i in 0..n {
+            r[i][i] = true;
+        }
+        for &(a, b, _) in &capacity {
+            r[a][b] = true;
+        }
+        for k in 0..n {
+            for i in 0..n {
+                for j in 0..n {
+                    if r[i][k] && r[k][j] {
+                        r[i][j] = true;
+                    }
+                }
+            }
+        }
+        let present: Vec<usize> = (0..n)
+            .filter(|v| capacity.iter().any(|(a, b, _)| a == v || b == v))
+            .collect();
+        let mut classes = 0;
+        let mut seen = vec![false; n];
+        for &v in &present {
+            if !seen[v] {
+                classes += 1;
+                for &u in &present {
+                    if r[v][u] && r[u][v] {
+                        seen[u] = true;
+                    }
+                }
+            }
+        }
+        let scc = run(&format!("scc({cap_text})"));
+        assert!(
+            scc.starts_with(&format!("{classes} strongly connected components")),
+            "{cap_text}: {scc}"
+        );
+    }
+    assert_eq!(
+        run("dijkstra([[a,b,1/2],[b,c,1/3],[a,c,1]], a, c)"),
+        "length 5/6: a - b - c"
+    );
+    assert_eq!(
+        run("max_flow([[s,a,3],[s,b,2],[a,t,2],[b,t,3],[a,b,1]], s, t)")
+            .split(',')
+            .next()
+            .unwrap(),
+        "max flow 5"
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("topological_sort([[a,b],[b,c],[c,a]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("dijkstra([[a,b,-1],[b,a,-1]], a, b, directed)")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("minimum_spanning_tree([[a,b,1],[c,d,2]])")
+            .is_error
+    );
+}

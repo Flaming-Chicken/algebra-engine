@@ -7495,3 +7495,87 @@ fn poisson_goodness_of_fit_matches_the_group_closed_forms() {
     let wild = run("poisson_regress([[0],[0],[0],[0],[1],[1],[1],[1]], [0,1,12,1,2,30,0,5])");
     assert!(field(&wild, "dispersion =") > 3.0, "{wild}");
 }
+
+#[test]
+fn planarity_counts_match_the_known_numbers_of_labelled_planar_graphs() {
+    // OEIS A066537: the numbers of labelled planar graphs on 4 and 5 vertices are 64 and 1023 (6 vertices: 32071, checked by the ignored test below).
+    let mut session = UraeSession::new();
+    for (n, expected) in [(4usize, 64usize), (5, 1023)] {
+        let pairs: Vec<(usize, usize)> = (0..n)
+            .flat_map(|a| (a + 1..n).map(move |b| (a, b)))
+            .collect();
+        let mut planar = 0;
+        for mask in 0u32..1 << pairs.len() {
+            let edges: Vec<String> = pairs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask >> i & 1 == 1)
+                .map(|(_, (a, b))| format!("[v{a},v{b}]"))
+                .collect();
+            if edges.is_empty() {
+                planar += 1;
+                continue;
+            }
+            let out = session
+                .execute_line(&format!("is_planar([{}])", edges.join(",")))
+                .output_text;
+            assert!(out == "true" || out == "false", "{out}");
+            if out == "true" {
+                planar += 1;
+            }
+        }
+        assert_eq!(planar, expected, "labelled planar graphs on {n} vertices");
+    }
+    // Named and classical graphs.
+    assert_eq!(run("is_planar(K4)"), "true");
+    assert_eq!(run("is_planar(K5)"), "false");
+    assert_eq!(run("is_planar(K6)"), "false");
+    assert_eq!(run("is_planar(C9)"), "true");
+    assert_eq!(run("is_planar(S6)"), "true");
+    let k33 = "[[a1,b1],[a1,b2],[a1,b3],[a2,b1],[a2,b2],[a2,b3],[a3,b1],[a3,b2],[a3,b3]]";
+    assert_eq!(run(&format!("is_planar({k33})")), "false");
+    // The cube and the octahedron are planar; the Petersen graph is not.
+    let cube = "[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]]";
+    assert_eq!(run(&format!("is_planar({cube})")), "true");
+    let octahedron = "[[1,2],[1,3],[1,4],[1,5],[6,2],[6,3],[6,4],[6,5],[2,3],[3,4],[4,5],[5,2]]";
+    assert_eq!(run(&format!("is_planar({octahedron})")), "true");
+    let petersen = "[[0,1],[1,2],[2,3],[3,4],[4,0],[0,5],[1,6],[2,7],[3,8],[4,9],[5,7],[7,9],[9,6],[6,8],[8,5]]";
+    assert_eq!(run(&format!("is_planar({petersen})")), "false");
+    // Two disjoint components are tested separately: a planar one next to K5 is not planar.
+    assert_eq!(
+        run(
+            "is_planar([[a,b],[b,c],[c,a],[p,q],[p,r],[p,s],[p,t],[q,r],[q,s],[q,t],[r,s],[r,t],[s,t]])"
+        ),
+        "false"
+    );
+}
+
+/// The exhaustive sweep over all 32768 labelled graphs on 6 vertices takes about twelve minutes in a debug build; run it with
+/// `cargo test -- --ignored planarity_on_six_vertices`. It passed on 20 Nov 2026 (32071, OEIS A066537).
+#[test]
+#[ignore]
+fn planarity_on_six_vertices_matches_oeis_a066537() {
+    let mut session = UraeSession::new();
+    let n = 6usize;
+    let pairs: Vec<(usize, usize)> = (0..n)
+        .flat_map(|a| (a + 1..n).map(move |b| (a, b)))
+        .collect();
+    let mut planar = 0;
+    for mask in 0u32..1 << pairs.len() {
+        let edges: Vec<String> = pairs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask >> i & 1 == 1)
+            .map(|(_, (a, b))| format!("[v{a},v{b}]"))
+            .collect();
+        if edges.is_empty()
+            || session
+                .execute_line(&format!("is_planar([{}])", edges.join(",")))
+                .output_text
+                == "true"
+        {
+            planar += 1;
+        }
+    }
+    assert_eq!(planar, 32071);
+}

@@ -185,6 +185,7 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "hamiltonian_cycle" | "hamilton_cycle" | "hamiltonian_circuit" => "hamiltonian_cycle",
         "max_matching" | "maximum_matching" | "matching_number" => "matching",
         "is_isomorphic" | "isomorphic" => "isomorphic",
+        "is_planar" | "planar" | "planarity" => "planar",
         "automorphisms" | "automorphism_count" | "aut" => "automorphisms",
         _ => return None,
     };
@@ -206,6 +207,7 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "hamiltonian_path" => hamiltonian(&g, false),
         "hamiltonian_cycle" => hamiltonian(&g, true),
         "automorphisms" => automorphisms(&g),
+        "planar" => planar(&g),
         _ => matching(&g),
     })
 }
@@ -270,4 +272,135 @@ fn automorphisms(g: &Graph) -> Result<String, String> {
     let mut found = 0;
     extend(&a, &a, &mut Vec::new(), 0, true, &mut found);
     Ok(found.to_string())
+}
+
+/// Planarity by exhaustive search over rotation systems: a connected graph is planar exactly when some choice of cyclic order of
+/// the edges at every vertex traces `E - V + 2` faces (Euler's formula for genus 0). Components are tested separately.
+fn planar(g: &Graph) -> Result<String, String> {
+    let n = g.n();
+    let adj = g.adjacency();
+    let mut seen = vec![false; n];
+    for start in 0..n {
+        if seen[start] || adj[start].is_empty() {
+            continue;
+        }
+        let mut members = vec![start];
+        seen[start] = true;
+        let mut at = 0;
+        while at < members.len() {
+            for &v in &adj[members[at]] {
+                if !seen[v] {
+                    seen[v] = true;
+                    members.push(v);
+                }
+            }
+            at += 1;
+        }
+        let edges: usize = members.iter().map(|&v| adj[v].len()).sum::<usize>() / 2;
+        let vertices = members.len();
+        if vertices >= 5 && edges > 3 * vertices - 6 {
+            return Ok("false".into());
+        }
+        // Rotation systems to try: the product of (degree - 1)! over the vertices.
+        let mut count = 1f64;
+        for &v in &members {
+            count *= (1..adj[v].len()).map(|k| k as f64).product::<f64>();
+        }
+        if count > 2e7 {
+            return Err("this component is too large for the exhaustive planarity search (more than 2*10^7 rotation systems)".into());
+        }
+        if !component_is_planar(&adj, &members, edges) {
+            return Ok("false".into());
+        }
+    }
+    Ok("true".into())
+}
+
+fn component_is_planar(adj: &[Vec<usize>], members: &[usize], edges: usize) -> bool {
+    // Rotation of each member: an ordering of its neighbours; the first neighbour stays fixed to remove cyclic symmetry.
+    let n = adj.len();
+    let mut rotation: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for &v in members {
+        rotation[v] = adj[v].clone();
+    }
+    let target = edges + 2 - members.len();
+    search(&mut rotation, members, 0, edges, target)
+}
+
+fn faces(rotation: &[Vec<usize>], members: &[usize]) -> usize {
+    // Darts (u, v) are indexed by the position of v in u's rotation; arriving at v from u we leave along the neighbour that follows u.
+    let mut index = std::collections::HashMap::new();
+    let mut total = 0;
+    for &u in members {
+        for (k, &v) in rotation[u].iter().enumerate() {
+            index.insert((u, v), (total, k));
+            total += 1;
+        }
+    }
+    let mut visited = vec![false; total];
+    let mut count = 0;
+    for &u in members {
+        for &v in &rotation[u] {
+            let (start, _) = index[&(u, v)];
+            if visited[start] {
+                continue;
+            }
+            count += 1;
+            let (mut a, mut b) = (u, v);
+            loop {
+                let (id, _) = index[&(a, b)];
+                if visited[id] {
+                    break;
+                }
+                visited[id] = true;
+                let around = &rotation[b];
+                let position = around.iter().position(|&x| x == a).unwrap_or(0);
+                let next = around[(position + 1) % around.len()];
+                a = b;
+                b = next;
+            }
+        }
+    }
+    count
+}
+
+fn search(
+    rotation: &mut Vec<Vec<usize>>,
+    members: &[usize],
+    at: usize,
+    edges: usize,
+    target: usize,
+) -> bool {
+    if at == members.len() {
+        return faces(rotation, members) == target;
+    }
+    let v = members[at];
+    let degree = rotation[v].len();
+    if degree <= 2 {
+        return search(rotation, members, at + 1, edges, target);
+    }
+    // Permute positions 1.. (position 0 fixed).
+    permute_tail(rotation, members, at, 1, edges, target)
+}
+
+fn permute_tail(
+    rotation: &mut Vec<Vec<usize>>,
+    members: &[usize],
+    at: usize,
+    k: usize,
+    edges: usize,
+    target: usize,
+) -> bool {
+    let v = members[at];
+    if k == rotation[v].len() {
+        return search(rotation, members, at + 1, edges, target);
+    }
+    for i in k..rotation[v].len() {
+        rotation[v].swap(k, i);
+        if permute_tail(rotation, members, at, k + 1, edges, target) {
+            return true;
+        }
+        rotation[v].swap(k, i);
+    }
+    false
 }

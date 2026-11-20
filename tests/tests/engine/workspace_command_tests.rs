@@ -1650,3 +1650,92 @@ fn sequence_rules_predict_the_true_continuation() {
     );
     assert!(run("next_term 1, 4, 9, 16").starts_with("a(n) = n^2"));
 }
+
+#[test]
+fn linear_programs_match_vertex_enumeration() {
+    // The oracle is a different algorithm: enumerate every intersection of two constraint lines (the axes included),
+    // keep the feasible points, and take the best objective. Deterministic pseudo-random small programs.
+    let mut state = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move |modulus: i64| -> i64 {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % modulus as u64) as i64
+    };
+    for case in 0..25 {
+        let constraint_count = 3 + next(2) as usize;
+        let mut lines: Vec<(f64, f64, f64)> = Vec::new(); // a x + b y <= c
+        let mut text = Vec::new();
+        for _ in 0..constraint_count {
+            let (a, b, c) = (1 + next(5), 1 + next(5), 5 + next(20));
+            lines.push((a as f64, b as f64, c as f64));
+            text.push(format!("{a}*x + {b}*y <= {c}"));
+        }
+        let (p, q) = (1 + next(6), 1 + next(6));
+        let maximise = case % 2 == 0;
+        let objective = format!("{p}*x + {q}*y");
+        // Candidate boundaries: the constraint lines and the two axes.
+        let mut boundaries = lines.clone();
+        boundaries.push((1.0, 0.0, 0.0));
+        boundaries.push((0.0, 1.0, 0.0));
+        let feasible = |x: f64, y: f64| {
+            x >= -1e-9 && y >= -1e-9 && lines.iter().all(|(a, b, c)| a * x + b * y <= c + 1e-9)
+        };
+        let mut best: Option<f64> = None;
+        for i in 0..boundaries.len() {
+            for j in i + 1..boundaries.len() {
+                let (a1, b1, c1) = boundaries[i];
+                let (a2, b2, c2) = boundaries[j];
+                let det = a1 * b2 - a2 * b1;
+                if det.abs() < 1e-12 {
+                    continue;
+                }
+                let (x, y) = ((c1 * b2 - c2 * b1) / det, (a1 * c2 - a2 * c1) / det);
+                if feasible(x, y) {
+                    let value = p as f64 * x + q as f64 * y;
+                    best = Some(match best {
+                        None => value,
+                        Some(b) => {
+                            if maximise {
+                                b.max(value)
+                            } else {
+                                b.min(value)
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        let command = format!(
+            "{} {objective} subject to {}",
+            if maximise { "maximize" } else { "minimize" },
+            text.join(", ")
+        );
+        let out = run(&command);
+        let got: f64 = out
+            .split("value = ")
+            .nth(1)
+            .unwrap()
+            .split(" at ")
+            .next()
+            .map(|s| match s.split_once('/') {
+                Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                None => s.parse().unwrap(),
+            })
+            .unwrap();
+        assert!(
+            (got - best.unwrap()).abs() < 1e-9,
+            "{command}: {out} vs {best:?}"
+        );
+    }
+    assert_eq!(
+        run("maximize 3*x + 2*y subject to x + y <= 4, x + 3*y <= 6"),
+        "maximum value = 12 at x = 4, y = 0"
+    );
+    assert!(run("maximize x + y subject to x - y <= 1").starts_with("unbounded"));
+    assert!(run("maximize x subject to x <= 3, x >= 5").starts_with("infeasible"));
+    assert_eq!(
+        run("minimize x + y subject to x + 2*y >= 4, 3*x + y >= 6"),
+        "minimum value = 14/5 at x = 8/5, y = 6/5"
+    );
+}

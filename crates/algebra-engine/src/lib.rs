@@ -87,6 +87,7 @@ pub mod series_sums;
 pub mod session;
 pub mod set_expr;
 pub mod sets;
+pub mod simplex_exact;
 pub mod simplify;
 pub mod smt;
 pub mod solver;

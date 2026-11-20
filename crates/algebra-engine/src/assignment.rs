@@ -15,7 +15,7 @@ fn show(q: &Q) -> String {
     }
 }
 
-fn parse_matrix(text: &str) -> Result<Vec<Vec<Q>>, String> {
+fn parse_matrix(text: &str, wide_only: bool) -> Result<Vec<Vec<Q>>, String> {
     let inner = text
         .trim()
         .strip_prefix('[')
@@ -47,7 +47,7 @@ fn parse_matrix(text: &str) -> Result<Vec<Vec<Q>>, String> {
     if matrix.is_empty() || matrix.iter().any(|r| r.len() != matrix[0].len()) {
         return Err("the cost matrix must be rectangular".into());
     }
-    if matrix.len() > matrix[0].len() {
+    if wide_only && matrix.len() > matrix[0].len() {
         return Err("there are more rows than columns: transpose the matrix".into());
     }
     Ok(matrix)
@@ -123,12 +123,18 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
     if !t.ends_with(')') {
         return None;
     }
+    if matches!(
+        name.as_str(),
+        "transportation" | "transport" | "transportation_problem"
+    ) {
+        return Some(transportation(&t[open + 1..t.len() - 1]));
+    }
     let maximise = match name.as_str() {
         "assignment" | "min_assignment" | "hungarian" | "linear_assignment" => false,
         "max_assignment" | "maximum_assignment" => true,
         _ => return None,
     };
-    let mut cost = match parse_matrix(&t[open + 1..t.len() - 1]) {
+    let mut cost = match parse_matrix(&t[open + 1..t.len() - 1], true) {
         Ok(m) => m,
         Err(e) => return Some(Err(e)),
     };
@@ -156,4 +162,88 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         show(&total),
         pairs.join(", ")
     )))
+}
+
+fn parse_list(text: &str) -> Result<Vec<Q>, String> {
+    let inner = text.trim().trim_start_matches('[').trim_end_matches(']');
+    // A single row of the matrix parser: `[[a, b, c]]`.
+    let matrix = parse_matrix(&format!("[[{inner}]]"), false)?;
+    Ok(matrix[0].clone())
+}
+
+/// `transportation(supply, demand, costs)`: ship from the sources to the sinks at minimum total cost, the shipments from source `i` to
+/// sink `j` costing `costs[i][j]` per unit; total supply must cover total demand (a surplus stays at the sources).
+fn transportation(body: &str) -> Result<String, String> {
+    use crate::simplex_exact::{Outcome, Sense, maximise};
+    let parts = crate::graph_commands::split_top(body);
+    let [supply, demand, costs] = parts.as_slice() else {
+        return Err("transportation(supply, demand, costs)".into());
+    };
+    let (supply, demand) = (parse_list(supply)?, parse_list(demand)?);
+    let costs = parse_matrix(costs, false)?;
+    let (m, n) = (supply.len(), demand.len());
+    if costs.len() != m || costs[0].len() != n {
+        return Err("costs must have one row per source and one column per sink".into());
+    }
+    if supply.iter().chain(&demand).any(|v| v < &Q::zero()) {
+        return Err("supplies and demands must not be negative".into());
+    }
+    // Variables x[i][j] at index i * n + j; maximise the negated cost.
+    let objective: Vec<Q> = (0..m * n).map(|k| -costs[k / n][k % n].clone()).collect();
+    let mut rows = Vec::new();
+    let mut senses = Vec::new();
+    let mut rhs = Vec::new();
+    for (i, s) in supply.iter().enumerate() {
+        rows.push(
+            (0..m * n)
+                .map(|k| {
+                    if k / n == i {
+                        Q::from_integer(1.into())
+                    } else {
+                        Q::zero()
+                    }
+                })
+                .collect(),
+        );
+        senses.push(Sense::LessEqual);
+        rhs.push(s.clone());
+    }
+    for (j, d) in demand.iter().enumerate() {
+        rows.push(
+            (0..m * n)
+                .map(|k| {
+                    if k % n == j {
+                        Q::from_integer(1.into())
+                    } else {
+                        Q::zero()
+                    }
+                })
+                .collect(),
+        );
+        senses.push(Sense::GreaterEqual);
+        rhs.push(d.clone());
+    }
+    match maximise(&objective, &rows, &senses, &rhs) {
+        Outcome::Optimal { value, point } => {
+            let shipments: Vec<String> = (0..m)
+                .flat_map(|i| (0..n).map(move |j| (i, j)))
+                .filter(|&(i, j)| !point[i * n + j].is_zero())
+                .map(|(i, j)| {
+                    format!(
+                        "{} from source {} to sink {}",
+                        show(&point[i * n + j]),
+                        i + 1,
+                        j + 1
+                    )
+                })
+                .collect();
+            Ok(format!(
+                "minimum cost {}: {}",
+                show(&-value),
+                shipments.join(", ")
+            ))
+        }
+        Outcome::Infeasible => Err("infeasible: the total supply does not cover the demand".into()),
+        Outcome::Unbounded => Err("unbounded".into()),
+    }
 }

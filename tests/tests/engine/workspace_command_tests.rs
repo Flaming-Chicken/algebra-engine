@@ -7883,3 +7883,126 @@ fn matrix_logarithm_exponentiates_back_and_is_exact_for_unipotent_matrices() {
             .is_error
     );
 }
+
+#[test]
+fn transportation_costs_match_exhaustive_integer_shipments() {
+    let mut state = 0x1111_2222_3333_4444u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    // Cheapest way to meet every demand exactly from the remaining supplies (costs are positive, so no excess is shipped).
+    fn cheapest(
+        costs: &[Vec<i64>],
+        supply: &mut Vec<i64>,
+        demand: &[i64],
+        sink: usize,
+        rest: i64,
+        source: usize,
+    ) -> i64 {
+        if sink == demand.len() {
+            return 0;
+        }
+        if source == supply.len() {
+            return if rest == 0 {
+                cheapest(
+                    costs,
+                    supply,
+                    demand,
+                    sink + 1,
+                    demand.get(sink + 1).copied().unwrap_or(0),
+                    0,
+                )
+            } else {
+                i64::MAX / 4
+            };
+        }
+        let mut best = i64::MAX / 4;
+        for amount in 0..=rest.min(supply[source]) {
+            supply[source] -= amount;
+            let tail = cheapest(costs, supply, demand, sink, rest - amount, source + 1);
+            supply[source] += amount;
+            best = best.min(amount * costs[source][sink] + tail);
+        }
+        best
+    }
+    for round in 0..30 {
+        let (m, n) = (2 + round % 2, 2 + round % 3);
+        let demand: Vec<i64> = (0..n).map(|_| 1 + next(5) as i64).collect();
+        let total: i64 = demand.iter().sum();
+        // Supplies that cover the demand with some slack.
+        let mut supply: Vec<i64> = (0..m).map(|_| 1 + next(6) as i64).collect();
+        while supply.iter().sum::<i64>() < total {
+            let k = next(m as u64) as usize;
+            supply[k] += 1;
+        }
+        let costs: Vec<Vec<i64>> = (0..m)
+            .map(|_| (0..n).map(|_| 1 + next(9) as i64).collect())
+            .collect();
+        let list = |v: &[i64]| {
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let matrix = format!(
+            "[{}]",
+            costs.iter().map(|r| list(r)).collect::<Vec<_>>().join(",")
+        );
+        let out = run(&format!(
+            "transportation({}, {}, {matrix})",
+            list(&supply),
+            list(&demand)
+        ));
+        let expected = cheapest(&costs, &mut supply.clone(), &demand, 0, demand[0], 0);
+        let reported: i64 = out
+            .split("minimum cost ")
+            .nth(1)
+            .unwrap()
+            .split(':')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            reported, expected,
+            "supply {supply:?}, demand {demand:?}, costs {costs:?}: {out}"
+        );
+        // The reported shipments respect the supplies, meet the demands and add up to the cost.
+        let (mut out_of, mut into, mut cost) = (vec![0i64; m], vec![0i64; n], 0i64);
+        for shipment in out.split(": ").nth(1).unwrap().split(", ") {
+            let amount: i64 = shipment.split(' ').next().unwrap().parse().unwrap();
+            let source: usize = shipment
+                .split("source ")
+                .nth(1)
+                .unwrap()
+                .split(' ')
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            let sink: usize = shipment.split("sink ").nth(1).unwrap().parse().unwrap();
+            out_of[source - 1] += amount;
+            into[sink - 1] += amount;
+            cost += amount * costs[source - 1][sink - 1];
+        }
+        assert!(out_of.iter().zip(&supply).all(|(a, b)| a <= b), "{out}");
+        assert!(into.iter().zip(&demand).all(|(a, b)| a >= b), "{out}");
+        assert_eq!(cost, expected, "{out}");
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("transportation([1,1],[3],[[1],[2]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("transportation([5,5],[3,3],[[1,2]])")
+            .is_error
+    );
+}

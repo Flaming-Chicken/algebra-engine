@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: calculus the way it is written: `d/dx x^3`, `d^2/dx^2 f`, `∂/∂x f`, `lim x->0 f`, `∫ x^2 dx`, `∫_0^1 x^2 dx`, `∑_{k=1}^{4} k`, `sqrt 16`, `sin x`, `nth_root(27, 3)`; `derivative(f, x, 2)` now gives the second derivative.
 - Fixed: a constant typed with a decimal (`sin(0.5)`, `ln(2.0)`, `normal_cdf(1.96)`) now also prints its floating-point value after the exact form (`sin(1/2) ≈ 0.479425538604203`).
 - Added: `fit`, `polyfit` and `linear_regression` take two lists (`fit([1,2,3],[2,4,6])`); `lcm` of polynomials; `subs`, `substitute`, `replace`, `evaluate` and `eval` substitution (`subs(x^2 + y, x = 2, y = 3)`).
 - Added: `nCr`, `nPr`, `prime_pi`, `tribonacci`, `compositions(n)` and `compositions(n, k)`; discrete function names are case-insensitive. They were echoed back unevaluated.

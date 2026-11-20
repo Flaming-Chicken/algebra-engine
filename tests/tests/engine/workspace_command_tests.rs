@@ -2256,3 +2256,34 @@ fn decimal_input_gets_a_floating_point_value() {
     // Symbols are left alone.
     assert!(!run("2.5*x").contains('≈'));
 }
+
+#[test]
+fn calculus_shorthand_means_the_explicit_command() {
+    // Each shorthand must give exactly what the explicit command gives.
+    for (short, explicit) in [
+        ("d/dx x^3", "diff(x^3, x)"),
+        ("d/dx(x^3 + 2*x)", "diff(x^3 + 2*x, x)"),
+        ("d/dx sin(x)*x", "diff(sin(x)*x, x)"),
+        ("d^2/dx^2 x^4", "diff(x^4, x, 2)"),
+        ("d²/dx² x^4", "diff(x^4, x, 2)"),
+        ("∂/∂y (x^2*y^3)", "diff(x^2*y^3, y)"),
+        ("derivative(x^3, x, 2)", "diff(x^3, x, 2)"),
+        ("lim x->0 sin(x)/x", "limit(sin(x)/x, x, 0)"),
+        ("limit x -> oo 1/x", "limit(1/x, x, oo)"),
+        ("lim x→2 x^2", "limit(x^2, x, 2)"),
+        ("sqrt 16", "sqrt(16)"),
+        ("sin x", "sin(x)"),
+        ("∫ x^2 dx", "integrate(x^2, x)"),
+        ("∫_0^1 x^2 dx", "integrate(x^2, x, 0, 1)"),
+        ("∑_{k=1}^{4} k", "sum(k, k, 1, 4)"),
+        ("nth_root(27, 3)", "root(27, 3)"),
+    ] {
+        assert_eq!(run(short), run(explicit), "{short} vs {explicit}");
+    }
+    // And the values are right.
+    assert_eq!(run("d^2/dx^2 x^4"), "12 · x^2");
+    assert_eq!(run("∑_{k=1}^{4} k"), "10");
+    assert_eq!(run("nth_root(27, 3)"), "3");
+    // A division of two symbols is not a derivative.
+    assert_eq!(run("d/dx"), "d / dx");
+}

@@ -904,11 +904,35 @@ fn poisson_regression(
             yi * eta - eta.exp() - log_gamma(*yi)
         })
         .sum();
+    // Goodness of fit: the deviance 2 sum [y ln(y / mu) - (y - mu)] and Pearson's chi-square sum (y - mu)^2 / mu; their ratio to
+    // the residual degrees of freedom estimates the dispersion (about 1 for a true Poisson model, above 1 for overdispersion).
+    let (mut deviance, mut pearson) = (0.0, 0.0);
+    for (row, yi) in design.iter().zip(&counts) {
+        let mu: f64 = row.iter().zip(&beta).map(|(a, b)| a * b).sum::<f64>().exp();
+        deviance += 2.0 * (if *yi > 0.0 { yi * (yi / mu).ln() } else { 0.0 } - (yi - mu));
+        pearson += (yi - mu).powi(2) / mu;
+    }
+    let residual_df = (n - p) as f64;
+    let fit = if residual_df > 0.0 {
+        let tail = 1.0
+            - crate::distributions_f64::eval("chi2_cdf", &[pearson, residual_df])
+                .unwrap_or(f64::NAN);
+        format!(
+            "; deviance = {}, Pearson chi-square = {} on {} df, dispersion = {}, overdispersion p = {}",
+            num(deviance),
+            num(pearson),
+            residual_df,
+            num(pearson / residual_df),
+            num(tail.clamp(0.0, 1.0))
+        )
+    } else {
+        String::new()
+    };
     // Information criteria: AIC = -2 ll + 2 p and BIC = -2 ll + p ln n (p parameters, n observations).
     let aic = -2.0 * log_likelihood + 2.0 * p as f64;
     let bic = -2.0 * log_likelihood + p as f64 * (n as f64).ln();
     Ok(format!(
-        "{}; AIC = {}, BIC = {}; log-likelihood = {}",
+        "{}{fit}; AIC = {}, BIC = {}; log-likelihood = {}",
         parts.join("; "),
         num(aic),
         num(bic),

@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `lr_test(X_full, X_reduced, y)`: likelihood-ratio tests for nested logistic and Poisson models.
+- `logit` and `poisson_regress` report AIC and BIC.
 - `inverse_ztransform` handles simple complex poles.
 - `dsolve` solves Riccati equations that have a power-law particular solution.
 - `sqrtm(A)`: principal matrix square root, exact when rational.

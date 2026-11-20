@@ -7094,3 +7094,220 @@ fn riccati_equations_are_solved_by_a_particular_solution_and_satisfy_the_equatio
     // A Riccati equation without a power-law particular solution is not claimed to be solved.
     assert!(!run("dsolve(y' = y^2 + x)").contains("Riccati"));
 }
+
+#[test]
+fn likelihood_ratio_tests_match_the_g_statistics_and_add_up_over_nested_models() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Logistic with a binary group: the LR statistic is the G statistic 2 sum O ln(O / E) of the 2x2 table.
+    let (s0, n0, s1, n1) = (7.0f64, 20.0f64, 15.0f64, 25.0f64);
+    let pooled = (s0 + s1) / (n0 + n1);
+    let cells = [
+        (s0, n0 * pooled),
+        (n0 - s0, n0 * (1.0 - pooled)),
+        (s1, n1 * pooled),
+        (n1 - s1, n1 * (1.0 - pooled)),
+    ];
+    let g: f64 = 2.0 * cells.iter().map(|(o, e)| o * (o / e).ln()).sum::<f64>();
+    let mut x = Vec::new();
+    let mut y = Vec::new();
+    for (group, successes, total) in [(0, 7, 20), (1, 15, 25)] {
+        for i in 0..total {
+            x.push(format!("[{group}]"));
+            y.push(if i < successes { "1" } else { "0" });
+        }
+    }
+    let (xs, ys) = (format!("[{}]", x.join(",")), format!("[{}]", y.join(",")));
+    let out = run(&format!("lr_test({xs}, none, {ys})"));
+    assert!((field(&out, "LR =") - g).abs() < 1e-4, "{out}: G = {g}");
+    assert!((field(&out, "df =") - 1.0).abs() < 1e-12, "{out}");
+    // A chi-square with one degree of freedom: p = erfc(sqrt(G / 2)); compare with the engine's own chi2 cdf.
+    let p: f64 = run(&format!("chi2_cdf({g}, 1)")).trim().parse().unwrap();
+    assert!((field(&out, "p =") - (1.0 - p)).abs() < 1e-5, "{out}");
+    // Poisson with groups: LR = 2 sum_g S_g ln(mean_g / overall mean).
+    let (group0, group1) = (
+        [2.0f64, 3.0, 1.0, 4.0, 2.0, 3.0],
+        [6.0f64, 8.0, 5.0, 9.0, 7.0],
+    );
+    let (sum0, sum1) = (group0.iter().sum::<f64>(), group1.iter().sum::<f64>());
+    let overall = (sum0 + sum1) / 11.0;
+    let g_poisson = 2.0 * (sum0 * (sum0 / 6.0 / overall).ln() + sum1 * (sum1 / 5.0 / overall).ln());
+    let xs = format!(
+        "[{}]",
+        group0
+            .iter()
+            .map(|_| "[0]")
+            .chain(group1.iter().map(|_| "[1]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        group0
+            .iter()
+            .chain(&group1)
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("lr_test({xs}, none, {ys}, poisson)"));
+    assert!(
+        (field(&out, "LR =") - g_poisson).abs() < 1e-4,
+        "{out}: G = {g_poisson}"
+    );
+    // Nested models add up: LR(none -> x1) + LR(x1 -> x1, x2) = LR(none -> x1, x2).
+    let data: [(f64, f64, u8); 14] = [
+        (0.5, 1.0, 0),
+        (1.0, 3.0, 0),
+        (1.5, 2.0, 0),
+        (2.0, 5.0, 1),
+        (2.5, 1.0, 0),
+        (3.0, 4.0, 1),
+        (3.5, 2.0, 0),
+        (4.0, 6.0, 1),
+        (4.5, 3.0, 1),
+        (5.0, 1.0, 0),
+        (5.5, 5.0, 1),
+        (6.0, 2.0, 1),
+        (2.2, 4.0, 0),
+        (4.8, 6.0, 0),
+    ];
+    let both = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let first = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, _, _)| format!("[{a:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        data.iter()
+            .map(|d| d.2.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let total = field(&run(&format!("lr_test({both}, none, {ys})")), "LR =");
+    let step1 = field(&run(&format!("lr_test({first}, none, {ys})")), "LR =");
+    let step2 = field(&run(&format!("lr_test({both}, {first}, {ys})")), "LR =");
+    assert!(
+        (total - step1 - step2).abs() < 1e-4,
+        "{total} vs {step1} + {step2}"
+    );
+    assert!(step1 >= 0.0 && step2 >= 0.0);
+    // Refusals.
+    assert!(
+        UraeSession::new()
+            .execute_line(&format!("lr_test({first}, {both}, {ys})"))
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line(&format!("lr_test({both}, none, {ys}, gamma)"))
+            .is_error
+    );
+}
+
+#[test]
+fn information_criteria_follow_from_the_log_likelihood() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Logistic: 14 observations, 3 parameters; Poisson: 12 observations, 3 parameters.
+    let data: [(f64, f64, u8); 14] = [
+        (0.5, 1.0, 0),
+        (1.0, 3.0, 0),
+        (1.5, 2.0, 0),
+        (2.0, 5.0, 1),
+        (2.5, 1.0, 0),
+        (3.0, 4.0, 1),
+        (3.5, 2.0, 0),
+        (4.0, 6.0, 1),
+        (4.5, 3.0, 1),
+        (5.0, 1.0, 0),
+        (5.5, 5.0, 1),
+        (6.0, 2.0, 1),
+        (2.2, 4.0, 0),
+        (4.8, 6.0, 0),
+    ];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        data.iter()
+            .map(|d| d.2.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("logit({xs}, {ys})"));
+    let ll = field(&out, "log-likelihood =");
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 6.0)).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 3.0 * 14.0f64.ln())).abs() < 1e-4,
+        "{out}"
+    );
+    let counts = [1, 2, 2, 6, 3, 7, 5, 12, 9, 8, 17, 15];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .take(12)
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        counts
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let ll = field(&out, "log-likelihood =");
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 6.0)).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 3.0 * 12.0f64.ln())).abs() < 1e-4,
+        "{out}"
+    );
+    // The BIC penalty ln n per parameter exceeds the AIC penalty 2 once n >= 8.
+    assert!(field(&out, "BIC =") - field(&out, "AIC =") > 0.0, "{out}");
+}

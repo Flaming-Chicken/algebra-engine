@@ -112,8 +112,8 @@ spellings a new user types first. The open list, by field:
   `sin`/`cos`, boundary value problems, systems for `rk4`, adaptive steps, variable-coefficient and nonlinear
   recurrences, exact `fft`.
 - **Statistics, probability and finance.** Done: the inference commands (`t_test`, `chi2_test`, `anova`, `fisher_exact`,
-  correlation, `kendall`, `mann_whitney`, `wilcoxon`, `kruskal`), `regress`, `mregress`, `logit`, `poisson_regress` and `predict`. Missing:
-  likelihood-ratio tests, offsets and other generalised linear models, weighted regression, residual diagnostics,
+  correlation, `kendall`, `mann_whitney`, `wilcoxon`, `kruskal`), `regress`, `mregress`, `logit`, `poisson_regress` and `predict`. Likelihood-ratio tests for logistic and Poisson models are done (`R97`). Missing:
+  offsets, overdispersion, AIC/BIC and other generalised linear models, weighted regression, residual diagnostics,
   `geometric_cdf`, sentence forms such as
   `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables; amortisation with extra payments,
   `xirr` with dates, bond pricing.

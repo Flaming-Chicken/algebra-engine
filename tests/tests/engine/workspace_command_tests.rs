@@ -2427,3 +2427,86 @@ fn double_factorial_primes_and_digit_functions_match_definitions() {
         );
     }
 }
+
+#[test]
+fn discrete_probability_functions_match_their_definitions() {
+    let frac = |text: &str| -> f64 {
+        match text.trim().split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => text.trim().parse().unwrap(),
+        }
+    };
+    let choose =
+        |n: u64, k: u64| -> f64 { (1..=k).fold(1.0, |acc, i| acc * (n - k + i) as f64 / i as f64) };
+    // binomial_cdf(n, p, k) is the sum of the pmf terms C(n, i) p^i (1-p)^(n-i), i = 0..k.
+    for (n, num, den) in [(10u64, 1u64, 2u64), (12, 1, 3), (7, 3, 4), (20, 1, 10)] {
+        let p = num as f64 / den as f64;
+        let mut cumulative = 0.0;
+        for k in 0..=n {
+            cumulative += choose(n, k) * p.powi(k as i32) * (1.0 - p).powi((n - k) as i32);
+            let got = frac(&run(&format!("binomial_cdf({n}, {num}/{den}, {k})")));
+            assert!(
+                (got - cumulative).abs() < 1e-12,
+                "binomial_cdf({n}, {num}/{den}, {k}): {got} vs {cumulative}"
+            );
+        }
+        assert_eq!(run(&format!("binomial_cdf({n}, {num}/{den}, {n})")), "1");
+        assert_eq!(run(&format!("binomial_cdf({n}, {num}/{den}, -1)")), "0");
+    }
+    // The hypergeometric pmf sums to 1 over k, and matches the ratio of binomials.
+    for (total, successes, draws) in [(10u64, 4u64, 5u64), (20, 7, 6), (52, 13, 5)] {
+        let mut sum = 0.0;
+        for k in 0..=draws.min(successes) {
+            let got = frac(&run(&format!(
+                "hypergeometric_pmf({k}, {total}, {successes}, {draws})"
+            )));
+            let expected =
+                choose(successes, k) * choose(total - successes, draws - k) / choose(total, draws);
+            assert!(
+                (got - expected).abs() < 1e-12,
+                "hypergeometric_pmf({k}, {total}, {successes}, {draws})"
+            );
+            sum += got;
+        }
+        assert!((sum - 1.0).abs() < 1e-12);
+    }
+    // Bayes' rule and z-scores.
+    assert_eq!(run("bayes(1/100, 9/10, 1/20)"), "2/13");
+    assert_eq!(run("z_score(75, 70, 5)"), "1");
+    // Expected value and variance against the definitions sum p x and sum p (x - mu)^2.
+    for (xs, ps) in [
+        ([1.0, 2.0, 3.0], [(1u32, 2u32), (1, 4), (1, 4)]),
+        ([0.0, 5.0, 10.0], [(1, 5), (3, 5), (1, 5)]),
+    ] {
+        let probabilities: Vec<f64> = ps.iter().map(|(a, b)| *a as f64 / *b as f64).collect();
+        let mean: f64 = xs.iter().zip(&probabilities).map(|(x, p)| x * p).sum();
+        let variance: f64 = xs
+            .iter()
+            .zip(&probabilities)
+            .map(|(x, p)| p * (x - mean).powi(2))
+            .sum();
+        let list = |v: &[String]| format!("[{}]", v.join(", "));
+        let values = list(&xs.iter().map(|x| x.to_string()).collect::<Vec<_>>());
+        let probs = list(
+            &ps.iter()
+                .map(|(a, b)| format!("{a}/{b}"))
+                .collect::<Vec<_>>(),
+        );
+        let e = run(&format!("expected_value({values}, {probs})"));
+        let v = run(&format!("variance_discrete({values}, {probs})"));
+        assert!(
+            (frac(e.rsplit("= ").next().unwrap()) - mean).abs() < 1e-12,
+            "{e}"
+        );
+        assert!(
+            (frac(v.rsplit("= ").next().unwrap()) - variance).abs() < 1e-12,
+            "{v}"
+        );
+    }
+    // Probabilities that do not sum to 1 are refused.
+    assert!(
+        UraeSession::new()
+            .execute_line("expected_value([1, 2], [1/2, 1/4])")
+            .is_error
+    );
+}

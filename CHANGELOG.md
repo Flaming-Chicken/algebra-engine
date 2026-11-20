@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `mregress` reports AIC and BIC.
 - `lr_test(X_full, X_reduced, y)`: likelihood-ratio tests for nested logistic and Poisson models.
 - `logit` and `poisson_regress` report AIC and BIC.
 - `inverse_ztransform` handles simple complex poles.

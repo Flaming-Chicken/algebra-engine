@@ -3556,3 +3556,141 @@ fn indexing_reads_and_writes_every_element() {
     s.execute_line("B[2,2] = x+1");
     assert_eq!(s.execute_line("B").output_text, "[ a, b ; c, x + 1 ]");
 }
+
+#[test]
+fn inverse_laplace_recovers_the_time_function_and_finance_matches_formulas() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    // Build f(t) from standard pieces in Rust, write its transform F(s), invert with the engine, and compare the engine's
+    // answer with f at several times.
+    //   c e^(a t)                    <->  c / (s - a)
+    //   c t^n e^(a t)                <->  c n! / (s - a)^(n+1)
+    //   e^(a t)(c cos wt + d sin wt) <->  (c (s - a) + d w) / ((s - a)^2 + w^2)
+    #[derive(Clone, Copy)]
+    enum Piece {
+        Exp { c: f64, a: i32 },
+        Poly { c: f64, n: u32, a: i32 },
+        Wave { c: f64, d: f64, a: i32, w: i32 },
+    }
+    let factorial = |n: u32| (1..=n).product::<u32>() as f64;
+    let cases: [Vec<Piece>; 6] = [
+        vec![Piece::Exp { c: 3.0, a: -2 }],
+        vec![Piece::Poly { c: 2.0, n: 2, a: 1 }],
+        vec![Piece::Wave {
+            c: 1.0,
+            d: 2.0,
+            a: -1,
+            w: 2,
+        }],
+        vec![Piece::Exp { c: 1.0, a: 1 }, Piece::Exp { c: -2.0, a: -3 }],
+        vec![
+            Piece::Poly {
+                c: 1.0,
+                n: 1,
+                a: -1,
+            },
+            Piece::Wave {
+                c: 0.0,
+                d: 1.0,
+                a: 0,
+                w: 3,
+            },
+        ],
+        vec![
+            Piece::Exp { c: 4.0, a: 0 },
+            Piece::Wave {
+                c: 1.0,
+                d: -1.0,
+                a: 1,
+                w: 1,
+            },
+            Piece::Poly {
+                c: 3.0,
+                n: 0,
+                a: -2,
+            },
+        ],
+    ];
+    for pieces in cases {
+        let transform: Vec<String> = pieces
+            .iter()
+            .map(|p| match *p {
+                Piece::Exp { c, a } => format!("({c})/(s - ({a}))"),
+                Piece::Poly { c, n, a } => format!("({})/(s - ({a}))^{}", c * factorial(n), n + 1),
+                Piece::Wave { c, d, a, w } => format!(
+                    "(({c})*(s - ({a})) + ({})) / ((s - ({a}))^2 + {})",
+                    d * w as f64,
+                    w * w
+                ),
+            })
+            .collect();
+        let f = transform.join(" + ");
+        let out = run(&format!("ilaplace({f}, s, t)"));
+        let expression = out.split_once(" = ").unwrap().1.to_string();
+        for t in [0.3f64, 0.7, 1.0, 1.9] {
+            let expected: f64 = pieces
+                .iter()
+                .map(|p| match *p {
+                    Piece::Exp { c, a } => c * (a as f64 * t).exp(),
+                    Piece::Poly { c, n, a } => c * t.powi(n as i32) * (a as f64 * t).exp(),
+                    Piece::Wave { c, d, a, w } => {
+                        (a as f64 * t).exp() * (c * (w as f64 * t).cos() + d * (w as f64 * t).sin())
+                    }
+                })
+                .sum();
+            let got = number(run(&format!("subs(({expression}), t, {t:?})")));
+            assert!(
+                (got - expected).abs() < 1e-9 * (1.0 + expected.abs()),
+                "F = {f}: f({t}) = {got}, expected {expected}\n{out}"
+            );
+        }
+    }
+    // Exact forms.
+    assert_eq!(
+        run("ilaplace(1/(s^2+1), s, t)"),
+        "L^-1{1/(s^2+1)}(t) = sin(t)"
+    );
+    assert_eq!(run("ilaplace(1/s^2)"), "L^-1{1/s^2}(t) = t");
+    assert!(
+        UraeSession::new()
+            .execute_line("ilaplace(s^2/(s^2+1), s, t)")
+            .is_error
+    );
+    // Finance against the closed forms.
+    for (p, r, n) in [
+        (1000.0f64, 0.05f64, 10i32),
+        (2500.0, 0.035, 7),
+        (10.0, 0.2, 3),
+    ] {
+        let growth = (1.0 + r).powi(n);
+        assert!(
+            (number(run(&format!("compound_interest({p}, {r}, {n})"))) - p * growth).abs()
+                < 1e-9 * p * growth
+        );
+        assert!(
+            (number(run(&format!("present_value({p}, {r}, {n})"))) - p / growth).abs() < 1e-9 * p
+        );
+        assert!(
+            (number(run(&format!("annuity({p}, {r}, {n})"))) - p * (1.0 - 1.0 / growth) / r).abs()
+                < 1e-9 * p * 10.0
+        );
+        // pmt is the payment that the annuity formula turns back into the loan.
+        let payment = number(run(&format!("pmt({r}, {n}, {p})")));
+        assert!(
+            (payment * (1.0 - 1.0 / growth) / r - p).abs() < 1e-9 * p,
+            "pmt({r}, {n}, {p}) = {payment}"
+        );
+    }
+    assert_eq!(run("simple_interest(1000, 1/20, 3)"), "150");
+    assert_eq!(run("percent_change(80, 100)"), "25");
+    // A 30-year mortgage: the payment of 200000 at 6% a year is the published 1199.10.
+    assert!((number(run("loan_payment(200000, 0.06, 30)")) - 1199.1010503).abs() < 1e-6);
+    // An exact short rational gets no extra value, a long one does.
+    assert_eq!(run("0.1 + 0.2"), "3/10");
+    assert!(run("1000*(1+0.05)^10").contains(" ≈ 1628.89462677744"));
+}

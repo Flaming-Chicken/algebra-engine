@@ -52,6 +52,7 @@ pub mod inequality;
 pub mod input_text;
 pub mod interconnect;
 pub mod intlist;
+pub mod inverse_laplace;
 pub mod lagrange;
 pub mod lemma_miner;
 pub mod lifting;

@@ -418,6 +418,66 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
                 a >> shift
             })
         }
+        ("compound_interest" | "future_value", [principal, rate, periods])
+            if periods.is_integer() =>
+        {
+            // P (1 + r)^n
+            let n = as_u64(periods, 5000)?;
+            let growth = Q::one() + rate;
+            Some(principal * (0..n).fold(Q::one(), |acc, _| acc * &growth))
+        }
+        ("present_value", [future, rate, periods]) if periods.is_integer() => {
+            // F / (1 + r)^n
+            let n = as_u64(periods, 5000)?;
+            let growth = Q::one() + rate;
+            let factor = (0..n).fold(Q::one(), |acc, _| acc * &growth);
+            (!factor.is_zero()).then(|| future / factor)
+        }
+        ("simple_interest", [principal, rate, time]) => Some(principal * rate * time),
+        ("pmt" | "payment", [rate, periods, present]) if periods.is_integer() => {
+            // pv r / (1 - (1 + r)^-n); with r = 0 the loan is repaid in equal parts.
+            let n = as_u64(periods, 5000)?;
+            if n == 0 {
+                return None;
+            }
+            if rate.is_zero() {
+                return Some(present / Q::from_integer(BigInt::from(n)));
+            }
+            let growth = Q::one() + rate;
+            let factor = (0..n).fold(Q::one(), |acc, _| acc * &growth);
+            let discount = Q::one() - factor.recip();
+            (!discount.is_zero()).then(|| present * rate / discount)
+        }
+        ("loan_payment" | "mortgage_payment", [principal, annual_rate, years])
+            if years.is_integer() =>
+        {
+            // monthly payment: i = r / 12, m = 12 years
+            let months = as_u64(years, 100)? * 12;
+            let monthly = annual_rate / Q::from_integer(BigInt::from(12));
+            if months == 0 {
+                return None;
+            }
+            if monthly.is_zero() {
+                return Some(principal / Q::from_integer(BigInt::from(months)));
+            }
+            let growth = Q::one() + &monthly;
+            let factor = (0..months).fold(Q::one(), |acc, _| acc * &growth);
+            let discount = Q::one() - factor.recip();
+            (!discount.is_zero()).then(|| principal * monthly / discount)
+        }
+        ("annuity" | "annuity_present_value", [payment, rate, periods]) if periods.is_integer() => {
+            // present value of n level payments: p (1 - (1 + r)^-n) / r
+            let n = as_u64(periods, 5000)?;
+            if rate.is_zero() {
+                return Some(payment * Q::from_integer(BigInt::from(n)));
+            }
+            let growth = Q::one() + rate;
+            let factor = (0..n).fold(Q::one(), |acc, _| acc * &growth);
+            Some(payment * (Q::one() - factor.recip()) / rate)
+        }
+        ("percent_change", [from, to]) if !from.is_zero() => {
+            Some((to - from) / from * Q::from_integer(BigInt::from(100)))
+        }
         ("tribonacci", [n]) => {
             let n = as_u64(n, 100_000)?;
             let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());

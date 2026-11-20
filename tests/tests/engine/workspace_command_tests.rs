@@ -4562,3 +4562,144 @@ fn inference_commands_agree_with_an_independent_integration() {
             .is_error
     );
 }
+
+#[test]
+fn chi_square_proportion_anova_and_one_sided_tests_satisfy_their_identities() {
+    let value = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} not in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ')', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Phi by the Maclaurin series of erf, written here independently of the engine.
+    let phi = |x: f64| -> f64 {
+        let z = x / std::f64::consts::SQRT_2;
+        let (mut term, mut sum) = (z, z);
+        for k in 1..200 {
+            term *= -z * z / k as f64;
+            sum += term / (2 * k + 1) as f64;
+        }
+        0.5 * (1.0 + 2.0 / std::f64::consts::PI.sqrt() * sum)
+    };
+    // One-sided p-values: greater + less = 1 and the two-sided value is twice the smaller.
+    for (data, mu) in [
+        ("[1,2,3,4,5]", "0"),
+        ("[12,15,11,14,18,13,16]", "15"),
+        ("[2.5,3.1,2.8,3.6,3.3]", "3"),
+    ] {
+        let greater = value(&run(&format!("t_test({data}, {mu}, greater)")), "p =");
+        let less = value(&run(&format!("t_test({data}, {mu}, less)")), "p =");
+        let two = value(&run(&format!("t_test({data}, {mu})")), "p =");
+        assert!(
+            (greater + less - 1.0).abs() < 1e-5,
+            "{data}: {greater} + {less}"
+        );
+        assert!(
+            (two - 2.0 * greater.min(less)).abs() < 1e-5,
+            "{data}: {two} vs {greater}, {less}"
+        );
+    }
+    // Goodness of fit: with 2 degrees of freedom the p-value is exp(-chi2 / 2).
+    for observed in ["[20,30,50]", "[18,22,60]", "[10,10,10]"] {
+        let out = run(&format!("chi2_test({observed}, [25,25,50])"));
+        let (statistic, p) = (value(&out, "chi-square ="), value(&out, "p ="));
+        let direct: f64 = observed
+            .trim_matches(['[', ']'])
+            .split(',')
+            .zip([25.0f64, 25.0, 50.0])
+            .map(|(o, e)| (o.parse::<f64>().unwrap() - e).powi(2) / e)
+            .sum();
+        assert!((statistic - direct).abs() < 1e-5, "{out}");
+        assert!((p - (-direct / 2.0).exp()).abs() < 1e-5, "{out}");
+    }
+    // A 2x2 independence table has 1 degree of freedom: p = 2 (1 - Phi(sqrt(chi2))).
+    for table in ["[[10,20],[30,40]]", "[[12,5],[7,16]]", "[[30,10],[20,40]]"] {
+        let out = run(&format!("chi2_test({table})"));
+        let (statistic, p) = (value(&out, "chi-square ="), value(&out, "p ="));
+        let cells: Vec<f64> = table
+            .replace("[[", "")
+            .replace("]]", "")
+            .replace("],[", ",")
+            .split(',')
+            .map(|c| c.parse().unwrap())
+            .collect();
+        let (a, b, c, d) = (cells[0], cells[1], cells[2], cells[3]);
+        // The closed form for a 2x2 table.
+        let direct =
+            (a + b + c + d) * (a * d - b * c).powi(2) / ((a + b) * (c + d) * (a + c) * (b + d));
+        assert!((statistic - direct).abs() < 1e-5, "{out} vs {direct}");
+        assert!((p - 2.0 * (1.0 - phi(direct.sqrt()))).abs() < 1e-5, "{out}");
+    }
+    // A proportion test is a z test of (x / n - p0) / sqrt(p0 (1 - p0) / n).
+    for (x, n, p0) in [
+        (60.0f64, 100.0f64, 0.5f64),
+        (18.0, 40.0, 0.3),
+        (7.0, 25.0, 0.4),
+    ] {
+        let z = (x / n - p0) / (p0 * (1.0 - p0) / n).sqrt();
+        let out = run(&format!("proportion_test({x:?}, {n:?}, {p0:?})"));
+        assert!((value(&out, "z =") - z).abs() < 1e-5, "{out}");
+        assert!(
+            (value(&out, "p =") - 2.0 * (1.0 - phi(z.abs()))).abs() < 1e-5,
+            "{out}"
+        );
+        let greater = run(&format!("proportion_test({x:?}, {n:?}, {p0:?}, greater)"));
+        assert!(
+            (value(&greater, "p =") - (1.0 - phi(z))).abs() < 1e-5,
+            "{greater}"
+        );
+    }
+    // With two groups the one-way ANOVA F is the square of the pooled t statistic and the p-values agree.
+    for (a, b) in [
+        ("[1,2,3,4]", "[3,4,5,9]"),
+        ("[5.1,4.9,5.6,5.8]", "[4.8,5.0,5.1,4.7,5.2]"),
+    ] {
+        let out = run(&format!("anova({a}, {b})"));
+        let (f, p) = (value(&out, "F ="), value(&out, "p ="));
+        let parse = |s: &str| -> Vec<f64> {
+            s.trim_matches(['[', ']'])
+                .split(',')
+                .map(|x| x.parse().unwrap())
+                .collect()
+        };
+        let (x, y) = (parse(a), parse(b));
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let ss = |v: &[f64]| v.iter().map(|e| (e - mean(v)).powi(2)).sum::<f64>();
+        let (n1, n2) = (x.len() as f64, y.len() as f64);
+        let pooled = (ss(&x) + ss(&y)) / (n1 + n2 - 2.0);
+        let t = (mean(&x) - mean(&y)) / (pooled * (1.0 / n1 + 1.0 / n2)).sqrt();
+        assert!(
+            (f - t * t).abs() < 1e-4 * (1.0 + f),
+            "F = {f}, t^2 = {}",
+            t * t
+        );
+        assert_eq!(value(&out, "df = ("), 1.0);
+        assert!((0.0..=1.0).contains(&p));
+    }
+    // A group-count example by hand: means 2, 3, 6 give F = 13 with (2, 6) degrees of freedom.
+    assert!(run("anova([1,2,3],[2,3,4],[5,6,7])").starts_with("F = 13, df = (2, 6), p = 0.006592"));
+    // Refusals.
+    assert!(UraeSession::new().execute_line("chi2_test([5])").is_error);
+    assert!(
+        UraeSession::new()
+            .execute_line("chi2_test([1,2],[0,3])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("proportion_test(11, 10, 0.5)")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("anova([1,1],[1,1])")
+            .is_error
+    );
+}

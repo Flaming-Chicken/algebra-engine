@@ -5117,3 +5117,272 @@ fn regression_inference_wilcoxon_and_kruskal_wallis_satisfy_their_identities() {
             .is_error
     );
 }
+
+#[test]
+fn matrix_commands_satisfy_their_defining_properties() {
+    // Exact rationals as (numerator, denominator) with i128 arithmetic.
+    type F = (i128, i128);
+    fn gcd(a: i128, b: i128) -> i128 {
+        if b == 0 { a.abs() } else { gcd(b, a % b) }
+    }
+    fn norm((n, d): F) -> F {
+        let g = gcd(n, d).max(1);
+        let s = if d < 0 { -1 } else { 1 };
+        (s * n / g, s * d / g)
+    }
+    fn add(a: F, b: F) -> F {
+        norm((a.0 * b.1 + b.0 * a.1, a.1 * b.1))
+    }
+    fn mul(a: F, b: F) -> F {
+        norm((a.0 * b.0, a.1 * b.1))
+    }
+    let parse_cell = |text: &str| -> F {
+        match text.trim().split_once('/') {
+            Some((a, b)) => norm((a.trim().parse().unwrap(), b.trim().parse().unwrap())),
+            None => (text.trim().parse().unwrap(), 1),
+        }
+    };
+    let parse_matrix = |text: &str| -> Vec<Vec<F>> {
+        text.trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(';')
+            .map(|r| r.split(',').map(parse_cell).collect())
+            .collect()
+    };
+    let product = |a: &Vec<Vec<F>>, b: &Vec<Vec<F>>| -> Vec<Vec<F>> {
+        (0..a.len())
+            .map(|i| {
+                (0..b[0].len())
+                    .map(|j| (0..b.len()).fold((0, 1), |s, k| add(s, mul(a[i][k], b[k][j]))))
+                    .collect()
+            })
+            .collect()
+    };
+    let transpose = |a: &Vec<Vec<F>>| -> Vec<Vec<F>> {
+        (0..a[0].len())
+            .map(|j| a.iter().map(|r| r[j]).collect())
+            .collect()
+    };
+    let literal = |rows: &[Vec<i128>]| {
+        format!(
+            "[{}]",
+            rows.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let mut state = 0xABCD_1234_5678_9EF1u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i128 - (m as i128) / 2
+    };
+    // The four Penrose conditions for random rectangular matrices (including rank deficient ones).
+    for (rows, cols) in [(3usize, 2usize), (2, 3), (3, 3), (4, 2), (2, 2)] {
+        for _ in 0..4 {
+            let mut data: Vec<Vec<i128>> = (0..rows)
+                .map(|_| (0..cols).map(|_| next(7)).collect())
+                .collect();
+            if next(2) == 0 && rows > 1 {
+                data[rows - 1] = data[0].iter().map(|x| 2 * x).collect();
+            }
+            let a: Vec<Vec<F>> = data
+                .iter()
+                .map(|r| r.iter().map(|x| (*x, 1)).collect())
+                .collect();
+            let p = parse_matrix(&run(&format!("pinv({})", literal(&data))));
+            let apa = product(&product(&a, &p), &a);
+            let pap = product(&product(&p, &a), &p);
+            assert_eq!(apa, a, "A A+ A for {data:?}");
+            assert_eq!(pap, p, "A+ A A+ for {data:?}");
+            let (ap, pa) = (product(&a, &p), product(&p, &a));
+            assert_eq!(ap, transpose(&ap), "A A+ symmetric for {data:?}");
+            assert_eq!(pa, transpose(&pa), "A+ A symmetric for {data:?}");
+        }
+    }
+    // The adjugate: A adj(A) = det(A) I, and the cofactor matrix is its transpose.
+    for _ in 0..6 {
+        let data: Vec<Vec<i128>> = (0..3).map(|_| (0..3).map(|_| next(9)).collect()).collect();
+        let det = data[0][0] * (data[1][1] * data[2][2] - data[1][2] * data[2][1])
+            - data[0][1] * (data[1][0] * data[2][2] - data[1][2] * data[2][0])
+            + data[0][2] * (data[1][0] * data[2][1] - data[1][1] * data[2][0]);
+        let a: Vec<Vec<F>> = data
+            .iter()
+            .map(|r| r.iter().map(|x| (*x, 1)).collect())
+            .collect();
+        let adjugate = parse_matrix(&run(&format!("adjugate({})", literal(&data))));
+        let identity_times_det: Vec<Vec<F>> = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| if i == j { (det, 1) } else { (0, 1) })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            product(&a, &adjugate),
+            identity_times_det,
+            "A adj(A) for {data:?}"
+        );
+        assert_eq!(
+            parse_matrix(&run(&format!("cofactor({})", literal(&data)))),
+            transpose(&adjugate)
+        );
+        // Expansion along the first row by minors: det = sum a_1j (-1)^j minor_1j.
+        let by_minors: i128 = (0..3)
+            .map(|j| {
+                let m: F = parse_cell(&run(&format!("minor({}, 1, {})", literal(&data), j + 1)));
+                data[0][j] * m.0 * if j % 2 == 0 { 1 } else { -1 }
+            })
+            .sum();
+        assert_eq!(by_minors, det, "{data:?}");
+    }
+    // Gram-Schmidt: pairwise orthogonal, as many vectors as the rank; projection leaves a residual orthogonal to v.
+    let gs = run("gram_schmidt([[1,2,0],[1,0,1],[1,1,1]])");
+    let vectors: Vec<Vec<F>> = gs
+        .trim_start_matches("orthogonal basis: ")
+        .split("], [")
+        .map(|v| {
+            v.trim_matches(['[', ']'])
+                .split(", ")
+                .map(parse_cell)
+                .collect()
+        })
+        .collect();
+    assert_eq!(vectors.len(), 3, "{gs}");
+    for i in 0..vectors.len() {
+        for j in i + 1..vectors.len() {
+            assert_eq!(
+                (0..3).fold((0, 1), |s, k| add(s, mul(vectors[i][k], vectors[j][k]))),
+                (0, 1),
+                "{gs}"
+            );
+        }
+    }
+    assert_eq!(
+        run("gram_schmidt([[1,2],[2,4],[0,1]])")
+            .matches('[')
+            .count(),
+        2,
+        "three vectors of rank two"
+    );
+    for (u, v) in [
+        ([1i128, 2], [3i128, 4]),
+        ([5, -1], [2, 2]),
+        ([0, 3], [4, 0]),
+    ] {
+        let p = run(&format!(
+            "projection([{},{}],[{},{}])",
+            u[0], u[1], v[0], v[1]
+        ));
+        let cells: Vec<F> = p
+            .trim_matches(['[', ']'])
+            .split(", ")
+            .map(parse_cell)
+            .collect();
+        let residual: Vec<F> = (0..2)
+            .map(|i| add((u[i], 1), (-cells[i].0, cells[i].1)))
+            .collect();
+        assert_eq!(
+            (0..2).fold((0, 1), |s, k| add(s, mul(residual[k], (v[k], 1)))),
+            (0, 1),
+            "projection of {u:?} on {v:?}: {p}"
+        );
+    }
+    // Least squares: the residual is orthogonal to the columns of A (the normal equations hold).
+    let x = parse_matrix(&run("lstsq([[1,1],[1,2],[1,3],[1,4]],[1,3,2,5])"));
+    let a: Vec<Vec<F>> = [[1, 1], [1, 2], [1, 3], [1, 4]]
+        .iter()
+        .map(|r| r.iter().map(|v| (*v, 1)).collect())
+        .collect();
+    let b: Vec<Vec<F>> = [1, 3, 2, 5].iter().map(|v| vec![(*v, 1)]).collect();
+    let residual: Vec<Vec<F>> = product(&a, &x)
+        .iter()
+        .zip(&b)
+        .map(|(p, q)| vec![add(p[0], (-q[0].0, q[0].1))])
+        .collect();
+    assert!(
+        product(&transpose(&a), &residual)
+            .iter()
+            .all(|r| r[0] == (0, 1)),
+        "A^T r = 0"
+    );
+    // Predicates.
+    assert_eq!(run("is_symmetric([[1,2],[2,1]])"), "true");
+    assert_eq!(run("is_symmetric([[1,2],[3,1]])"), "false");
+    assert_eq!(run("is_positive_definite([[2,1],[1,2]])"), "true");
+    assert_eq!(run("is_positive_definite([[1,2],[2,1]])"), "false");
+    assert_eq!(run("is_orthogonal([[0,1],[1,0]])"), "true");
+    assert_eq!(run("is_orthogonal([[1,1],[0,1]])"), "false");
+    // cond of a 2x2 matrix: sigma^2 are the roots of l^2 - tr(A^T A) l + det(A)^2.
+    for (a, b, c, d) in [
+        (1.0f64, 2.0f64, 3.0f64, 4.0f64),
+        (2.0, 0.0, 0.0, 5.0),
+        (3.0, 1.0, 1.0, 2.0),
+    ] {
+        let trace = a * a + b * b + c * c + d * d;
+        let det = a * d - b * c;
+        let disc = (trace * trace - 4.0 * det * det).sqrt();
+        let expected = ((trace + disc) / (trace - disc)).sqrt();
+        let got: f64 = run(&format!("cond([[{a:?},{b:?}],[{c:?},{d:?}]])"))
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(
+            (got - expected).abs() < 1e-8 * expected,
+            "cond: {got} vs {expected}"
+        );
+    }
+    // The matrix exponential of an upper triangular 2x2: [[e^a, b (e^d - e^a) / (d - a)], [0, e^d]].
+    let value = |text: &str| -> f64 { run(&format!("evalf({text})")).trim().parse().unwrap() };
+    let out = run("expm([[1,2],[0,3]])");
+    let cells: Vec<String> = out
+        .trim_matches(['[', ']', ' '])
+        .split([',', ';'])
+        .map(|c| c.trim().to_string())
+        .collect();
+    assert!(
+        (value(&cells[0]) - 1f64.exp()).abs() < 1e-9
+            && (value(&cells[3]) - 3f64.exp()).abs() < 1e-9,
+        "{out}"
+    );
+    assert!(
+        (value(&cells[1]) - 2.0 * (3f64.exp() - 1f64.exp()) / 2.0).abs() < 1e-9,
+        "{out}"
+    );
+    assert_eq!(run("expm([[0,1],[0,0]])"), "[ 1, 1 ; 0, 1 ]");
+    assert_eq!(
+        run("expm([[0,1],[-1,0]])"),
+        "[ cos(1), sin(1) ; -sin(1), cos(1) ]"
+    );
+    // Stored matrices work too.
+    let mut session = UraeSession::new();
+    session.execute_line("M = [[1,2],[3,4]]");
+    assert_eq!(
+        session.execute_line("adjugate(M)").output_text,
+        "[ 4, -2 ; -3, 1 ]"
+    );
+    assert_eq!(
+        session.execute_line("pinv(M)").output_text,
+        "[ -2, 1 ; 3/2, -1/2 ]"
+    );
+    // Refusals.
+    assert!(
+        UraeSession::new()
+            .execute_line("adjugate([[1,2,3],[4,5,6]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("hadamard([[1,2]],[[1],[2]])")
+            .is_error
+    );
+}

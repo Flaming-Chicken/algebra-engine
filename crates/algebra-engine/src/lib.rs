@@ -66,6 +66,7 @@ pub mod logic_commands;
 pub mod macros;
 pub mod matexpr;
 pub mod matrix;
+pub mod matrix_commands;
 pub mod mcts;
 pub mod neural_ode;
 pub mod noneuclidean;

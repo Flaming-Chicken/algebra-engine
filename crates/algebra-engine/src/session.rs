@@ -791,6 +791,13 @@ impl UraeSession {
         };
         let trimmed = matrix_expanded.as_deref().unwrap_or(trimmed);
         // `A[1,2]`, `v[3]`, `A[:,2]`, `row(A, 1)`, `size(A)`, `diag(A)`: indexing and shape queries on matrices.
+        // `pinv(A)`, `adjugate(A)`, `projection(u, v)`, `matrix_exp(A)`, ...: exact linear algebra.
+        if let Some(outcome) = crate::matrix_commands::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
         if let Some(outcome) = crate::indexing::run(self, trimmed) {
             return match outcome {
                 Ok(text) => OperationResult::success(text.clone(), text.clone(), text),

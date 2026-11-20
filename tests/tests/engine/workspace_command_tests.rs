@@ -6351,3 +6351,122 @@ fn logistic_regression_satisfies_the_score_equations_and_the_two_by_two_closed_f
             .is_error
     );
 }
+
+#[test]
+fn prediction_intervals_match_the_closed_form_and_the_intercept_interval() {
+    let interval = |text: &str, key: &str| -> (f64, f64) {
+        let inner = text
+            .split(key)
+            .nth(1)
+            .unwrap()
+            .split('(')
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap();
+        let (a, b) = inner.split_once(", ").unwrap();
+        (a.parse().unwrap(), b.parse().unwrap())
+    };
+    let list = |v: &[f64]| {
+        format!(
+            "[{}]",
+            v.iter()
+                .map(|e| format!("{e:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let datasets: [(&[f64], &[f64]); 3] = [
+        (&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 5.0, 4.0, 5.0]),
+        (
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            &[6.0, 5.0, 7.0, 3.0, 2.0, 2.0],
+        ),
+        (
+            &[0.5, 1.5, 2.5, 3.0, 4.5, 6.0, 7.5],
+            &[1.0, 2.2, 2.9, 4.1, 5.2, 7.4, 8.1],
+        ),
+    ];
+    for (x, y) in datasets {
+        let n = x.len() as f64;
+        let (mx, my) = (x.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
+        let sxx: f64 = x.iter().map(|a| (a - mx).powi(2)).sum();
+        let sxy: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
+        let slope = sxy / sxx;
+        let sse: f64 = x
+            .iter()
+            .zip(y)
+            .map(|(a, b)| (b - my - slope * (a - mx)).powi(2))
+            .sum();
+        let s2 = sse / (n - 2.0);
+        for (x0, level) in [
+            (mx, 0.95),
+            (x[0] - 1.0, 0.95),
+            (x[x.len() - 1] + 2.5, 0.9),
+            (0.0, 0.95),
+        ] {
+            let out = run(&format!(
+                "predict({}, {}, {x0:?}, {level:?})",
+                list(x),
+                list(y)
+            ));
+            let fit = my + slope * (x0 - mx);
+            let critical: f64 = run(&format!(
+                "t_quantile({}, {})",
+                1.0 - (1.0 - level) / 2.0,
+                n - 2.0
+            ))
+            .trim()
+            .parse()
+            .unwrap();
+            let h = 1.0 / n + (x0 - mx).powi(2) / sxx;
+            let (lo, hi) = interval(&out, "confidence interval for the mean");
+            assert!(
+                (lo - (fit - critical * (s2 * h).sqrt())).abs() < 1e-4
+                    && (hi - (fit + critical * (s2 * h).sqrt())).abs() < 1e-4,
+                "{out}"
+            );
+            let (plo, phi) = interval(&out, "prediction interval");
+            assert!(
+                (plo - (fit - critical * (s2 * (1.0 + h)).sqrt())).abs() < 1e-4
+                    && (phi - (fit + critical * (s2 * (1.0 + h)).sqrt())).abs() < 1e-4,
+                "{out}"
+            );
+            assert!(
+                plo < lo && phi > hi,
+                "the prediction interval contains the mean interval: {out}"
+            );
+        }
+        // At x0 = 0 the confidence interval of the mean is the confidence interval of the intercept from regress().
+        let at_zero = interval(
+            &run(&format!("predict({}, {}, 0)", list(x), list(y))),
+            "confidence interval for the mean",
+        );
+        let regress = run(&format!("regress({}, {})", list(x), list(y)));
+        let intercept = regress.split("intercept").nth(1).unwrap();
+        let ci = intercept
+            .split("95% CI (")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap();
+        let (a, b) = ci.split_once(", ").unwrap();
+        assert!(
+            (at_zero.0 - a.parse::<f64>().unwrap()).abs() < 1e-4
+                && (at_zero.1 - b.parse::<f64>().unwrap()).abs() < 1e-4,
+            "{regress}"
+        );
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("predict([1,2,3],[1,2,3],2, 1.5)")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("predict([1,1,1],[1,2,3],2)")
+            .is_error
+    );
+}

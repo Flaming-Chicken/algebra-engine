@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `predict(x, y, x0)`: fitted value with confidence and prediction intervals.
 - `logistic_regress(X, y)` / `logit`: logistic regression with Wald inference and odds ratios.
 - Graph paths and matchings: `is_eulerian`, `euler_path`, `hamiltonian_path`, `hamiltonian_cycle`, `max_matching`.
 - `inverse_ztransform(X, z, n)` for rational X(z) with real poles.

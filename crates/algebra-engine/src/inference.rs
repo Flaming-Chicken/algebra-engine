@@ -128,6 +128,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "fisher_exact" | "fisher_test" | "fisher" => "fisher",
         "correlation_test" | "pearson_test" | "pearson" => "pearson",
         "spearman" | "spearman_test" | "spearmanr" => "spearman",
+        "predict" | "regress_predict" | "prediction_interval" | "predict_interval" => "predict",
         "kendall" | "kendall_tau" | "kendalltau" | "kendall_test" => "kendall",
         "mann_whitney" | "mannwhitney" | "mann_whitney_u" | "wilcoxon_rank_sum" => "mann_whitney",
         "regression_test" | "regress" | "linregress" | "regression_inference" => "regress",
@@ -147,6 +148,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             return Some(correlation(session, &args, command == "spearman", alt));
         }
         "kendall" => return Some(kendall(session, &args)),
+        "predict" => return Some(predict(session, &args)),
         "mann_whitney" => return Some(mann_whitney(session, &args)),
         "regress" => return Some(regress(session, &args)),
         "wilcoxon" => return Some(wilcoxon(session, &args)),
@@ -1000,5 +1002,68 @@ fn kendall(session: &mut UraeSession, args: &[String]) -> Result<String, String>
         n,
         number(z),
         number(normal_p(z, Alternative::Two))
+    ))
+}
+
+/// `predict(x, y, x0[, level])`: the fitted value of the least-squares line at `x0` with the confidence interval for the mean
+/// response and the (wider) prediction interval for a new observation.
+fn predict(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let x = list(session, args.first().ok_or("predict(x, y, x0)")?).ok_or("x must be a list")?;
+    let y = list(session, args.get(1).ok_or("predict(x, y, x0)")?).ok_or("y must be a list")?;
+    let x0 =
+        rational(session, args.get(2).ok_or("predict(x, y, x0)")?).ok_or("x0 must be a number")?;
+    let level = match args.get(3) {
+        Some(l) => rational(session, l)
+            .map(|q| float(&q))
+            .ok_or("the level must be a number")?,
+        None => 0.95,
+    };
+    if !(0.0 < level && level < 1.0) {
+        return Err("the level must lie strictly between 0 and 1".into());
+    }
+    if x.len() != y.len() || x.len() < 3 {
+        return Err("x and y need the same length, at least 3".into());
+    }
+    let n = Q::from_integer(BigInt::from(x.len()));
+    let (mean_x, mean_y) = (
+        x.iter().fold(Q::zero(), |s, v| s + v) / &n,
+        y.iter().fold(Q::zero(), |s, v| s + v) / &n,
+    );
+    let sxx = x
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_x) * (v - &mean_x));
+    let syy = y
+        .iter()
+        .fold(Q::zero(), |s, v| s + (v - &mean_y) * (v - &mean_y));
+    let sxy = x
+        .iter()
+        .zip(&y)
+        .fold(Q::zero(), |s, (a, b)| s + (a - &mean_x) * (b - &mean_y));
+    if sxx.is_zero() {
+        return Err("x is constant: the line is undefined".into());
+    }
+    let slope = &sxy / &sxx;
+    let fitted = &mean_y + &slope * (&x0 - &mean_x);
+    let sse = &syy - &slope * &sxy;
+    let df = x.len() as f64 - 2.0;
+    let variance = float(&sse) / df;
+    let leverage = 1.0 / float(&n) + float(&((&x0 - &mean_x) * (&x0 - &mean_x) / &sxx));
+    let critical =
+        distribution("t_quantile", &[1.0 - (1.0 - level) / 2.0, df]).ok_or("t quantile failed")?;
+    let (mean_half, new_half) = (
+        critical * (variance * leverage).sqrt(),
+        critical * (variance * (1.0 + leverage)).sqrt(),
+    );
+    let value = float(&fitted);
+    Ok(format!(
+        "fit = {} at x = {}; {}% confidence interval for the mean ({}, {}); {}% prediction interval ({}, {})",
+        show(&fitted),
+        show(&x0),
+        number(level * 100.0),
+        number(value - mean_half),
+        number(value + mean_half),
+        number(level * 100.0),
+        number(value - new_half),
+        number(value + new_half)
     ))
 }

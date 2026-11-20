@@ -6921,3 +6921,109 @@ fn hessenberg_reduction_is_a_similarity_to_upper_hessenberg_form() {
             .is_error
     );
 }
+
+#[test]
+fn matrix_square_root_squares_back_and_is_exact_when_the_root_is_rational() {
+    let mut state = 0x7777_3333_1111_AAAAu64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i64
+    };
+    let literal = |m: &Vec<Vec<i64>>| {
+        format!(
+            "[{}]",
+            m.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let square = |m: &Vec<Vec<i64>>| -> Vec<Vec<i64>> {
+        (0..m.len())
+            .map(|i| {
+                (0..m.len())
+                    .map(|j| (0..m.len()).map(|k| m[i][k] * m[k][j]).sum())
+                    .collect()
+            })
+            .collect()
+    };
+    // S with positive eigenvalues (triangular with a positive diagonal, then conjugated by an integer shear): the principal root of S^2 is S.
+    for n in [2usize, 3, 4] {
+        for _ in 0..4 {
+            let mut s: Vec<Vec<i64>> = (0..n)
+                .map(|i| {
+                    (0..n)
+                        .map(|j| {
+                            if j > i {
+                                next(5) - 2
+                            } else if i == j {
+                                1 + next(4)
+                            } else {
+                                0
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
+            let (r, c) = (next(n as u64) as usize, next(n as u64) as usize);
+            if r != c {
+                // Conjugation by E = I + e_r e_c^T keeps the eigenvalues.
+                for k in 0..n {
+                    let v = s[c][k];
+                    s[r][k] += v;
+                }
+                for row in s.iter_mut() {
+                    let v = row[r];
+                    row[c] -= v;
+                }
+            }
+            let a = square(&s);
+            let out = run(&format!("sqrtm({})", literal(&a)));
+            let expected = run(&literal(&s));
+            assert_eq!(out, expected, "sqrtm of {a:?}: {out}");
+        }
+    }
+    // Irrational roots: the decimals square back to A.
+    let decimals = |text: &str| -> Vec<Vec<f64>> {
+        text.trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(';')
+            .map(|r| r.split(',').map(|c| c.trim().parse().unwrap()).collect())
+            .collect()
+    };
+    for a in [
+        vec![vec![2i64, 0], vec![0, 3]],
+        vec![vec![2, 1], vec![1, 2]],
+        vec![vec![5, 2, 0], vec![2, 5, 1], vec![0, 1, 4]],
+        vec![vec![1, 1], vec![0, 2]],
+    ] {
+        let n = a.len();
+        let s = decimals(&run(&format!("sqrtm({})", literal(&a))));
+        for i in 0..n {
+            for j in 0..n {
+                let value: f64 = (0..n).map(|k| s[i][k] * s[k][j]).sum();
+                assert!((value - a[i][j] as f64).abs() < 1e-8, "{a:?}: {s:?}");
+            }
+        }
+    }
+    assert_eq!(run("sqrtm([[4,0],[0,9]])"), "[ 2, 0 ; 0, 3 ]");
+    assert!(
+        UraeSession::new()
+            .execute_line("sqrtm([[-1,0],[0,4]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("sqrtm([[1,2,3],[4,5,6]])")
+            .is_error
+    );
+}

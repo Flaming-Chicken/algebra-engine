@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `sqrtm(A)`: principal matrix square root, exact when rational.
 - `hessenberg(A)`: exact upper Hessenberg form with the similarity matrix.
 - `jordan(A)`: Jordan normal form of a rational matrix with rational eigenvalues.
 - `poisson_regress(X, y)`: Poisson regression with Wald inference and rate ratios.

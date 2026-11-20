@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: propositional-logic commands `truth_table(F)`, `tautology(F)`, `satisfiable(F)`, `contradiction(F)`, `equivalent(F, G)`, `count_models(F)`; set notation `|{1,2,3}|`, `cardinality({...})`, `{1,2} x {3,4}` and `cartesian_product(A, B)`.
 - Fixed: `5 xor 3` printed `15 · xor`, `0xFF` printed 0, `0b1010 + 1` printed 1 and `powerset({1,2})` was garbled. Added `0x`/`0b`/`0o` literals, `&`, `|`, `xor`, `<<`, `>>` on integers, `255 to binary` / `in hex` / `as octal`, and the spellings `bin`, `to_binary`, `to_hex`, `from_binary`, `from_hex`, `to_octal`.
 - Added: `arithmetic_sum(a, d, n)`, `geometric_sum(a, r, n)`, `hypotenuse(a, b)`, `area_triangle` (Heron's formula or three points), `angle_between(u, v)` (exact multiples of pi) and `maclaurin(f, n)`; `maclaurin(cos(x), 6)` used to return `cos(x)` unchanged.
 - Added: exact `binomial_cdf`, `hypergeometric_pmf`, `z_score`, `bayes(prior, sensitivity, false_positive)`, `expected_value(values, probabilities)` and `variance_discrete`. They were echoed back.

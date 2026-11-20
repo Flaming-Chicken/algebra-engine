@@ -874,7 +874,8 @@ pub fn shorthand(input: &str) -> Option<String> {
     if let Some(rest) = t.strip_prefix("nth_root(") {
         return Some(format!("root({rest}"));
     }
-    bits_shorthand(t)
+    set_shorthand(t)
+        .or_else(|| bits_shorthand(t))
         .or_else(|| choose_shorthand(t))
         .or_else(|| bars_shorthand(t))
         .or_else(|| derivative_shorthand(t))
@@ -981,6 +982,53 @@ fn bits_shorthand(s: &str) -> Option<String> {
             && integer(b)
         {
             return Some(format!("{command}({}, {})", a.trim(), b.trim()));
+        }
+    }
+    None
+}
+
+/// `|{1,2,3}|` and `cardinality({1,2,3})` as `size {1,2,3}`; `cartesian_product(A, B)` and `A x B` as `A cross B`.
+fn set_shorthand(s: &str) -> Option<String> {
+    let t = s.trim();
+    if let Some(inner) = t.strip_prefix('|').and_then(|r| r.strip_suffix('|'))
+        && inner.trim().starts_with('{')
+        && inner.trim().ends_with('}')
+    {
+        return Some(format!("size {}", inner.trim()));
+    }
+    for name in ["cardinality(", "card(", "size_of("] {
+        if let Some(inner) = t.strip_prefix(name).and_then(|r| r.strip_suffix(')'))
+            && inner.trim().starts_with('{')
+        {
+            return Some(format!("size {}", inner.trim()));
+        }
+    }
+    if let Some(inner) = t
+        .strip_prefix("cartesian_product(")
+        .or_else(|| t.strip_prefix("cross_product_sets("))
+        .and_then(|r| r.strip_suffix(')'))
+    {
+        let (mut depth, mut at) = (0i32, None);
+        for (i, c) in inner.char_indices() {
+            match c {
+                '{' | '(' | '[' => depth += 1,
+                '}' | ')' | ']' => depth -= 1,
+                ',' if depth == 0 && at.is_none() => at = Some(i),
+                _ => {}
+            }
+        }
+        let at = at?;
+        return Some(format!(
+            "{} cross {}",
+            inner[..at].trim(),
+            inner[at + 1..].trim()
+        ));
+    }
+    if t.starts_with('{') && t.ends_with('}') {
+        for times in ["} x {", "} × {", "}×{", "} X {"] {
+            if t.matches(times).count() == 1 {
+                return Some(t.replacen(times, "} cross {", 1));
+            }
         }
     }
     None

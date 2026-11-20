@@ -2664,3 +2664,88 @@ fn bit_operations_and_number_bases_match_the_standard_library() {
         assert_eq!(subsets, 1 << members, "{out}");
     }
 }
+
+#[test]
+fn logic_commands_match_brute_force_and_set_notation_works() {
+    // Each formula is paired with an independent Rust evaluation over (p, q, r).
+    type Formula = (&'static str, fn(bool, bool, bool) -> bool);
+    let formulas: [Formula; 8] = [
+        ("p and q", |p, q, _| p && q),
+        ("p or q", |p, q, _| p || q),
+        ("p xor q", |p, q, _| p ^ q),
+        ("p -> q", |p, q, _| !p || q),
+        ("p <-> q", |p, q, _| p == q),
+        ("not (p and q) or r", |p, q, r| !(p && q) || r),
+        ("(p -> q) and (q -> r)", |p, q, r| (!p || q) && (!q || r)),
+        ("p and (q or r)", |p, q, r| p && (q || r)),
+    ];
+    for (formula, truth) in formulas {
+        let words: Vec<&str> = formula.split(|c: char| !c.is_alphabetic()).collect();
+        let vars: Vec<char> = ['p', 'q', 'r']
+            .into_iter()
+            .filter(|v| words.contains(&v.to_string().as_str()))
+            .collect();
+        let n = vars.len();
+        let table = run(&format!("truth_table({formula})"));
+        let rows: Vec<&str> = table.lines().skip(1).collect();
+        assert_eq!(rows.len(), 1 << n, "{formula}: {table}");
+        let mut satisfying = 0;
+        for (i, row) in rows.iter().enumerate() {
+            let value = |v: char| match vars.iter().position(|x| *x == v) {
+                Some(k) => (i >> (n - 1 - k)) & 1 == 0,
+                None => false,
+            };
+            let expected = truth(value('p'), value('q'), value('r'));
+            assert!(
+                row.ends_with(if expected { "| T" } else { "| F" }),
+                "{formula} row {i}: {row}"
+            );
+            satisfying += expected as usize;
+        }
+        assert_eq!(
+            run(&format!("count_models({formula})")),
+            format!("{satisfying} of {} assignments satisfy it", 1 << n)
+        );
+        assert_eq!(
+            run(&format!("tautology({formula})")),
+            (satisfying == 1 << n).to_string(),
+            "{formula}"
+        );
+        assert_eq!(
+            run(&format!("contradiction({formula})")),
+            (satisfying == 0).to_string(),
+            "{formula}"
+        );
+        assert_eq!(
+            run(&format!("satisfiable({formula})")).starts_with("satisfiable"),
+            satisfying > 0,
+            "{formula}"
+        );
+    }
+    // Classical tautologies and equivalences.
+    for law in [
+        "p or not p",
+        "(p -> q) <-> (not q -> not p)",
+        "not (p and q) <-> (not p or not q)",
+        "((p -> q) and p) -> q",
+    ] {
+        assert_eq!(run(&format!("tautology({law})")), "true", "{law}");
+    }
+    assert_eq!(run("equivalent(not (p or q), not p and not q)"), "true");
+    assert_eq!(run("equivalent(p -> q, q -> p)"), "false");
+    assert_eq!(run("satisfiable(p and not p)"), "unsatisfiable");
+    // Set cardinality and Cartesian products: |A x B| = |A| |B|.
+    assert_eq!(run("|{1, 2, 3}|"), "3");
+    assert_eq!(run("cardinality({1, 2, 2, 3})"), "3");
+    for (a, b) in [
+        ("{1, 2}", "{3, 4, 5}"),
+        ("{a}", "{1, 2, 3, 4}"),
+        ("{1, 2, 3}", "{x, y, z}"),
+    ] {
+        let size = |set: &str| -> usize { run(&format!("size {set}")).parse().unwrap() };
+        let product = run(&format!("{a} x {b}"));
+        assert_eq!(product, run(&format!("cartesian_product({a}, {b})")));
+        assert_eq!(product.matches('(').count(), size(a) * size(b), "{product}");
+    }
+    assert_eq!(run("|x|"), run("abs(x)"));
+}

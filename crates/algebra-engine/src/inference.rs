@@ -295,7 +295,7 @@ fn normal_p(z: f64, alt: Alternative) -> f64 {
 }
 
 /// The standard normal distribution function (erf by its Maclaurin series).
-fn normal_cdf(x: f64) -> f64 {
+pub(crate) fn normal_cdf(x: f64) -> f64 {
     // Phi(x) = (1 + erf(x / sqrt 2)) / 2 with erf from its Maclaurin series for moderate arguments.
     let z = x / std::f64::consts::SQRT_2;
     let (mut term, mut sum) = (z, z);

@@ -6233,3 +6233,121 @@ fn graph_paths_and_matchings_match_exhaustive_search() {
     assert_eq!(run("hamiltonian_cycle(P4)"), "none");
     assert!(run("max_matching(K6)").starts_with("3:"));
 }
+
+#[test]
+fn logistic_regression_satisfies_the_score_equations_and_the_two_by_two_closed_form() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // A binary predictor: the slope is the log odds ratio of the 2x2 table and the intercept the log odds of the baseline group.
+    // Group 0: 7 successes in 20; group 1: 15 in 25.
+    let mut x = Vec::new();
+    let mut y = Vec::new();
+    for (group, successes, total) in [(0, 7, 20), (1, 15, 25)] {
+        for i in 0..total {
+            x.push(format!("[{group}]"));
+            y.push(if i < successes { "1" } else { "0" });
+        }
+    }
+    let out = run(&format!(
+        "logistic_regress([{}], [{}])",
+        x.join(","),
+        y.join(",")
+    ));
+    let (b0, b1) = (
+        field(&out, "intercept ="),
+        field(out.split("x1").nth(1).unwrap(), "="),
+    );
+    assert!((b0 - (7.0f64 / 13.0).ln()).abs() < 1e-5, "{out}");
+    assert!(
+        (b1 - ((15.0f64 / 10.0) / (7.0 / 13.0)).ln()).abs() < 1e-5,
+        "{out}"
+    );
+    // Wald standard error of a log odds ratio: sqrt(1/a + 1/b + 1/c + 1/d).
+    let se = (1.0f64 / 7.0 + 1.0 / 13.0 + 1.0 / 15.0 + 1.0 / 10.0).sqrt();
+    assert!(
+        (field(out.split("x1").nth(1).unwrap(), "se ") - se).abs() < 1e-5,
+        "{out}"
+    );
+    // Continuous predictors: the score equations X^T (y - p) = 0 hold at the reported coefficients.
+    let data: [(f64, f64, u8); 14] = [
+        (0.5, 1.0, 0),
+        (1.0, 3.0, 0),
+        (1.5, 2.0, 0),
+        (2.0, 5.0, 1),
+        (2.5, 1.0, 0),
+        (3.0, 4.0, 1),
+        (3.5, 2.0, 0),
+        (4.0, 6.0, 1),
+        (4.5, 3.0, 1),
+        (5.0, 1.0, 0),
+        (5.5, 5.0, 1),
+        (6.0, 2.0, 1),
+        (2.2, 4.0, 0),
+        (4.8, 6.0, 0),
+    ];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        data.iter()
+            .map(|d| d.2.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("logit({xs}, {ys})"));
+    let beta = [
+        field(&out, "intercept ="),
+        field(out.split("x1").nth(1).unwrap(), "="),
+        field(out.split("x2").nth(1).unwrap(), "="),
+    ];
+    let mut score = [0.0f64; 3];
+    let mut log_likelihood = 0.0;
+    for (a, b, outcome) in data {
+        let eta = beta[0] + beta[1] * a + beta[2] * b;
+        let p = 1.0 / (1.0 + (-eta).exp());
+        let r = outcome as f64 - p;
+        score[0] += r;
+        score[1] += r * a;
+        score[2] += r * b;
+        log_likelihood += outcome as f64 * eta - (1.0 + eta.exp()).ln();
+    }
+    assert!(
+        score.iter().all(|s| s.abs() < 1e-4),
+        "{out}: score {score:?}"
+    );
+    assert!(
+        (field(&out, "log-likelihood =") - log_likelihood).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(out.split("x1").nth(1).unwrap(), "odds ratio ") - beta[1].exp()).abs() < 1e-4,
+        "{out}"
+    );
+    // Perfect separation and bad outcomes are refused.
+    assert!(
+        UraeSession::new()
+            .execute_line("logit([[1],[2],[3],[4],[5],[6]], [0,0,0,1,1,1])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("logit([[1],[2],[3],[4]], [0,2,1,0])")
+            .is_error
+    );
+}

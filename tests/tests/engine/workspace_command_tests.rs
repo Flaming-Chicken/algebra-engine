@@ -5478,3 +5478,126 @@ fn kendall_tau_matches_pair_counting_and_the_inversion_distribution() {
             .is_error
     );
 }
+
+#[test]
+fn multiple_regression_reduces_to_simple_regression_and_satisfies_the_normal_equations() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        let token = after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap();
+        match token.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => token.parse().unwrap(),
+        }
+    };
+    // One predictor: identical to regress(x, y); F = t^2 for the slope.
+    let simple = run("regress([1,2,3,4,5,6],[6,5,7,3,2,2])");
+    let multi = run("mregress([[1],[2],[3],[4],[5],[6]],[6,5,7,3,2,2])");
+    let slope_part = simple.split(';').next().unwrap();
+    let multi_slope = multi.split("x1").nth(1).unwrap();
+    assert!(
+        (field(slope_part, "slope =") - field(multi_slope, "=")).abs() < 1e-9,
+        "{simple} / {multi}"
+    );
+    assert!(
+        (field(slope_part, "t =") - field(multi_slope, "t =")).abs() < 1e-4,
+        "{simple} / {multi}"
+    );
+    assert!(
+        (field(slope_part, "p =") - field(multi_slope, "p =")).abs() < 1e-4,
+        "{simple} / {multi}"
+    );
+    assert!(
+        (field(&multi, "F =") - field(multi_slope, "t =").powi(2)).abs() < 1e-3,
+        "{multi}"
+    );
+    assert!(
+        (field(&multi, "R^2 =") - field(&simple, "R^2 =")).abs() < 1e-5,
+        "{multi}"
+    );
+    // Two predictors with noise: the residual is orthogonal to the constant and to both columns.
+    let x: [[i64; 2]; 7] = [[1, 2], [2, 1], [3, 5], [4, 3], [5, 8], [6, 4], [7, 9]];
+    let y = [3i64, 4, 8, 7, 14, 9, 16];
+    let xs = format!(
+        "[{}]",
+        x.iter()
+            .map(|r| format!("[{},{}]", r[0], r[1]))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        y.iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("mregress({xs}, {ys})"));
+    let (b0, b1, b2) = (
+        field(&out, "intercept ="),
+        field(out.split("x1").nth(1).unwrap(), "="),
+        field(out.split("x2").nth(1).unwrap(), "="),
+    );
+    let residuals: Vec<f64> = (0..7)
+        .map(|i| y[i] as f64 - b0 - b1 * x[i][0] as f64 - b2 * x[i][1] as f64)
+        .collect();
+    assert!(residuals.iter().sum::<f64>().abs() < 1e-9, "{out}");
+    assert!(
+        (0..7)
+            .map(|i| residuals[i] * x[i][0] as f64)
+            .sum::<f64>()
+            .abs()
+            < 1e-9,
+        "{out}"
+    );
+    assert!(
+        (0..7)
+            .map(|i| residuals[i] * x[i][1] as f64)
+            .sum::<f64>()
+            .abs()
+            < 1e-9,
+        "{out}"
+    );
+    let mean = y.iter().sum::<i64>() as f64 / 7.0;
+    let sst: f64 = y.iter().map(|v| (*v as f64 - mean).powi(2)).sum();
+    let sse: f64 = residuals.iter().map(|e| e * e).sum();
+    assert!(
+        (field(&out, "R^2 =") - (1.0 - sse / sst)).abs() < 1e-5,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "adjusted R^2 =") - (1.0 - (sse / 4.0) / (sst / 6.0))).abs() < 1e-5,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "F =") - (sst - sse) / 2.0 / (sse / 4.0)).abs() < 1e-3,
+        "{out}"
+    );
+    // An exactly linear response gives exact coefficients.
+    assert!(
+        run("mregress([[1,0],[0,1],[1,1],[2,1],[3,5]],[3,4,6,8,22])")
+            .starts_with("intercept = 1 (exact fit); x1 = 2 (exact fit); x2 = 3 (exact fit)")
+    );
+    // Refusals: collinear predictors, too few observations, mismatched lengths.
+    assert!(
+        UraeSession::new()
+            .execute_line("mregress([[1,2],[2,4],[3,6],[4,8]],[1,2,3,5])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("mregress([[1,2],[2,3]],[1,2])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("mregress([[1],[2],[3],[4]],[1,2,3])")
+            .is_error
+    );
+}

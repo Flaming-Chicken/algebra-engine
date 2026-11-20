@@ -254,7 +254,7 @@ fn linear_form(graph: &ExprGraph, expr: ExprId, vars: &[SymbolId]) -> Result<(Ve
 }
 
 /// Split `a, b, c` at top-level commas.
-fn split_commas(text: &str) -> Vec<String> {
+pub(crate) fn split_commas(text: &str) -> Vec<String> {
     let (mut depth, mut current, mut out) = (0i32, String::new(), Vec::new());
     for c in text.chars() {
         match c {
@@ -295,7 +295,7 @@ pub fn solve_text(graph: &ExprGraph, input: &str) -> Option<Result<String, Strin
     ))
 }
 
-fn strip_word<'a>(input: &'a str, words: &[&str]) -> Option<&'a str> {
+pub(crate) fn strip_word<'a>(input: &'a str, words: &[&str]) -> Option<&'a str> {
     for w in words {
         if input.len() > w.len()
             && input
@@ -309,7 +309,7 @@ fn strip_word<'a>(input: &'a str, words: &[&str]) -> Option<&'a str> {
     None
 }
 
-fn split_subject(text: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_subject(text: &str) -> Option<(&str, &str)> {
     let lower = text.to_ascii_lowercase();
     for marker in [" subject to ", " s.t. ", " st ", " such that ", " where "] {
         if let Some(at) = lower.find(marker) {

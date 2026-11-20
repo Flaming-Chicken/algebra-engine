@@ -6713,3 +6713,102 @@ fn poisson_regression_satisfies_the_score_equations_and_the_group_closed_form() 
             .is_error
     );
 }
+
+#[test]
+fn jordan_form_recovers_the_blocks_of_a_conjugated_matrix() {
+    let mut state = 0x0F1E_2D3C_4B5A_6978u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    // Block structures as (eigenvalue, size) lists.
+    let structures: [&[(i64, usize)]; 8] = [
+        &[(2, 2), (3, 1)],
+        &[(1, 3)],
+        &[(1, 2), (1, 1), (-2, 1)],
+        &[(0, 2), (0, 2)],
+        &[(4, 1), (4, 1), (5, 2)],
+        &[(-1, 3), (2, 1)],
+        &[(3, 1), (3, 1), (3, 1)],
+        &[(2, 2), (2, 2), (-3, 1)],
+    ];
+    for blocks in structures {
+        let n: usize = blocks.iter().map(|b| b.1).sum();
+        // J.
+        let mut j = vec![vec![0i64; n]; n];
+        let mut at = 0;
+        for &(lambda, size) in blocks {
+            for k in 0..size {
+                j[at + k][at + k] = lambda;
+                if k + 1 < size {
+                    j[at + k][at + k + 1] = 1;
+                }
+            }
+            at += size;
+        }
+        // A = P J P^-1 for a product of elementary integer operations (P and P^-1 stay integral).
+        let mut a = j.clone();
+        for _ in 0..6 {
+            let (r, s) = (next(n as u64) as usize, next(n as u64) as usize);
+            if r == s {
+                continue;
+            }
+            let factor = next(3) as i64 - 1;
+            // Conjugation by E = I + factor e_r e_s^T: A -> E A E^-1.
+            for c in 0..n {
+                let v = a[s][c];
+                a[r][c] += factor * v;
+            }
+            for row in a.iter_mut() {
+                let v = row[r];
+                row[s] -= factor * v;
+            }
+        }
+        let text = format!(
+            "[{}]",
+            a.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let out = run(&format!("jordan({text})"));
+        let reported: Vec<(i64, usize)> = out
+            .split("with blocks ")
+            .nth(1)
+            .unwrap()
+            .split(", ")
+            .map(|b| {
+                let size: usize = b[1..b.find('(').unwrap()].parse().unwrap();
+                let lambda: i64 = b[b.find('(').unwrap() + 1..b.len() - 1].parse().unwrap();
+                (lambda, size)
+            })
+            .collect();
+        let mut expected: Vec<(i64, usize)> = blocks.to_vec();
+        let mut got = reported.clone();
+        expected.sort();
+        got.sort();
+        assert_eq!(got, expected, "{text}: {out}");
+    }
+    assert_eq!(
+        run("jordan([[2,1],[0,2]])").split(" with").next().unwrap(),
+        "[ 2, 1 ; 0, 2 ]"
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("jordan([[0,-1],[1,0]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("jordan([[1,2,3],[4,5,6]])")
+            .is_error
+    );
+}

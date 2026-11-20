@@ -11,6 +11,7 @@
 
 pub mod analysis;
 pub mod api;
+pub mod assignment;
 pub mod autodiff;
 pub mod bigfloat;
 pub mod binomial_roots;

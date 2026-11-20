@@ -7638,6 +7638,39 @@ fn dalembert_equations_give_a_parametric_solution_with_dy_equal_p_dx() {
             }
         }
     }
+    // Singular solutions: each is a line y = m x + c with m = F(m) and c = G(m), so it satisfies the equation with y' = m.
+    for (equation, f, g, expected) in [
+        ("y = 2*x*y' + (y')^2", cases[0].1, cases[0].2, 1usize),
+        ("y = x*(y')^2 + y'", cases[1].1, cases[1].2, 2),
+        ("y = -x*y' + (y')^3", cases[2].1, cases[2].2, 1),
+    ] {
+        let out = run(&format!("dsolve({equation})"));
+        let lines: Vec<&str> = out
+            .split("singular solutions ")
+            .nth(1)
+            .unwrap()
+            .trim_end_matches(')')
+            .split(", y = ")
+            .collect();
+        assert_eq!(lines.len(), expected, "{out}");
+        for line in lines {
+            let text = line.trim_start_matches("y = ");
+            let at = |x: f64| -> f64 {
+                run(&format!(
+                    "evalf({})",
+                    text.replace('x', &format!("({x:?})"))
+                ))
+                .trim()
+                .parse()
+                .unwrap_or_else(|_| panic!("{text}"))
+            };
+            let (c, m) = (at(0.0), at(1.0) - at(0.0));
+            assert!(
+                (m - f(m)).abs() < 1e-12 && (c - g(m)).abs() < 1e-12,
+                "{equation}: y = {m} x + {c}: {out}"
+            );
+        }
+    }
     // F(p) = p is Clairaut's equation, which keeps its own answer.
     assert!(run("dsolve(y = x*y' + (y')^2)").contains("Clairaut"));
 }

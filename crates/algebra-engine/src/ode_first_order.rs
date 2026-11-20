@@ -375,7 +375,29 @@ fn dalembert(session: &mut UraeSession, equation: &str, y: &str) -> Option<Resul
     let y_of_p = session
         .eval(&format!("simplify(({x_of_p})*({f}) + ({g}))"))
         .ok()?;
+    // Singular solutions: a root p0 of p = F(p) gives the straight line y = p0 x + G(p0), a solution with slope p0.
+    let mut singular = Vec::new();
+    if let Ok(roots) = session.eval(&format!("solve(({gap}) = 0, dydx)"))
+        && let Some(list) = roots.split(": [").nth(1).and_then(|r| r.strip_suffix(']'))
+    {
+        for root in list.split(", ") {
+            let root = root.trim();
+            if root.is_empty() || root.contains("RootOf") || root.contains('i') {
+                continue;
+            }
+            if let Some(constant) = substitute(session, &g, "dydx", root)
+                && let Ok(line) = session.eval(&format!("simplify(({root})*{x} + ({constant}))"))
+            {
+                singular.push(format!("{y} = {line}"));
+            }
+        }
+    }
+    let extra = if singular.is_empty() {
+        String::new()
+    } else {
+        format!("; singular solutions {}", singular.join(", "))
+    };
     Some(Ok(format!(
-        "{x} = {x_of_p}, {y} = {y_of_p}  (d'Alembert equation; parameter dydx)"
+        "{x} = {x_of_p}, {y} = {y_of_p}  (d'Alembert equation; parameter dydx{extra})"
     )))
 }

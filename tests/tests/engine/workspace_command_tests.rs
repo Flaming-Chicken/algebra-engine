@@ -1908,3 +1908,53 @@ fn complex_functions_and_transforms_match_their_definitions() {
     assert_eq!(run("polar(1+i)"), "√(2)·e^(i·π/4)");
     assert_eq!(run("atan2(1, -1)"), "3*π/4");
 }
+
+#[test]
+fn residues_and_poles_match_closed_forms() {
+    // Known residues.
+    assert_eq!(run("residue(1/(x^2-1), x, 1)"), "1/2");
+    assert_eq!(run("residue(1/(x^2-1), x, -1)"), "-1/2");
+    assert_eq!(run("residue(1/(x^2+1), x, i)"), "-1/2·i");
+    assert_eq!(run("residue(exp(x)/x^3, x, 0)"), "1/2");
+    assert_eq!(run("residue(cot(x), x, 0)"), "1");
+    assert_eq!(run("residue(1/(x^2*(x-1)), x, 0)"), "-1");
+    assert_eq!(run("residue(x^2+3, x, 0)"), "0");
+    // Simple poles r_k of 1 / prod (x - r_k): the residue at r_k is 1 / prod_{j != k} (r_k - r_j), and for
+    // three or more poles the residues sum to zero.
+    for roots in [[1i64, 2, 4], [-3, 0, 5], [2, 3, 7]] {
+        let f = format!(
+            "1/((x-({}))*(x-({}))*(x-({})))",
+            roots[0], roots[1], roots[2]
+        );
+        let mut total = 0.0f64;
+        for (k, r) in roots.iter().enumerate() {
+            let denominator: i64 = roots
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != k)
+                .map(|(_, o)| r - o)
+                .product();
+            let out = run(&format!("residue({f}, x, {r})"));
+            let got: f64 = match out.split_once('/') {
+                Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                None => out.parse().unwrap(),
+            };
+            assert!(
+                (got - 1.0 / denominator as f64).abs() < 1e-9,
+                "{f} at {r}: {out}"
+            );
+            total += got;
+        }
+        assert!(total.abs() < 1e-9, "{f}: residues sum to {total}");
+    }
+    // Poles with their orders.
+    assert_eq!(run("poles(1/(x^2-1))"), "x = 1 (order 1), x = -1 (order 1)");
+    assert_eq!(
+        run("poles((x+1)/(x^2*(x-3)))"),
+        "x = 0 (order 2), x = 3 (order 1)"
+    );
+    // abs of a complex constant is its modulus.
+    assert_eq!(run("abs(1+i)"), "√(2)");
+    assert_eq!(run("abs(3+4i)"), "5");
+    assert_eq!(run("abs(-3)"), "3");
+}

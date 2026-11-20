@@ -174,7 +174,16 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
     let (name, args) = split_call(input)?;
     match name.as_str() {
         "arg" | "phase" | "argument" | "modulus" | "polar" | "atan2" | "convolve" | "conv"
-        | "dft" | "fft" | "ifft" | "idft" => {}
+        | "dft" | "fft" | "ifft" | "idft" | "residue" | "poles" => {}
+        "abs" => {
+            // Only a complex constant with an imaginary part: everything else is the ordinary abs.
+            let [arg] = args.as_slice() else { return None };
+            let (_, im) = complex_value(session, arg).ok()?;
+            if im == 0.0 {
+                return None;
+            }
+            return Some(run_named(session, "modulus", &args));
+        }
         _ => return None,
     }
     Some(run_named(session, &name, &args))
@@ -182,6 +191,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
 
 fn run_named(session: &mut UraeSession, name: &str, args: &[String]) -> Result<String, String> {
     match name {
+        "residue" => residue(session, args),
+        "poles" => poles(session, args),
         "atan2" => {
             if args.len() != 2 {
                 return Err("atan2(y, x)".into());
@@ -269,5 +280,188 @@ fn run_named(session: &mut UraeSession, name: &str, args: &[String]) -> Result<S
                 .collect();
             Ok(format!("[{}]", shown.join(", ")))
         }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------
+// Residues and poles
+// ------------------------------------------------------------------------------------------------------------
+
+/// The expression with the variable replaced by the complex number `(re, im)`, evaluated to a complex value.
+fn eval_at(
+    session: &UraeSession,
+    expr: algebra_core::ExprId,
+    symbol: algebra_core::SymbolId,
+    imaginary: algebra_core::ExprId,
+    (re, im): (f64, f64),
+) -> Option<(f64, f64)> {
+    let g = &session.graph;
+    let point = g.add([g.float(re), g.mul([g.float(im), imaginary])]);
+    let replaced = g.substitute(expr, symbol, point);
+    let v = g.evalf(replaced, &EvalContext::default()).ok()?;
+    let (a, b) = v.as_complex();
+    (a.is_finite() && b.is_finite()).then_some((a, b))
+}
+
+/// The sole variable of `expr` (or the one named), as a symbol.
+fn variable_of(
+    session: &UraeSession,
+    expr: algebra_core::ExprId,
+    named: Option<&str>,
+) -> Result<algebra_core::SymbolId, String> {
+    let g = &session.graph;
+    if let Some(n) = named {
+        return Ok(g.symbols.get_or_intern(n));
+    }
+    let mut symbols = std::collections::BTreeSet::new();
+    crate::poly::collect_expr_symbols(g, expr, &mut symbols);
+    let names: Vec<_> = symbols
+        .into_iter()
+        .filter(|s| !matches!(g.symbols.resolve(*s).as_deref(), Some("pi" | "e" | "i")))
+        .collect();
+    match names.as_slice() {
+        [one] => Ok(*one),
+        [] => Ok(g.symbols.get_or_intern("x")),
+        _ => Err("several variables: name the one, for example `residue(f, x, 0)`".into()),
+    }
+}
+
+/// `1 / (2 pi i)` times the integral of `f` over the circle of radius `r` about `a`, by the trapezoid rule
+/// (it converges geometrically for a function analytic in a neighbourhood of the circle).
+fn contour(
+    session: &UraeSession,
+    expr: algebra_core::ExprId,
+    symbol: algebra_core::SymbolId,
+    imaginary: algebra_core::ExprId,
+    a: (f64, f64),
+    r: f64,
+) -> Option<(f64, f64)> {
+    let n = 1024usize;
+    let (mut sr, mut si) = (0.0, 0.0);
+    for k in 0..n {
+        let t = 2.0 * std::f64::consts::PI * (k as f64 + 0.5) / n as f64;
+        let (c, s) = (t.cos(), t.sin());
+        let z = (a.0 + r * c, a.1 + r * s);
+        let f = eval_at(session, expr, symbol, imaginary, z)?;
+        // dz / (2 pi i) = (z - a) dt / (2 pi), so the average of f * (z - a) over the circle.
+        let w = (r * c, r * s);
+        sr += f.0 * w.0 - f.1 * w.1;
+        si += f.0 * w.1 + f.1 * w.0;
+    }
+    Some((sr / n as f64, si / n as f64))
+}
+
+/// A number as a small rational when it is one to about nine digits, otherwise as a decimal.
+fn rational_text(x: f64) -> String {
+    for q in 1..=360i64 {
+        let p = (x * q as f64).round();
+        if (x - p / q as f64).abs() < 1e-9 {
+            let p = p as i64;
+            let g = gcd(p.abs(), q).max(1);
+            return if q / g == 1 {
+                format!("{}", p / g)
+            } else {
+                format!("{}/{}", p / g, q / g)
+            };
+        }
+    }
+    clean(x)
+}
+
+fn complex_rational_text((re, im): (f64, f64)) -> String {
+    let (r, i) = (rational_text(re), rational_text(im));
+    match (r.as_str(), i.as_str()) {
+        (_, "0") => r,
+        ("0", "1") => "i".into(),
+        ("0", "-1") => "-i".into(),
+        ("0", _) => format!("{i}·i"),
+        (_, _) if im < 0.0 => format!("{r} - {}·i", i.trim_start_matches('-')),
+        _ => format!("{r} + {i}·i"),
+    }
+}
+
+fn residue(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let (function, named, point) = match args {
+        [f, a] => (f.as_str(), None, a.as_str()),
+        [f, x, a] => (f.as_str(), Some(x.as_str()), a.as_str()),
+        _ => return Err("residue(f, x, a)".into()),
+    };
+    let parser = ExprParser::new(&session.graph);
+    let expr = parser.parse(function).map_err(|e| e.to_string())?;
+    let imaginary = parser.parse("i").map_err(|e| e.to_string())?;
+    let symbol = variable_of(session, expr, named)?;
+    let a = complex_value(session, point)?;
+    let near = "f is not defined near the point";
+    let coarse = contour(session, expr, symbol, imaginary, a, 1e-2).ok_or(near)?;
+    let fine = contour(session, expr, symbol, imaginary, a, 1e-3).ok_or(near)?;
+    if (coarse.0 - fine.0).abs() > 1e-7 || (coarse.1 - fine.1).abs() > 1e-7 {
+        return Err(
+            "the point is too close to another singularity, or the singularity is not isolated"
+                .into(),
+        );
+    }
+    Ok(complex_rational_text(fine))
+}
+
+/// Top-level `numerator / denominator` split of a text with exactly one top-level division.
+fn split_fraction(text: &str) -> Option<(String, String)> {
+    let (mut depth, mut at) = (0i32, None);
+    let chars: Vec<char> = text.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            '/' if depth == 0 => {
+                if at.is_some() {
+                    return None;
+                }
+                at = Some(i);
+            }
+            _ => {}
+        }
+    }
+    let i = at?;
+    let n: String = chars[..i].iter().collect();
+    let d: String = chars[i + 1..].iter().collect();
+    Some((n.trim().to_string(), d.trim().to_string()))
+}
+
+fn poles(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
+    let (function, named) = match args {
+        [f] => (f.as_str(), None),
+        [f, x] => (f.as_str(), Some(x.as_str())),
+        _ => return Err("poles(f)".into()),
+    };
+    let parser = ExprParser::new(&session.graph);
+    let expr = parser.parse(function).map_err(|e| e.to_string())?;
+    let imaginary = parser.parse("i").map_err(|e| e.to_string())?;
+    let symbol = variable_of(session, expr, named)?;
+    let var = session.graph.symbols.resolve(symbol).unwrap_or_default();
+    let together = session.eval(&format!("cancel(together({function}))"))?;
+    let Some((_, denominator)) = split_fraction(&together) else {
+        return Ok("no poles".into());
+    };
+    let solved = session.eval(&format!("solve({denominator} = 0, {var})"))?;
+    let (Some(open), Some(close)) = (solved.find('['), solved.rfind(']')) else {
+        return Err(format!("could not solve the denominator: {solved}"));
+    };
+    let mut found = Vec::new();
+    for root in split_top(&solved[open + 1..close]) {
+        let a = complex_value(session, &root)?;
+        // The order from how fast |f| grows: |f(a + h)| ~ h^-m.
+        let magnitude = |h: f64| {
+            eval_at(session, expr, symbol, imaginary, (a.0 + h, a.1))
+                .map(|v| (v.0 * v.0 + v.1 * v.1).sqrt())
+        };
+        let order = match (magnitude(1e-3), magnitude(1e-4)) {
+            (Some(p), Some(q)) if p > 0.0 && q > 0.0 => (q / p).log10().round() as i64,
+            _ => 1,
+        };
+        found.push(format!("{var} = {root} (order {})", order.max(1)));
+    }
+    if found.is_empty() {
+        Ok("no poles".into())
+    } else {
+        Ok(found.join(", "))
     }
 }

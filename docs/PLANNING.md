@@ -86,41 +86,56 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R67` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R77` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
-  `sqrt(x^2+1)/x`); integrals with non-linear arguments, `sqrt` of cubics and irreducible quartic denominators;
-  periodic inequalities; one-sided `lim x->0+`; `d/dx x^2 + 1` without brackets; mixed partials `∂²f/∂x∂y`;
-  `converges` and `radius_of_convergence` of a sum; residues at symbolic points and of irrational value.
+  `sqrt(x^2+1)/x`); integrals with non-linear arguments, `sqrt` of cubics and irreducible cubic, quartic or sextic
+  denominators (`1/(x^3+x+1)` raises an error); periodic inequalities; `d/dx x^2 + 1` without brackets; the
+  numerator form `∂²f/∂x∂y`; total derivatives; `converges` and `radius_of_convergence` of a sum; residues at symbolic
+  points and of irrational value.
 - **Special functions.** Bessel `Y`, `K` and non-integer order, `polygamma` at negative `x`, `f_quantile` and discrete
   quantiles, `poisson_cdf` in closed form, svd factors `U` and `V` (singular values exist).
 - **Numbers and algebra.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `4^(1/4)` to `sqrt(2)`, symbolic roots
   (`sqrt(x^2*y)`), `exp(x)/exp(y)`, `oo * 0`, `lcm` and `gcd` of multivariate polynomials, `acos(1/sqrt 2)` as a
-  plain expression, Galois groups of degree 5 and up, `groebner`, `jordan`, a simplified `qr`.
+  plain expression, binomial roots for n = 5, 7, 9, 10, Galois groups of degree 5 and up, `groebner`, `jordan`, a
+  simplified `qr`.
 - **Solving.** General solutions of trigonometric equations (`+ 2 pi k`), numerical values beside a `RootOf`,
   inequalities with a nonlinear objective (KKT), integer and quadratic programs, `extrema` of several variables.
-- **Transforms, ODEs and recurrences.** Z-transform of `sin`/`cos`, boundary value problems, systems and higher-order
-  equations for `rk4`, adaptive steps, variable-coefficient and nonlinear recurrences, exact `fft`.
-- **Statistics and probability.** `t_test`, `confidence_interval`, `geometric_cdf`, sentence forms such as
-  `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables.
-- **Discrete, logic and sets.** Graph theory (`chromatic_polynomial`, `spanning_trees`), `pascal_row`,
+- **ODEs, transforms and recurrences.** Done: first-order separable, linear, Bernoulli, homogeneous, exact and
+  integrating-factor equations; constant-coefficient and Euler second-order equations; homogeneous and forced linear
+  systems by the inverse Laplace transform. Missing: Riccati and Clairaut equations, other integrating factors, an
+  explicit `tan` for `atan(y) = ...`, nonlinear systems, time-varying coefficients, forcing with a non-rational transform,
+  irreducible cubic factors in the inverse Laplace transform, the inverse Fourier and Z transforms, Z-transform of
+  `sin`/`cos`, boundary value problems, systems for `rk4`, adaptive steps, variable-coefficient and nonlinear
+  recurrences, exact `fft`.
+- **Statistics, probability and finance.** `t_test`, `confidence_interval`, `geometric_cdf`, sentence forms such as
+  `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables; amortisation with extra payments,
+  `xirr` with dates, bond pricing.
+- **Discrete, logic and sets.** Directed and weighted graphs, planarity, isomorphism, matchings and flows, `pascal_row`,
   `partitions_list`, normal forms and simplification of formulas, quantifiers, `~a` and `base_convert` in arbitrary
   bases, `multiset_permutations`.
 - **Input forms.** Quantified formulas, LaTeX tables, `align` and `\text{}` in formulas, English with several clauses
   (`sum of 1 to 10`, `area of circle radius 3`), `sin x cos x`, unit arithmetic across dimensions (`3 m * 2 s`),
   `|x| + 1`, the decimal tail for commands typed with decimals (`integrate(sin(x), x, 0, 0.5)`).
 - **Structure.** The two parser tables of command names (`parser.rs` and `numeric_commands.rs`) must stay in step; one
-  table would remove a class of mistakes. Seven of the command hooks at the top of `UraeSession::execute_line` are now one
-  ordered registry (`COMMAND_HOOKS` in `session.rs`); the rest (linear programs and Lagrange multipliers, element
-  assignment and indexing, matrix variables, `input_text` rewrites) still sit inline in an order that matters and should
-  join it. The `missing_docs` backlog.
+  table would remove a class of mistakes. Ten command hooks at the top of `UraeSession::execute_line` are one ordered
+  registry (`COMMAND_HOOKS` in `session.rs`); linear programs and Lagrange multipliers, element assignment and indexing,
+  matrix variables and the `input_text` rewrites still sit inline in an order that matters and should join it. Numbers
+  beyond 64 bits travel through the simplifier's e-graph as symbols named by their text (fixed on the way out in `R77`;
+  a digit bound and a real big-number node would remove the class). The `missing_docs` backlog.
+- **Process.** The unreleased work is a stack of pull requests waiting for the `v0.7.0` release PR to be merged; the
+  ledger and changelog entries of one pull request sit next to those of the next, so the stack merges in order or not
+  at all. A new item should not start from `dev` while the stack is open.
 
 **What the loop taught (so far).** Wrong answers came almost only from code that reinterprets input: an English or
 shorthand rewrite, a retry after a parse failure, or an alias that shadowed an existing function. Each such rewrite
 needs a guard (never retry across a bare function name or a multi-letter word, never join two numbers) and a test that
 pins what it must refuse as well as what it accepts. The cheap, high-yield probes are the spellings a first user types:
 `d/dx x^3`, `2 x`, `0xFF`, `5 km to m`, `sin(0.5)`.
+A second cheap check is an audit that substitutes every returned solution back into its equation at several points (
+ODE solutions, roots, antiderivatives by differentiation): it found wrong answers in the standard ODE solver that no input-spelling probe
+had touched (`R75`, `R76`). Both checks belong in the test suite as oracles, not only in the loop.
 
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit
 factors (an elliptic-curve method); the remainder of `R1` (arbitrary CAD surface meshes as solids).

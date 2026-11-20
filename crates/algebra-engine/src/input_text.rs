@@ -877,7 +877,8 @@ pub fn shorthand(input: &str) -> Option<String> {
     if let Some(rest) = t.strip_prefix("nth_root(") {
         return Some(format!("root({rest}"));
     }
-    set_shorthand(t)
+    percent_shorthand(t)
+        .or_else(|| set_shorthand(t))
         .or_else(|| bits_shorthand(t))
         .or_else(|| choose_shorthand(t))
         .or_else(|| bars_shorthand(t))
@@ -1088,4 +1089,46 @@ pub fn expand_degrees(s: &str) -> Option<String> {
         i += 1;
     }
     changed.then_some(out)
+}
+
+/// `15% of 80`, `80 + 15%`, `80 - 15%`, `15%` and `0.75 as fraction`.
+fn percent_shorthand(s: &str) -> Option<String> {
+    let t = s.trim();
+    let numeric = |x: &str| {
+        let x = x.trim();
+        !x.is_empty()
+            && x.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && x.chars().any(|c| c.is_ascii_digit())
+    };
+    for suffix in [
+        " as a fraction",
+        " as fraction",
+        " to a fraction",
+        " to fraction",
+    ] {
+        if let Some(value) = t.strip_suffix(suffix)
+            && !value.trim().is_empty()
+        {
+            return Some(value.trim().to_string());
+        }
+    }
+    if let Some((left, rest)) = t.split_once("% of ")
+        && numeric(left)
+        && !rest.trim().is_empty()
+    {
+        return Some(format!("(({})/100)*({})", left.trim(), rest.trim()));
+    }
+    let body = t.strip_suffix('%')?;
+    if numeric(body) {
+        return Some(format!("({})/100", body.trim()));
+    }
+    for (sign, one) in [('+', "1 +"), ('-', "1 -")] {
+        if let Some(at) = body.rfind(sign) {
+            let (left, percent) = (body[..at].trim(), body[at + 1..].trim());
+            if numeric(percent) && !left.is_empty() {
+                return Some(format!("({left})*({one} ({percent})/100)"));
+            }
+        }
+    }
+    None
 }

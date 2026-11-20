@@ -274,6 +274,57 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             }
             return Some(session.eval(&rewritten));
         }
+        "round" if args.len() == 2 => {
+            // round(x, n): half away from zero at n decimal places, exact on the rational value of x.
+            let digits: i32 = args[1].trim().parse().ok()?;
+            if !(-30..=30).contains(&digits) {
+                return None;
+            }
+            let value = match session.eval(&args[0]) {
+                Ok(v) => v,
+                Err(e) => return Some(Err(e)),
+            };
+            let (numerator, denominator) = match value.split_once('/') {
+                Some((a, b)) => (
+                    a.trim().parse::<num_bigint::BigInt>().ok()?,
+                    b.trim().parse::<num_bigint::BigInt>().ok()?,
+                ),
+                None => (
+                    value.trim().parse::<num_bigint::BigInt>().ok()?,
+                    num_bigint::BigInt::from(1),
+                ),
+            };
+            let ten = num_bigint::BigInt::from(10);
+            // scaled = value * 10^digits as a fraction p / q, then the nearest integer with ties away from zero.
+            let (p, q) = if digits >= 0 {
+                (numerator * ten.pow(digits as u32), denominator)
+            } else {
+                (numerator, denominator * ten.pow((-digits) as u32))
+            };
+            let two = num_bigint::BigInt::from(2);
+            let negative = p < num_bigint::BigInt::from(0);
+            let magnitude = if negative { -p } else { p };
+            let rounded = (&magnitude * &two + &q) / (&q * &two);
+            let rounded = if negative { -rounded } else { rounded };
+            if digits <= 0 {
+                let shifted = rounded * ten.pow((-digits) as u32);
+                return Some(Ok(shifted.to_string()));
+            }
+            let sign = if rounded < num_bigint::BigInt::from(0) {
+                "-"
+            } else {
+                ""
+            };
+            let text = if rounded < num_bigint::BigInt::from(0) {
+                (-rounded).to_string()
+            } else {
+                rounded.to_string()
+            };
+            let width = digits as usize;
+            let padded = format!("{text:0>width$}", width = width + 1);
+            let (whole, fraction) = padded.split_at(padded.len() - width);
+            return Some(Ok(format!("{sign}{whole}.{fraction}")));
+        }
         "lcm" => {
             // Integer lcm is handled elsewhere; this is the polynomial case, lcm = a b / gcd(a, b).
             if args.len() < 2 || args.iter().all(|a| a.trim().parse::<i128>().is_ok()) {

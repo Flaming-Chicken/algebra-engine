@@ -175,6 +175,54 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
     match name.as_str() {
         "arg" | "phase" | "argument" | "modulus" | "polar" | "atan2" | "convolve" | "conv"
         | "dft" | "fft" | "ifft" | "idft" | "residue" | "poles" => {}
+        "subs" | "substitute" | "replace" | "evaluate" | "eval" => {
+            // `subs(f, x, 3)` or `subs(f, x = 3, y = 4)`: replace whole-word variables, then evaluate.
+            if args.len() < 2 {
+                return None;
+            }
+            let mut pairs: Vec<(String, String)> = Vec::new();
+            if args.len() == 3 && !args[1].contains('=') {
+                pairs.push((args[1].clone(), args[2].clone()));
+            } else {
+                for a in &args[1..] {
+                    let (v, value) = a.split_once('=')?;
+                    pairs.push((v.trim().to_string(), value.trim().to_string()));
+                }
+            }
+            if pairs
+                .iter()
+                .any(|(v, _)| v.is_empty() || !v.chars().all(|c| c.is_alphanumeric() || c == '_'))
+            {
+                return None;
+            }
+            // Simultaneous replacement through placeholders, so `subs(x + y, x = y, y = 1)` is not applied twice.
+            let mut text = args[0].clone();
+            for (k, (v, _)) in pairs.iter().enumerate() {
+                text = replace_word(&text, v, &format!("§{k}§"));
+            }
+            for (k, (_, value)) in pairs.iter().enumerate() {
+                text = text.replace(&format!("§{k}§"), &format!("({value})"));
+            }
+            return Some(session.eval(&text));
+        }
+        "lcm" => {
+            // Integer lcm is handled elsewhere; this is the polynomial case, lcm = a b / gcd(a, b).
+            if args.len() < 2 || args.iter().all(|a| a.trim().parse::<i128>().is_ok()) {
+                return None;
+            }
+            let mut current = args[0].clone();
+            for next in &args[1..] {
+                let g = match session.eval(&format!("gcd({current}, {next})")) {
+                    Ok(g) => g,
+                    Err(e) => return Some(Err(e)),
+                };
+                current = match session.eval(&format!("cancel(({current})*({next})/({g}))")) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+            }
+            return Some(Ok(current));
+        }
         "abs" => {
             // Only a complex constant with an imaginary part: everything else is the ordinary abs.
             let [arg] = args.as_slice() else { return None };
@@ -464,4 +512,26 @@ fn poles(session: &mut UraeSession, args: &[String]) -> Result<String, String> {
     } else {
         Ok(found.join(", "))
     }
+}
+
+/// `text` with every whole-word occurrence of the identifier `word` replaced by `with`.
+fn replace_word(text: &str, word: &str, with: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let w: Vec<char> = word.chars().collect();
+    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
+    let (mut out, mut i) = (String::new(), 0usize);
+    while i < chars.len() {
+        let boundary_before = i == 0 || !is_ident(chars[i - 1]);
+        if boundary_before
+            && chars[i..].starts_with(&w)
+            && chars.get(i + w.len()).is_none_or(|c| !is_ident(*c))
+        {
+            out.push_str(with);
+            i += w.len();
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    out
 }

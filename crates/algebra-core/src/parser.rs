@@ -1639,7 +1639,7 @@ fn numeric_command_name(name: &str) -> Option<&'static str> {
         "minimize" | "argmin" => "minimize",
         "maximize" | "argmax" => "maximize",
         "interpolate" | "lagrange" | "interp" => "interpolate",
-        "fit" | "polyfit" | "linfit" => "fit",
+        "fit" | "polyfit" | "linfit" | "linear_regression" | "linreg" | "regression" => "fit",
         "mean" | "average" => "mean",
         "median" => "median",
         "variance" => "variance",

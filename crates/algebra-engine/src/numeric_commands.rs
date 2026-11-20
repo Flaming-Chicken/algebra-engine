@@ -797,6 +797,30 @@ fn interpolate(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, Stri
 
 /// Least-squares polynomial fit of the given degree (default 1), from the exact normal equations.
 fn fit(graph: &ExprGraph, args: &[String]) -> Result<NumericOutput, String> {
+    // `fit([x1, x2, ...], [y1, y2, ...], degree)`: two lists of numbers are zipped into points.
+    let zipped: Vec<String>;
+    let args = if args.len() >= 2
+        && args[0].trim_start().starts_with('[')
+        && args[1].trim_start().starts_with('[')
+        && !args[0].contains('(')
+    {
+        let (xs, ys) = (list_items(&args[0]), list_items(&args[1]));
+        if xs.len() != ys.len() {
+            return Err(format!("{} x values but {} y values", xs.len(), ys.len()));
+        }
+        let pairs: Vec<String> = xs
+            .iter()
+            .zip(&ys)
+            .map(|(x, y)| format!("[{x}, {y}]"))
+            .collect();
+        zipped = [format!("[{}]", pairs.join(", "))]
+            .into_iter()
+            .chain(args.iter().skip(2).cloned())
+            .collect();
+        &zipped[..]
+    } else {
+        args
+    };
     let pts = points(graph, args.first().ok_or("a list of points is needed")?)?;
     let degree: usize = match args.get(1) {
         Some(d) => d
@@ -1385,7 +1409,7 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "minimize" | "argmin" => "minimize",
         "maximize" | "argmax" => "maximize",
         "interpolate" | "lagrange" | "interp" => "interpolate",
-        "fit" | "polyfit" | "linfit" => "fit",
+        "fit" | "polyfit" | "linfit" | "linear_regression" | "linreg" | "regression" => "fit",
         "mean" | "average" | "avg" => "mean",
         "median" => "median",
         "variance" | "var" => "variance",

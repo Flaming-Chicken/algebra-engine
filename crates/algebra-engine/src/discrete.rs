@@ -402,6 +402,22 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
             let power = (0..count).fold(Q::one(), |acc, _| acc * ratio);
             Some(first * (power - Q::one()) / (ratio - Q::one()))
         }
+        ("bitand" | "bitor" | "bitxor", [a, b]) => {
+            let (a, b) = (as_integer(a)?, as_integer(b)?);
+            integer_result(match lowered.as_str() {
+                "bitand" => a & b,
+                "bitor" => a | b,
+                _ => a ^ b,
+            })
+        }
+        ("shl" | "shr", [a, b]) => {
+            let (a, shift) = (as_integer(a)?, as_u64(b, 100_000)? as usize);
+            integer_result(if lowered == "shl" {
+                a << shift
+            } else {
+                a >> shift
+            })
+        }
         ("tribonacci", [n]) => {
             let n = as_u64(n, 100_000)?;
             let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());

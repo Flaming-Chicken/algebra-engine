@@ -509,7 +509,10 @@ fn exact(graph: &ExprGraph, text: &str) -> Result<Q, String> {
 pub(crate) fn list_items(text: &str) -> Vec<String> {
     let trimmed = text.trim();
     // Remove one pair of outer brackets (not every leading bracket: `[[0, 0], [1, 1]]` is a list of lists).
-    let t = if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+    let t = if (trimmed.starts_with('[') && trimmed.ends_with(']')
+        || trimmed.starts_with('{') && trimmed.ends_with('}'))
+        && trimmed.len() >= 2
+    {
         &trimmed[1..trimmed.len() - 1]
     } else {
         trimmed
@@ -518,11 +521,11 @@ pub(crate) fn list_items(text: &str) -> Vec<String> {
     let (mut depth, mut current) = (0i32, String::new());
     for c in t.chars() {
         match c {
-            '[' | '(' => {
+            '[' | '(' | '{' => {
                 depth += 1;
                 current.push(c);
             }
-            ']' | ')' => {
+            ']' | ')' | '}' => {
                 depth -= 1;
                 current.push(c);
             }
@@ -1427,12 +1430,12 @@ pub fn canonical_name(name: &str) -> Option<&'static str> {
         "skewness" => "skewness",
         "kurtosis" => "kurtosis",
         "zscore" => "zscore",
-        "dec2bin" => "dec2bin",
-        "bin2dec" => "bin2dec",
-        "dec2hex" | "hex" => "dec2hex",
-        "hex2dec" => "hex2dec",
-        "dec2oct" | "oct" => "dec2oct",
-        "oct2dec" => "oct2dec",
+        "dec2bin" | "bin" | "to_binary" | "binary" | "tobinary" => "dec2bin",
+        "bin2dec" | "from_binary" | "frombinary" => "bin2dec",
+        "dec2hex" | "hex" | "to_hex" | "tohex" | "hexadecimal" => "dec2hex",
+        "hex2dec" | "from_hex" | "fromhex" => "hex2dec",
+        "dec2oct" | "oct" | "to_octal" | "tooctal" | "octal" => "dec2oct",
+        "oct2dec" | "from_octal" | "fromoctal" => "oct2dec",
         "subsets" | "powerset" | "power_set" => "subsets",
         "permutations_list" | "all_permutations" => "permutations_list",
         "cycle_type" => "cycle_type",

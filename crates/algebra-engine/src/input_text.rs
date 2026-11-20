@@ -649,6 +649,9 @@ pub fn english(input: &str) -> Option<String> {
 /// The rewritten input, or `None` if there is nothing to rewrite.
 pub fn normalise(input: &str) -> Option<String> {
     let original = input.trim();
+    if let Some(expanded) = expand_radix_literals(original) {
+        return Some(expanded);
+    }
     if let Some(short) = shorthand(original) {
         return Some(short);
     }
@@ -871,7 +874,8 @@ pub fn shorthand(input: &str) -> Option<String> {
     if let Some(rest) = t.strip_prefix("nth_root(") {
         return Some(format!("root({rest}"));
     }
-    choose_shorthand(t)
+    bits_shorthand(t)
+        .or_else(|| choose_shorthand(t))
         .or_else(|| bars_shorthand(t))
         .or_else(|| derivative_shorthand(t))
         .or_else(|| limit_shorthand(t))
@@ -894,4 +898,90 @@ fn choose_shorthand(s: &str) -> Option<String> {
 fn bars_shorthand(s: &str) -> Option<String> {
     let inner = s.strip_prefix('|')?.strip_suffix('|')?;
     (!inner.is_empty() && !inner.contains('|')).then(|| format!("abs({inner})"))
+}
+
+// ------------------------------------------------------------------------------------------------------------
+// Number bases and bit operations typed as text: `0xFF`, `0b1010 + 1`, `255 to binary`, `5 xor 3`, `6 << 2`.
+// ------------------------------------------------------------------------------------------------------------
+
+/// `0xFF`, `0b1010`, `0o17` replaced by their decimal values; `None` when the text has no such literal.
+pub fn expand_radix_literals(s: &str) -> Option<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let (mut out, mut i, mut changed) = (String::new(), 0usize, false);
+    while i < chars.len() {
+        let at_start = i == 0
+            || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '.');
+        if at_start
+            && chars[i] == '0'
+            && let Some(&marker) = chars.get(i + 1)
+        {
+            let base = match marker {
+                'x' | 'X' => 16,
+                'b' | 'B' => 2,
+                'o' | 'O' => 8,
+                _ => 0,
+            };
+            if base != 0 {
+                let start = i + 2;
+                let mut end = start;
+                while end < chars.len() && chars[end].is_digit(base) {
+                    end += 1;
+                }
+                let boundary = chars
+                    .get(end)
+                    .is_none_or(|c| !(c.is_alphanumeric() || *c == '_'));
+                if end > start && boundary {
+                    let digits: String = chars[start..end].iter().collect();
+                    if let Some(value) = num_bigint::BigInt::parse_bytes(digits.as_bytes(), base) {
+                        out.push_str(&value.to_string());
+                        i = end;
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    changed.then_some(out)
+}
+
+/// `255 to binary` as `dec2bin(255)` and `5 xor 3`, `5 & 3`, `5 | 3`, `6 << 2`, `6 >> 1` as `bitxor(5, 3)`, ...
+fn bits_shorthand(s: &str) -> Option<String> {
+    let t = s.trim();
+    let integer = |x: &str| {
+        let x = x.trim();
+        !x.is_empty() && x.chars().all(|c| c.is_ascii_digit())
+    };
+    for (word, command) in [
+        ("binary", "dec2bin"),
+        ("hexadecimal", "dec2hex"),
+        ("hex", "dec2hex"),
+        ("octal", "dec2oct"),
+    ] {
+        for connective in [" to ", " in ", " as "] {
+            if let Some((n, target)) = t.split_once(connective)
+                && integer(n)
+                && target.trim().eq_ignore_ascii_case(word)
+            {
+                return Some(format!("{command}({})", n.trim()));
+            }
+        }
+    }
+    for (op, command) in [
+        (" xor ", "bitxor"),
+        ("<<", "shl"),
+        (">>", "shr"),
+        ("&", "bitand"),
+        ("|", "bitor"),
+    ] {
+        if let Some((a, b)) = t.split_once(op)
+            && integer(a)
+            && integer(b)
+        {
+            return Some(format!("{command}({}, {})", a.trim(), b.trim()));
+        }
+    }
+    None
 }

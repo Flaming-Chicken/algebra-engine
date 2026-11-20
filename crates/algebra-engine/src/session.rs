@@ -1518,6 +1518,13 @@ fn implicit_product_spaces(input: &str) -> Option<String> {
             if FUNCTIONS.contains(&word.as_str()) && next != Some(&'(') {
                 return None;
             }
+            // A multi-letter word that is not a call (`5 xor 3`) is not a product of single-letter symbols.
+            if word.chars().count() >= 2
+                && next != Some(&'(')
+                && !matches!(word.as_str(), "pi" | "oo" | "inf")
+            {
+                return None;
+            }
             k = end;
         } else {
             k += 1;

@@ -7579,3 +7579,100 @@ fn planarity_on_six_vertices_matches_oeis_a066537() {
     }
     assert_eq!(planar, 32071);
 }
+
+#[test]
+fn assignment_costs_match_exhaustive_search() {
+    let mut state = 0x0BAD_C0DE_1234_5678u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    // All injective maps rows -> columns, depth first.
+    fn best(cost: &[Vec<i64>], row: usize, used: &mut Vec<bool>, sign: i64) -> i64 {
+        if row == cost.len() {
+            return 0;
+        }
+        let mut result = i64::MAX;
+        for j in 0..cost[0].len() {
+            if !used[j] {
+                used[j] = true;
+                result = result.min(sign * cost[row][j] + best(cost, row + 1, used, sign));
+                used[j] = false;
+            }
+        }
+        result
+    }
+    for round in 0..40 {
+        let n = 2 + round % 5;
+        let m = n + round % 3;
+        // Costs in eighths so that fractions are exercised; negative values included.
+        let cost: Vec<Vec<i64>> = (0..n)
+            .map(|_| (0..m).map(|_| next(41) as i64 - 12).collect())
+            .collect();
+        let text = format!(
+            "[{}]",
+            cost.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|c| if c % 8 == 0 {
+                            (c / 8).to_string()
+                        } else {
+                            format!("{c}/8")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for (command, sign) in [("assignment", 1i64), ("max_assignment", -1)] {
+            let out = run(&format!("{command}({text})"));
+            let expected = sign * best(&cost, 0, &mut vec![false; m], sign);
+            let total = out
+                .split("cost ")
+                .nth(1)
+                .unwrap()
+                .split(':')
+                .next()
+                .unwrap();
+            let value = match total.split_once('/') {
+                Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                None => total.parse().unwrap(),
+            };
+            assert!(
+                (value - expected as f64 / 8.0).abs() < 1e-12,
+                "{command}({text}): {out}, expected {}",
+                expected as f64 / 8.0
+            );
+            // The reported pairs use distinct columns and add up to the total.
+            let columns: Vec<usize> = out
+                .split(": ")
+                .nth(1)
+                .unwrap()
+                .split(", ")
+                .map(|p| p.split("column ").nth(1).unwrap().parse::<usize>().unwrap() - 1)
+                .collect();
+            assert_eq!(columns.len(), n);
+            let mut sorted = columns.clone();
+            sorted.sort_unstable();
+            sorted.dedup();
+            assert_eq!(sorted.len(), n, "{out}");
+            let sum: i64 = columns.iter().enumerate().map(|(i, &j)| cost[i][j]).sum();
+            assert_eq!(sum, expected, "{command}({text}): {out}");
+        }
+    }
+    assert!(run("assignment([[4,1,3],[2,0,5],[3,2,2]])").starts_with("minimum cost 5:"));
+    assert!(
+        UraeSession::new()
+            .execute_line("assignment([[1,2],[3,4],[5,6]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("assignment([[1,2],[3]])")
+            .is_error
+    );
+}

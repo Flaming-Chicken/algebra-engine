@@ -79,6 +79,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         |_, line| crate::weighted_graph::run(line),
     ),
     (
+        "assignment problem (assignment, max_assignment)",
+        |_, line| crate::assignment::run(line),
+    ),
+    (
         "graph paths and matchings (euler_path, hamiltonian_cycle, max_matching)",
         |_, line| crate::graph_paths::run(line),
     ),

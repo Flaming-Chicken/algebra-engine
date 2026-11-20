@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 ### Added
 
 - d'Alembert equations also report their singular line solutions.
+- `logm(A)`: principal matrix logarithm, exact for unipotent matrices.
 - `assignment(costs)` / `max_assignment(costs)`: the assignment problem by the Hungarian method.
 - `dsolve` solves d'Alembert (Lagrange) equations `y = x F(y') + G(y')` parametrically.
 - `is_planar(G)`: planarity of small graphs.

@@ -342,6 +342,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "hessenberg",
         "sqrtm",
         "matrix_sqrt",
+        "logm",
+        "matrix_log",
         "mregress",
         "multiple_regression",
         "ols",
@@ -379,6 +381,7 @@ fn evaluate(
         "lr_test" | "likelihood_ratio_test" => likelihood_ratio(session, a, args),
         "hessenberg" => hessenberg(session, a),
         "sqrtm" | "matrix_sqrt" => sqrtm(session, a),
+        "logm" | "matrix_log" => logm(session, a),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -1274,4 +1277,121 @@ fn likelihood_ratio(
         df,
         num(p.clamp(0.0, 1.0))
     ))
+}
+
+/// The principal square root of a floating point matrix by the Denman-Beavers iteration (`None` without one).
+fn principal_sqrt_f64(a: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+    let n = a.len();
+    let mut y = a.to_vec();
+    let mut z: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+        .collect();
+    for _ in 0..100 {
+        let (y_inverse, z_inverse) = (invert_f64(&y)?, invert_f64(&z)?);
+        let next_y: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| (y[i][j] + z_inverse[i][j]) / 2.0).collect())
+            .collect();
+        let next_z: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| (z[i][j] + y_inverse[i][j]) / 2.0).collect())
+            .collect();
+        let change: f64 = (0..n)
+            .flat_map(|i| (0..n).map(move |j| (i, j)))
+            .map(|(i, j)| (next_y[i][j] - y[i][j]).abs())
+            .fold(0.0, f64::max);
+        y = next_y;
+        z = next_z;
+        if y.iter().flatten().any(|v| !v.is_finite()) {
+            return None;
+        }
+        if change < 1e-15 {
+            return Some(y);
+        }
+    }
+    Some(y)
+}
+
+/// `logm(A)`: the principal matrix logarithm by inverse scaling and squaring (repeated square roots until `A^(1/2^k)` is close to
+/// the identity, then the series `log(I + X)`), multiplied back by `2^k`. Decimal entries; rationals are recognised.
+fn logm(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
+    let n = a.len();
+    if a[0].len() != n {
+        return Err("logm needs a square matrix".into());
+    }
+    let mut y: Vec<Vec<f64>> = a
+        .iter()
+        .map(|r| r.iter().map(|q| q.to_f64().unwrap_or(f64::NAN)).collect())
+        .collect();
+    let distance = |m: &[Vec<f64>]| -> f64 {
+        (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| (m[i][j] - if i == j { 1.0 } else { 0.0 }).abs())
+                    .sum::<f64>()
+            })
+            .fold(0.0, f64::max)
+    };
+    let mut halvings = 0;
+    while distance(&y) > 0.25 {
+        y = principal_sqrt_f64(&y).ok_or(
+            "the matrix has no principal logarithm (it is singular or has a negative eigenvalue)",
+        )?;
+        halvings += 1;
+        if halvings > 60 {
+            return Err("the matrix has no principal logarithm".into());
+        }
+    }
+    // log(I + X) = X - X^2/2 + X^3/3 - ...
+    let x: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| y[i][j] - if i == j { 1.0 } else { 0.0 })
+                .collect()
+        })
+        .collect();
+    let mut power = x.clone();
+    let mut sum = vec![vec![0.0f64; n]; n];
+    for j in 1..=80 {
+        let sign = if j % 2 == 1 { 1.0 } else { -1.0 };
+        for r in 0..n {
+            for c in 0..n {
+                sum[r][c] += sign * power[r][c] / j as f64;
+            }
+        }
+        power = multiply_f64(&power, &x);
+    }
+    let scale = 2f64.powi(halvings);
+    let result: Vec<Vec<f64>> = sum
+        .iter()
+        .map(|row| row.iter().map(|v| v * scale).collect())
+        .collect();
+    let exact: Option<Matrix> = result
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| {
+                    if v.abs() < 1e-11 {
+                        Some(Q::zero())
+                    } else {
+                        recognise(*v)
+                    }
+                })
+                .collect::<Option<Vec<Q>>>()
+        })
+        .collect();
+    if let Some(m) = exact {
+        return display(session, &m);
+    }
+    let rows: Vec<String> = result
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|v| {
+                    let t = format!("{v:.10}");
+                    t.trim_end_matches('0').trim_end_matches('.').to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .collect();
+    Ok(format!("[ {} ]", rows.join(" ; ")))
 }

@@ -7771,3 +7771,115 @@ fn assignment_costs_match_exhaustive_search() {
             .is_error
     );
 }
+
+#[test]
+fn matrix_logarithm_exponentiates_back_and_is_exact_for_unipotent_matrices() {
+    let decimals = |text: &str| -> Vec<Vec<f64>> {
+        text.trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(';')
+            .map(|r| r.split(',').map(|c| c.trim().parse().unwrap()).collect())
+            .collect()
+    };
+    let multiply = |a: &Vec<Vec<f64>>, b: &Vec<Vec<f64>>| -> Vec<Vec<f64>> {
+        (0..a.len())
+            .map(|i| {
+                (0..a.len())
+                    .map(|j| (0..a.len()).map(|k| a[i][k] * b[k][j]).sum())
+                    .collect()
+            })
+            .collect()
+    };
+    // exp(M) by scaling and squaring with a Taylor series.
+    let exp = |m: &Vec<Vec<f64>>| -> Vec<Vec<f64>> {
+        let n = m.len();
+        let squarings = 12;
+        let scaled: Vec<Vec<f64>> = m
+            .iter()
+            .map(|r| r.iter().map(|v| v / 2f64.powi(squarings)).collect())
+            .collect();
+        let mut term: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+            .collect();
+        let mut sum = term.clone();
+        for k in 1..30 {
+            term = multiply(&term, &scaled)
+                .iter()
+                .map(|r| r.iter().map(|v| v / k as f64).collect())
+                .collect();
+            for i in 0..n {
+                for j in 0..n {
+                    sum[i][j] += term[i][j];
+                }
+            }
+        }
+        for _ in 0..squarings {
+            sum = multiply(&sum, &sum);
+        }
+        sum
+    };
+    let literal = |m: &Vec<Vec<i64>>| {
+        format!(
+            "[{}]",
+            m.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    let cases: [Vec<Vec<i64>>; 6] = [
+        vec![vec![2, 0], vec![0, 3]],
+        vec![vec![2, 1], vec![1, 2]],
+        vec![vec![5, 2, 0], vec![2, 5, 1], vec![0, 1, 4]],
+        vec![vec![1, 1], vec![0, 2]],
+        vec![vec![10, 3, 1], vec![3, 8, 2], vec![1, 2, 6]],
+        vec![vec![30, 1], vec![1, 40]],
+    ];
+    for a in cases {
+        let log = decimals(&run(&format!("logm({})", literal(&a))));
+        let back = exp(&log);
+        for i in 0..a.len() {
+            for j in 0..a.len() {
+                assert!(
+                    (back[i][j] - a[i][j] as f64).abs() < 1e-7 * (1.0 + a[i][j].abs() as f64),
+                    "exp(logm({a:?})) = {back:?}"
+                );
+            }
+        }
+    }
+    // Unipotent matrices have a polynomial (hence rational) logarithm: log(I + N) = N - N^2/2 + ...
+    assert_eq!(run("logm([[1,1],[0,1]])"), "[ 0, 1 ; 0, 0 ]");
+    assert_eq!(run("logm([[1,2],[0,1]])"), "[ 0, 2 ; 0, 0 ]");
+    assert_eq!(run("logm([[1,0],[0,1]])"), "[ 0, 0 ; 0, 0 ]");
+    // log(I + N) with N^2 != 0: N = [[0,1,0],[0,0,1],[0,0,0]] gives N - N^2/2.
+    assert_eq!(
+        run("logm([[1,1,0],[0,1,1],[0,0,1]])"),
+        "[ 0, 1, -1/2 ; 0, 0, 1 ; 0, 0, 0 ]"
+    );
+    // log of a scalar matrix is ln c times the identity.
+    let scalar = decimals(&run("logm([[7,0],[0,7]])"));
+    assert!((scalar[0][0] - 7f64.ln()).abs() < 1e-9 && scalar[0][1].abs() < 1e-9);
+    // No principal logarithm for singular matrices or negative eigenvalues.
+    assert!(
+        UraeSession::new()
+            .execute_line("logm([[1,2],[2,4]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("logm([[-1,0],[0,4]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("logm([[1,2,3],[4,5,6]])")
+            .is_error
+    );
+}

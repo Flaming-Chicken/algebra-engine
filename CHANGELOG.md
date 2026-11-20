@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: `npv(rate, [flows])`, `irr([flows])`, `cagr(start, end, years)` and `doubling_time(rate)`.
 - Added: `inverse_laplace` / `ilaplace` of rational functions (`ilaplace(1/(s^2+1), s, t)` is `sin(t)`); exact finance functions `compound_interest` (`future_value`), `present_value`, `simple_interest`, `pmt`, `loan_payment`, `annuity`, `percent_change`. A rational with a long denominator typed with decimals now also prints its value (`1000*(1+0.05)^10` is `... ≈ 1628.894626777442`).
 - Added: indexing. `A[1,2]`, `A[1][2]`, `A[2]` (a row), `A[1,:]`, `A[:,2]`, `v[3]`, `v[-1]` (1-based, negative from the end), element assignment `A[1,2] = 7`, `row(A, i)`, `col(A, j)`, `size(A)`, `rows(A)`, `ncols(A)`. Fixed: `diag(A)` of a matrix returned a wrong 4x4 matrix; it is now the diagonal.
 - Added: workspace commands `who` (also `list variables`), `show a`, `clear x y`, `delete a`, `reset`, and `%` for the previous result (`% + 1`); `reset` used to echo and not reset.

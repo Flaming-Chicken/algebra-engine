@@ -136,6 +136,10 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "histogram",
         "freq",
         "counts",
+        "npv",
+        "irr",
+        "cagr",
+        "doubling_time",
     ];
     if !handled.contains(&name.as_str()) || args.is_empty() {
         return None;
@@ -217,6 +221,81 @@ fn evaluate(
                 .filter(|x| **x == target)
                 .count()
                 .to_string()))
+        }
+        "npv" => {
+            // npv(rate, [cash flows]): the first flow is at time 0, so npv = sum cf_k / (1 + r)^k.
+            let [rate, flows] = args else { return None };
+            let rate = rational(session, rate)?;
+            let flows = list(session, flows)?;
+            let growth = Q::one() + rate;
+            if growth.is_zero() {
+                return Some(Err("the rate must not be -100%".into()));
+            }
+            let mut discount = Q::one();
+            let mut total = Q::zero();
+            for flow in &flows {
+                total += flow / &discount;
+                discount *= &growth;
+            }
+            Some(Ok(show(&total)))
+        }
+        "irr" => {
+            // The rate at which the net present value is zero, by bisection on (-0.99, 100) in floating point.
+            let [flows] = args else { return None };
+            let flows: Vec<f64> = list(session, flows)?
+                .iter()
+                .map(|q| num_traits::ToPrimitive::to_f64(q).unwrap_or(f64::NAN))
+                .collect();
+            let value = |r: f64| -> f64 {
+                flows
+                    .iter()
+                    .enumerate()
+                    .map(|(k, f)| f / (1.0 + r).powi(k as i32))
+                    .sum()
+            };
+            let (mut lo, mut hi) = (-0.99f64, 100.0f64);
+            if value(lo) * value(hi) > 0.0 {
+                return Some(Err(
+                    "no sign change between -99% and 10000%: the flows have no internal rate of return".into(),
+                ));
+            }
+            for _ in 0..200 {
+                let mid = 0.5 * (lo + hi);
+                if value(lo) * value(mid) <= 0.0 {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            Some(Ok(format!("{}", 0.5 * (lo + hi))))
+        }
+        "cagr" => {
+            // (end / start)^(1 / years) - 1 as an exact expression.
+            let numbers: Vec<Q> = args
+                .iter()
+                .map(|a| rational(session, a))
+                .collect::<Option<_>>()?;
+            let [start, end, years] = numbers.as_slice() else {
+                return None;
+            };
+            if !start.is_positive() || !years.is_positive() {
+                return Some(Err(
+                    "cagr(start, end, years) needs a positive start and number of years".into(),
+                ));
+            }
+            Some(session.eval(&format!(
+                "({})^(1/({})) - 1",
+                show(&(end / start)),
+                show(years)
+            )))
+        }
+        "doubling_time" => {
+            let [rate] = args else { return None };
+            let rate = rational(session, rate)?;
+            if !(Q::one() + &rate).is_positive() || rate.is_zero() {
+                return Some(Err("the rate must be positive for a doubling time".into()));
+            }
+            Some(session.eval(&format!("ln(2)/ln(1 + ({}))", show(&rate))))
         }
         "weighted_mean" => {
             let [values, weights] = args else { return None };

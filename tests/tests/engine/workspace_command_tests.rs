@@ -7090,3 +7090,90 @@ fn riccati_equations_are_solved_by_a_particular_solution_and_satisfy_the_equatio
     // A Riccati equation without a power-law particular solution is not claimed to be solved.
     assert!(!run("dsolve(y' = y^2 + x)").contains("Riccati"));
 }
+
+#[test]
+fn information_criteria_follow_from_the_log_likelihood() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // Logistic: 14 observations, 3 parameters; Poisson: 12 observations, 3 parameters.
+    let data: [(f64, f64, u8); 14] = [
+        (0.5, 1.0, 0),
+        (1.0, 3.0, 0),
+        (1.5, 2.0, 0),
+        (2.0, 5.0, 1),
+        (2.5, 1.0, 0),
+        (3.0, 4.0, 1),
+        (3.5, 2.0, 0),
+        (4.0, 6.0, 1),
+        (4.5, 3.0, 1),
+        (5.0, 1.0, 0),
+        (5.5, 5.0, 1),
+        (6.0, 2.0, 1),
+        (2.2, 4.0, 0),
+        (4.8, 6.0, 0),
+    ];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        data.iter()
+            .map(|d| d.2.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("logit({xs}, {ys})"));
+    let ll = field(&out, "log-likelihood =");
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 6.0)).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 3.0 * 14.0f64.ln())).abs() < 1e-4,
+        "{out}"
+    );
+    let counts = [1, 2, 2, 6, 3, 7, 5, 12, 9, 8, 17, 15];
+    let xs = format!(
+        "[{}]",
+        data.iter()
+            .take(12)
+            .map(|(a, b, _)| format!("[{a:?},{b:?}]"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        counts
+            .iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("poisson_regress({xs}, {ys})"));
+    let ll = field(&out, "log-likelihood =");
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 6.0)).abs() < 1e-4,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 3.0 * 12.0f64.ln())).abs() < 1e-4,
+        "{out}"
+    );
+    // The BIC penalty ln n per parameter exceeds the AIC penalty 2 once n >= 8.
+    assert!(field(&out, "BIC =") - field(&out, "AIC =") > 0.0, "{out}");
+}

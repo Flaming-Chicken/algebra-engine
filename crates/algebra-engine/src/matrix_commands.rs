@@ -797,9 +797,14 @@ fn logistic_regression(
             yi * eta - (1.0 + eta.exp()).ln()
         })
         .sum();
+    // Information criteria: AIC = -2 ll + 2 p and BIC = -2 ll + p ln n (p parameters, n observations).
+    let aic = -2.0 * log_likelihood + 2.0 * p as f64;
+    let bic = -2.0 * log_likelihood + p as f64 * (n as f64).ln();
     Ok(format!(
-        "{}; log-likelihood = {}",
+        "{}; AIC = {}, BIC = {}; log-likelihood = {}",
         parts.join("; "),
+        num(aic),
+        num(bic),
         num(log_likelihood)
     ))
 }
@@ -896,9 +901,14 @@ fn poisson_regression(
             yi * eta - eta.exp() - log_gamma(*yi)
         })
         .sum();
+    // Information criteria: AIC = -2 ll + 2 p and BIC = -2 ll + p ln n (p parameters, n observations).
+    let aic = -2.0 * log_likelihood + 2.0 * p as f64;
+    let bic = -2.0 * log_likelihood + p as f64 * (n as f64).ln();
     Ok(format!(
-        "{}; log-likelihood = {}",
+        "{}; AIC = {}, BIC = {}; log-likelihood = {}",
         parts.join("; "),
+        num(aic),
+        num(bic),
         num(log_likelihood)
     ))
 }

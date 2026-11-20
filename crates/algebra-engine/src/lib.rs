@@ -49,6 +49,7 @@ pub mod iga;
 pub mod indeterminate;
 pub mod indexing;
 pub mod inequality;
+pub mod inference;
 pub mod input_text;
 pub mod interconnect;
 pub mod intlist;

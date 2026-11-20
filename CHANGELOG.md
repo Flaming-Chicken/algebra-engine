@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Statistical inference on data lists: `confidence_interval(data[, level])`, `t_test(data, mu)`, `t_test(a, b)` (Welch), `paired_t_test(a, b)`, `z_test(data, mu, sigma)`. Exact mean and variance, two-sided p-values.
 - Fixed: a rational beyond 64 bits as a power base or divisor printed without parentheses (`(a/b)^x` as `a/b^x`, a different expression) and gave a wrong value tail; such numbers are no longer turned into symbols by the simplifier.
 - Fixed: separable first-order equations written with a quotient (`y' = 1/y^2`, `y' = 1/(y^2+1)`, `y' = (x^2+1)/(y^2+1)`, `y' = (1+y^2)*x`) printed only a classification; they are solved. The simplifier folds `(b^m)^n` for an integer `n`, `1/b^(-k)` and `(a/b)^(-k)`.
 - Fixed: first-order equations whose `y'` has a coefficient other than 1 were solved as if it were 1 (`2*y' = y` gave `exp(x)`, `y + (x^2*y - x)*y' = 0` gave `ln(y) = -x + C1`); non-exact equations with an integrating factor `mu(x)` or `mu(y)` are solved; `exp(-2*ln(x))` simplifies to `x^(-2)`; `-(-1/2*x)` no longer prints a double minus.

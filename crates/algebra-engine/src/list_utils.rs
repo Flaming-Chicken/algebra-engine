@@ -50,7 +50,7 @@ fn show_list(items: &[Q]) -> String {
 }
 
 /// The rational value of an argument, or `None` when it is not a rational number.
-fn rational(session: &mut UraeSession, text: &str) -> Option<Q> {
+pub(crate) fn rational(session: &mut UraeSession, text: &str) -> Option<Q> {
     let t = text.trim();
     if t.is_empty() || t.chars().any(|c| c.is_alphabetic() && !matches!(c, 'e')) {
         // Letters (variables, function names) mean this is not plain data. `e` alone only appears in decimals.
@@ -73,7 +73,7 @@ fn rational(session: &mut UraeSession, text: &str) -> Option<Q> {
 }
 
 /// A list argument `[a, b, c]` / `{a, b, c}` as numbers.
-fn list(session: &mut UraeSession, text: &str) -> Option<Vec<Q>> {
+pub(crate) fn list(session: &mut UraeSession, text: &str) -> Option<Vec<Q>> {
     let t = text.trim();
     let inner = t
         .strip_prefix('[')

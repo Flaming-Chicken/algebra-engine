@@ -56,6 +56,7 @@ pub mod limit_check;
 pub mod limits;
 pub mod linprog;
 pub mod logic;
+pub mod logic_commands;
 pub mod macros;
 pub mod matexpr;
 pub mod matrix;

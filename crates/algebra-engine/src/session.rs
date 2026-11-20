@@ -102,6 +102,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         "homogeneous and exact first-order ODEs (fallback after the standard solver)",
         crate::ode_first_order::run,
     ),
+    (
+        "statistical inference (confidence_interval, t_test, z_test)",
+        crate::inference::run,
+    ),
 ];
 
 /// Centralized stateful execution engine session for URAE.

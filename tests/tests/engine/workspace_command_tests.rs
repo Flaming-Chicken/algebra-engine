@@ -4436,3 +4436,129 @@ fn rationals_beyond_64_bits_stay_numbers_in_powers_and_quotients() {
         );
     }
 }
+
+#[test]
+fn inference_commands_agree_with_an_independent_integration() {
+    // ln Gamma by the Lanczos approximation (g = 7), written here so that the oracle shares nothing with the engine.
+    fn ln_gamma(x: f64) -> f64 {
+        const G: [f64; 9] = [
+            0.999_999_999_999_809_9,
+            676.520_368_121_885_1,
+            -1_259.139_216_722_402_8,
+            771.323_428_777_653_1,
+            -176.615_029_162_140_6,
+            12.507_343_278_686_905,
+            -0.138_571_095_265_720_12,
+            9.984_369_578_019_572e-6,
+            1.505_632_735_149_311_6e-7,
+        ];
+        let x = x - 1.0;
+        let t = x + 7.5;
+        let mut a = G[0];
+        for (i, g) in G.iter().enumerate().skip(1) {
+            a += g / (x + i as f64);
+        }
+        0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
+    }
+    // Two-sided p-value of t with df degrees of freedom: 1 - 2 * integral of the density from 0 to |t| (Simpson).
+    let p_value = |t: f64, df: f64| -> f64 {
+        let density = |u: f64| {
+            (ln_gamma((df + 1.0) / 2.0)
+                - ln_gamma(df / 2.0)
+                - 0.5 * (df * std::f64::consts::PI).ln()
+                - (df + 1.0) / 2.0 * (1.0 + u * u / df).ln())
+            .exp()
+        };
+        let n = 4000;
+        let h = t.abs() / n as f64;
+        let mut sum = density(0.0) + density(t.abs());
+        for k in 1..n {
+            sum += density(k as f64 * h) * if k % 2 == 1 { 4.0 } else { 2.0 };
+        }
+        1.0 - 2.0 * sum * h / 3.0
+    };
+    let value = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} not in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ')', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let samples: [&str; 4] = [
+        "[1,2,3,4,5]",
+        "[5.1,4.9,5.6,5.8,6.0,5.5]",
+        "[12,15,11,14,18,13,16]",
+        "[2.5,3.1,2.8,3.6,3.3,2.9,3.4,3.0]",
+    ];
+    for data in samples {
+        for mu in ["0", "3", "5.5"] {
+            let out = run(&format!("t_test({data}, {mu})"));
+            let (t, df, p) = (value(&out, "t ="), value(&out, "df ="), value(&out, "p ="));
+            assert!(
+                (p - p_value(t, df)).abs() < 2e-6,
+                "t_test({data}, {mu}): p = {p}, integration gives {}\n{out}",
+                p_value(t, df)
+            );
+        }
+        // The endpoints of the 95% interval are the hypothesised means at which p = 0.05.
+        let interval = run(&format!("confidence_interval({data})"));
+        let inside = interval
+            .split_once("mean: (")
+            .unwrap()
+            .1
+            .split_once(')')
+            .unwrap()
+            .0
+            .to_string();
+        for endpoint in inside.split(", ") {
+            let out = run(&format!("t_test({data}, {endpoint})"));
+            assert!(
+                (value(&out, "p =") - 0.05).abs() < 5e-5,
+                "{data} at {endpoint}: {out}"
+            );
+        }
+    }
+    // Textbook values: t = 3 / sqrt(2.5 / 5) = 4.2426 with 4 df gives p = 0.0132; the 95% interval is (1.0368, 4.9632).
+    let out = run("t_test([1,2,3,4,5], 0)");
+    assert!(
+        out.starts_with("t = 4.242641, df = 4, p = 0.013236"),
+        "{out}"
+    );
+    assert!(run("confidence_interval([1,2,3,4,5])").contains("(1.036757, 4.963243)"));
+    // Welch's degrees of freedom lie between the smaller sample's and the pooled count, and the test is symmetric in the samples.
+    let welch = run("t_test([5.1,4.9,5.6,5.8,6.0,5.5], [4.8,5.0,5.1,4.7,5.2,4.9])");
+    let swapped = run("t_test([4.8,5.0,5.1,4.7,5.2,4.9], [5.1,4.9,5.6,5.8,6.0,5.5])");
+    let (df, p) = (value(&welch, "df ="), value(&welch, "p ="));
+    assert!((5.0..=10.0).contains(&df), "{welch}");
+    assert!((p - p_value(value(&welch, "t ="), df)).abs() < 2e-6);
+    assert!(
+        (value(&swapped, "p =") - p).abs() < 1e-9
+            && (value(&swapped, "t =") + value(&welch, "t =")).abs() < 1e-9
+    );
+    // Paired: the one-sample test of the differences.
+    let paired = run("paired_t_test([85,80,78,90,77],[82,81,75,86,74])");
+    let one_sample = run("t_test([3,-1,3,4,3], 0)");
+    assert!(
+        (value(&paired, "t =") - value(&one_sample, "t =")).abs() < 1e-9
+            && (value(&paired, "p =") - value(&one_sample, "p =")).abs() < 1e-9
+    );
+    // z: a known sigma, against the normal distribution.
+    let z = run("z_test([102,98,101,99,100,103], 100, 2)");
+    assert!(
+        (value(&z, "z =") - 0.612372).abs() < 1e-6 && (value(&z, "p =") - 0.540291).abs() < 1e-5,
+        "{z}"
+    );
+    // Too little data is refused.
+    assert!(UraeSession::new().execute_line("t_test([1], 0)").is_error);
+    assert!(
+        UraeSession::new()
+            .execute_line("confidence_interval([1,2,3], 1.5)")
+            .is_error
+    );
+}

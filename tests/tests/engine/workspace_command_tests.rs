@@ -2118,3 +2118,108 @@ fn combinatorial_spellings_match_enumeration() {
     assert_eq!(int("prime_pi(100)"), 25);
     assert_eq!(int("Fibonacci(10)"), 55);
 }
+
+#[test]
+fn regression_with_two_lists_and_polynomial_lcm() {
+    // Least squares by the closed form slope = Sxy / Sxx, intercept = ybar - slope xbar, on pseudo-random data.
+    let mut state = 0xA076_1D64_78BD_642Fu64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % 41) as i64 - 20
+    };
+    for _ in 0..6 {
+        let n = 5 + (next().rem_euclid(4)) as usize;
+        let xs: Vec<i64> = (0..n as i64).collect();
+        let ys: Vec<i64> = xs.iter().map(|x| 3 * x - 4 + next() / 4).collect();
+        let (nf, xbar) = (n as f64, xs.iter().sum::<i64>() as f64 / n as f64);
+        let ybar = ys.iter().sum::<i64>() as f64 / nf;
+        let sxy: f64 = xs
+            .iter()
+            .zip(&ys)
+            .map(|(x, y)| (*x as f64 - xbar) * (*y as f64 - ybar))
+            .sum();
+        let sxx: f64 = xs.iter().map(|x| (*x as f64 - xbar).powi(2)).sum();
+        let (slope, intercept) = (sxy / sxx, ybar - sxy / sxx * xbar);
+        let list = |v: &[i64]| {
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        for name in ["fit", "polyfit", "linear_regression"] {
+            let out = run(&format!("{name}({}, {})", list(&xs), list(&ys)));
+            // The line is printed like `51/25 · x - 1/20`: evaluate it at 0 and at 1.
+            let evaluated = run(&format!("subs({out}, x, 0)"));
+            let parse = |t: &str| -> f64 {
+                match t.trim().split_once('/') {
+                    Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+                    None => t.trim().parse().unwrap(),
+                }
+            };
+            assert!(
+                (parse(&evaluated) - intercept).abs() < 1e-9,
+                "{name}: intercept {evaluated} vs {intercept}"
+            );
+            let at_one = run(&format!("subs({out}, x, 1)"));
+            assert!(
+                (parse(&at_one) - (slope + intercept)).abs() < 1e-9,
+                "{name}: {at_one} vs {}",
+                slope + intercept
+            );
+        }
+    }
+    // Degree 2 through three points is exact interpolation.
+    assert_eq!(run("polyfit([0, 1, 2], [1, 2, 5], 2)"), "x^2 + 1");
+    // lcm of polynomials with chosen roots: the lcm has the union of the roots (compared after expansion).
+    let monic = |roots: &[i64]| {
+        roots
+            .iter()
+            .map(|r| format!("(x - ({r}))"))
+            .collect::<Vec<_>>()
+            .join("*")
+    };
+    for (a, b) in [
+        (vec![1, -1], vec![-1]),
+        (vec![1, -1], vec![-1, -1, 2]),
+        (vec![0, 2, 3], vec![2, 3, 5]),
+    ] {
+        let (pa, pb) = (monic(&a), monic(&b));
+        let mut union = a.clone();
+        for r in &b {
+            // Multiplicity is the larger of the two counts.
+            let (ca, cb) = (
+                a.iter().filter(|v| *v == r).count(),
+                b.iter().filter(|v| *v == r).count(),
+            );
+            if cb > ca && union.iter().filter(|v| *v == r).count() < cb {
+                union.push(*r);
+            }
+        }
+        let got = run(&format!("expand({})", run(&format!("lcm({pa}, {pb})"))));
+        let expected = run(&format!("expand({})", monic(&union)));
+        assert_eq!(got, expected, "lcm({pa}, {pb})");
+    }
+    assert_eq!(run("lcm(6, 4)"), "12");
+}
+
+#[test]
+fn substitution_spellings_replace_whole_words_simultaneously() {
+    assert_eq!(run("subs(2*x + 1, x, 3)"), "7");
+    assert_eq!(run("subs(x^2 + y, x = 2, y = 3)"), "7");
+    assert_eq!(run("substitute(sin(x), x, pi/6)"), "1/2");
+    assert_eq!(run("replace(2*x + 1, x, 3)"), "7");
+    // Simultaneous: x -> y and y -> 1 applied once each, not chained.
+    assert_eq!(run("subs(x + y, x = y, y = 1)"), "y + 1");
+    // Whole words only: `max` and `xy` do not contain the variable `x`.
+    assert_eq!(run("subs(xy + x, x, 2)"), "xy + 2");
+    // A polynomial substituted at integer points agrees with direct evaluation.
+    for a in -3i64..=3 {
+        let direct = (a * a * a - 2 * a + 5).to_string();
+        assert_eq!(run(&format!("subs(x^3 - 2*x + 5, x, {a})")), direct);
+    }
+}

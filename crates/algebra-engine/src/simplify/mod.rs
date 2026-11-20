@@ -644,6 +644,28 @@ impl Simplifier {
                 "__const_inf" => Ok(graph.constant(algebra_core::Constant::Infinity)),
                 "__const_neginf" => Ok(graph.constant(algebra_core::Constant::NegInfinity)),
                 "__const_undef" => Ok(graph.constant(algebra_core::Constant::Undefined)),
+                // Numbers beyond 64 bits travel through the e-graph as symbols named by their text (`expr_to_egg`):
+                // they come back as numbers, not as symbols (a symbol named `a/b` printed as `a/b^x` for `(a/b)^x`).
+                text if !text.is_empty()
+                    && text
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c == '-' || c == '/')
+                    && text.chars().any(|c| c.is_ascii_digit()) =>
+                {
+                    let (numerator, denominator) = text.split_once('/').unwrap_or((text, "1"));
+                    match (
+                        numerator.parse::<num_bigint::BigInt>(),
+                        denominator.parse::<num_bigint::BigInt>(),
+                    ) {
+                        (Ok(n), Ok(d)) if d != num_bigint::BigInt::from(0) => {
+                            Ok(crate::poly::expr_from_rational(
+                                graph,
+                                &num_rational::BigRational::new(n, d),
+                            ))
+                        }
+                        _ => Ok(graph.symbol(s)),
+                    }
+                }
                 _ => Ok(graph.symbol(s)),
             },
             SymbolicLang::IdentityMatrix => Ok(graph.symbol("I")),

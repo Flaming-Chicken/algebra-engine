@@ -339,6 +339,9 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "mregress",
         "multiple_regression",
         "ols",
+        "logistic_regress",
+        "logistic_regression",
+        "logit",
     ];
     if !known.contains(&name.as_str()) {
         return None;
@@ -358,6 +361,9 @@ fn evaluate(
     let square = rows == cols;
     match name {
         "mregress" | "multiple_regression" | "ols" => multiple_regression(session, a, args),
+        "logistic_regress" | "logistic_regression" | "logit" => {
+            logistic_regression(session, a, args)
+        }
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -647,5 +653,141 @@ fn multiple_regression(
         k,
         df,
         num(fp.clamp(0.0, 1.0))
+    ))
+}
+
+/// Invert a small dense matrix in floating point (Gauss-Jordan with partial pivoting).
+fn invert_f64(m: &[Vec<f64>]) -> Option<Vec<Vec<f64>>> {
+    let n = m.len();
+    let mut a: Vec<Vec<f64>> = m
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            row.iter()
+                .copied()
+                .chain((0..n).map(|j| if i == j { 1.0 } else { 0.0 }))
+                .collect()
+        })
+        .collect();
+    for col in 0..n {
+        let pivot = (col..n).max_by(|&x, &y| a[x][col].abs().total_cmp(&a[y][col].abs()))?;
+        if a[pivot][col].abs() < 1e-12 {
+            return None;
+        }
+        a.swap(col, pivot);
+        let p = a[col][col];
+        for v in a[col].iter_mut() {
+            *v /= p;
+        }
+        for r in 0..n {
+            if r != col {
+                let f = a[r][col];
+                let pivot_row = a[col].clone();
+                for (v, w) in a[r].iter_mut().zip(&pivot_row) {
+                    *v -= f * w;
+                }
+            }
+        }
+    }
+    Some(a.into_iter().map(|row| row[n..].to_vec()).collect())
+}
+
+/// `logistic_regress(X, y)`: maximum likelihood by iteratively reweighted least squares (Newton), with Wald standard errors.
+fn logistic_regression(
+    session: &mut UraeSession,
+    x: &Matrix,
+    args: &[String],
+) -> Result<String, String> {
+    let y = parse(session, args.get(1).ok_or("logistic_regress(X, y)")?)
+        .ok_or("y must be a list of 0s and 1s")?;
+    let (n, k) = (x.len(), x[0].len());
+    let f = |q: &Q| q.to_f64().unwrap_or(f64::NAN);
+    let outcome: Vec<f64> = y.iter().map(|r| f(&r[0])).collect();
+    if outcome.len() != n || y[0].len() != 1 || outcome.iter().any(|v| *v != 0.0 && *v != 1.0) {
+        return Err("y needs one 0 or 1 per row of X".into());
+    }
+    if n < k + 2 {
+        return Err("too few observations".into());
+    }
+    let design: Vec<Vec<f64>> = x
+        .iter()
+        .map(|row| std::iter::once(1.0).chain(row.iter().map(f)).collect())
+        .collect();
+    let p = k + 1;
+    let mut beta = vec![0.0; p];
+    let mut information = vec![vec![0.0; p]; p];
+    let mut converged = false;
+    for _ in 0..100 {
+        let probability: Vec<f64> = design
+            .iter()
+            .map(|row| {
+                1.0 / (1.0 + (-row.iter().zip(&beta).map(|(a, b)| a * b).sum::<f64>()).exp())
+            })
+            .collect();
+        let mut gradient = vec![0.0; p];
+        information = vec![vec![0.0; p]; p];
+        for (i, row) in design.iter().enumerate() {
+            let w = probability[i] * (1.0 - probability[i]);
+            for a in 0..p {
+                gradient[a] += row[a] * (outcome[i] - probability[i]);
+                for b in 0..p {
+                    information[a][b] += w * row[a] * row[b];
+                }
+            }
+        }
+        let inverse = invert_f64(&information).ok_or("the likelihood is degenerate: the classes are perfectly separable or the predictors are dependent")?;
+        let step: Vec<f64> = (0..p)
+            .map(|a| (0..p).map(|b| inverse[a][b] * gradient[b]).sum())
+            .collect();
+        for a in 0..p {
+            beta[a] += step[a];
+        }
+        if beta.iter().any(|b| b.abs() > 40.0) {
+            return Err("the classes are perfectly separable: the maximum likelihood estimate does not exist".into());
+        }
+        if step.iter().all(|s| s.abs() < 1e-11) {
+            converged = true;
+            break;
+        }
+    }
+    if !converged {
+        return Err("the iteration did not converge".into());
+    }
+    let covariance = invert_f64(&information).ok_or("singular information matrix")?;
+    let num = |v: f64| {
+        let t = format!("{v:.6}");
+        t.trim_end_matches('0').trim_end_matches('.').to_string()
+    };
+    let names: Vec<String> = std::iter::once("intercept".to_string())
+        .chain((1..=k).map(|i| format!("x{i}")))
+        .collect();
+    let parts: Vec<String> = (0..p)
+        .map(|i| {
+            let se = covariance[i][i].sqrt();
+            let z = beta[i] / se;
+            let tail = crate::inference::normal_cdf(z.abs());
+            format!(
+                "{} = {} (se {}, z = {}, p = {}, odds ratio {})",
+                names[i],
+                num(beta[i]),
+                num(se),
+                num(z),
+                num((2.0 * (1.0 - tail)).clamp(0.0, 1.0)),
+                num(beta[i].exp())
+            )
+        })
+        .collect();
+    let log_likelihood: f64 = design
+        .iter()
+        .zip(&outcome)
+        .map(|(row, yi)| {
+            let eta: f64 = row.iter().zip(&beta).map(|(a, b)| a * b).sum();
+            yi * eta - (1.0 + eta.exp()).ln()
+        })
+        .sum();
+    Ok(format!(
+        "{}; log-likelihood = {}",
+        parts.join("; "),
+        num(log_likelihood)
     ))
 }

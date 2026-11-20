@@ -339,6 +339,7 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "eig",
         "jordan",
         "jordan_form",
+        "hessenberg",
         "mregress",
         "multiple_regression",
         "ols",
@@ -371,6 +372,7 @@ fn evaluate(
         }
         "poisson_regress" | "poisson_regression" => poisson_regression(session, a, args),
         "jordan" | "jordan_form" => jordan(session, a),
+        "hessenberg" => hessenberg(session, a),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -995,5 +997,53 @@ fn jordan(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
         "{} with blocks {}",
         display(session, &j)?,
         sizes.join(", ")
+    ))
+}
+
+/// `hessenberg(A)`: an upper Hessenberg matrix `H` similar to `A` with `A = P H P^-1`, by exact elimination with row and column
+/// swaps (a similarity transform at every step).
+fn hessenberg(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
+    let n = a.len();
+    if a[0].len() != n {
+        return Err("hessenberg needs a square matrix".into());
+    }
+    let mut h = a.clone();
+    let mut p = identity(n);
+    for k in 0..n.saturating_sub(2) {
+        let Some(pivot) = (k + 1..n).find(|&r| !h[r][k].is_zero()) else {
+            continue;
+        };
+        if pivot != k + 1 {
+            h.swap(pivot, k + 1);
+            for row in h.iter_mut() {
+                row.swap(pivot, k + 1);
+            }
+            for row in p.iter_mut() {
+                row.swap(pivot, k + 1);
+            }
+        }
+        for i in k + 2..n {
+            if h[i][k].is_zero() {
+                continue;
+            }
+            let factor = &h[i][k] / &h[k + 1][k];
+            for c in 0..n {
+                let delta = &factor * &h[k + 1][c];
+                h[i][c] -= delta;
+            }
+            for row in h.iter_mut() {
+                let delta = &factor * &row[i];
+                row[k + 1] += delta;
+            }
+            for row in p.iter_mut() {
+                let delta = &factor * &row[i];
+                row[k + 1] += delta;
+            }
+        }
+    }
+    Ok(format!(
+        "H = {}; P = {}",
+        display(session, &h)?,
+        display(session, &p)?
     ))
 }

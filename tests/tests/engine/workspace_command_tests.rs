@@ -6812,3 +6812,112 @@ fn jordan_form_recovers_the_blocks_of_a_conjugated_matrix() {
             .is_error
     );
 }
+
+#[test]
+fn hessenberg_reduction_is_a_similarity_to_upper_hessenberg_form() {
+    type F = (i128, i128);
+    fn gcd(a: i128, b: i128) -> i128 {
+        if b == 0 { a.abs() } else { gcd(b, a % b) }
+    }
+    fn norm((n, d): F) -> F {
+        let g = gcd(n, d).max(1);
+        let s = if d < 0 { -1 } else { 1 };
+        (s * n / g, s * d / g)
+    }
+    fn add(a: F, b: F) -> F {
+        norm((a.0 * b.1 + b.0 * a.1, a.1 * b.1))
+    }
+    fn mul(a: F, b: F) -> F {
+        norm((a.0 * b.0, a.1 * b.1))
+    }
+    let cell = |t: &str| -> F {
+        match t.trim().split_once('/') {
+            Some((a, b)) => norm((a.trim().parse().unwrap(), b.trim().parse().unwrap())),
+            None => (t.trim().parse().unwrap(), 1),
+        }
+    };
+    let matrix = |t: &str| -> Vec<Vec<F>> {
+        t.trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(';')
+            .map(|r| r.split(',').map(cell).collect())
+            .collect()
+    };
+    let product = |a: &Vec<Vec<F>>, b: &Vec<Vec<F>>| -> Vec<Vec<F>> {
+        (0..a.len())
+            .map(|i| {
+                (0..b[0].len())
+                    .map(|j| (0..b.len()).fold((0, 1), |s, k| add(s, mul(a[i][k], b[k][j]))))
+                    .collect()
+            })
+            .collect()
+    };
+    let mut state = 0x5555_AAAA_1234_FEDCu64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i128 - (m as i128) / 2
+    };
+    for n in [3usize, 4, 5, 6, 5, 4] {
+        let mut data: Vec<Vec<i128>> = (0..n).map(|_| (0..n).map(|_| next(9)).collect()).collect();
+        if n == 5 {
+            // Zeros in the pivot column exercise the row-swap branch.
+            for row in data.iter_mut().skip(1) {
+                row[0] = 0;
+            }
+            data[3][0] = 2;
+        }
+        let a: Vec<Vec<F>> = data
+            .iter()
+            .map(|r| r.iter().map(|v| (*v, 1)).collect())
+            .collect();
+        let text = format!(
+            "[{}]",
+            data.iter()
+                .map(|r| format!(
+                    "[{}]",
+                    r.iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let out = run(&format!("hessenberg({text})"));
+        let (h_text, p_text) = out
+            .strip_prefix("H = ")
+            .unwrap()
+            .split_once("; P = ")
+            .unwrap();
+        let (h, p) = (matrix(h_text), matrix(p_text));
+        for (i, row) in h.iter().enumerate() {
+            for (j, v) in row.iter().enumerate() {
+                if i > j + 1 {
+                    assert_eq!(*v, (0, 1), "H not Hessenberg: {out}");
+                }
+            }
+        }
+        // A P = P H, and P is invertible (its inverse exists in the engine).
+        assert_eq!(
+            product(&a, &p),
+            product(&p, &h),
+            "A P = P H for {text}: {out}"
+        );
+        assert_ne!(
+            run(&format!("det({p_text})")).trim(),
+            "0",
+            "P is singular: {out}"
+        );
+        let trace = |m: &Vec<Vec<F>>| (0..n).fold((0, 1), |s, i| add(s, m[i][i]));
+        assert_eq!(trace(&a), trace(&h), "{out}");
+        assert_eq!(trace(&product(&a, &a)), trace(&product(&h, &h)), "{out}");
+    }
+    assert!(
+        UraeSession::new()
+            .execute_line("hessenberg([[1,2,3],[4,5,6]])")
+            .is_error
+    );
+}

@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: indexing. `A[1,2]`, `A[1][2]`, `A[2]` (a row), `A[1,:]`, `A[:,2]`, `v[3]`, `v[-1]` (1-based, negative from the end), element assignment `A[1,2] = 7`, `row(A, i)`, `col(A, j)`, `size(A)`, `rows(A)`, `ncols(A)`. Fixed: `diag(A)` of a matrix returned a wrong 4x4 matrix; it is now the diagonal.
 - Added: workspace commands `who` (also `list variables`), `show a`, `clear x y`, `delete a`, `reset`, and `%` for the previous result (`% + 1`); `reset` used to echo and not reset.
 - Fixed: matrix variables. `A = [[1,2],[3,4]]` stored nothing, so `A*A`, `det(A)`, `A^-1` and `A*v` failed; matrices and vectors can now be assigned to names and reused (`B = A*A`, `C = inverse(A)`).
 - Added: exact list utilities `sum`, `cumsum`, `cumprod`, `diff([...])`, `sort`, `reverse`, `len`, `unique`, `count`, `argmax`, `argmin`, `min([...])`, `range(n)`, `linspace`, `arange`, `sum_squares`, `geometric_mean`, `harmonic_mean`, `rms`, `weighted_mean`, `moving_average`, `rank_data`, `histogram`. `range(5)` is now `[0, 1, 2, 3, 4]` (it printed the statistical range, 0).

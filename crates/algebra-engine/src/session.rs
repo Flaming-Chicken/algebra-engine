@@ -726,6 +726,17 @@ impl UraeSession {
 
         // Commands inside the arguments of another command (`factor(expand((x+1)^3 - 1))`,
         // `integrate(simplify(...), x)`) are evaluated first and replaced by their results.
+        // Element assignment `A[1,2] = 7`, `v[2] = 99` on a stored matrix or vector.
+        if let Some(outcome) = crate::indexing::assign(self, trimmed) {
+            return match outcome {
+                Ok((name, stored, shown)) => {
+                    self.matrix_vars.insert(name.clone(), stored);
+                    let out = format!("{name} = {shown}");
+                    OperationResult::success(out.clone(), out.clone(), out)
+                }
+                Err(e) => OperationResult::error(e),
+            };
+        }
         // Matrix variables: `A = [[1,2],[3,4]]`, `B = A*A`; later `A^-1`, `det(A)`, `A*v` see the stored matrix.
         if let Some(result) = self.try_matrix_assignment(trimmed) {
             return result;
@@ -737,6 +748,14 @@ impl UraeSession {
             (expanded != trimmed).then_some(expanded)
         };
         let trimmed = matrix_expanded.as_deref().unwrap_or(trimmed);
+        // `A[1,2]`, `v[3]`, `A[:,2]`, `row(A, 1)`, `size(A)`, `diag(A)`: indexing and shape queries on matrices.
+        if let Some(outcome) = crate::indexing::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         let resolved = self.resolve_nested_commands(trimmed);
         let trimmed = resolved.as_deref().unwrap_or(trimmed);
 

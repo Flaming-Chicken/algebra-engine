@@ -652,6 +652,9 @@ pub fn normalise(input: &str) -> Option<String> {
     if let Some(expanded) = expand_radix_literals(original) {
         return Some(expanded);
     }
+    if let Some(expanded) = expand_degrees(original) {
+        return Some(expanded);
+    }
     if let Some(short) = shorthand(original) {
         return Some(short);
     }
@@ -1032,4 +1035,57 @@ fn set_shorthand(s: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// `30°`, `30 deg`, `60 degrees`, `2.5 degree` replaced by `(30*pi/180)`; `None` when the text has none.
+pub fn expand_degrees(s: &str) -> Option<String> {
+    // `convert 180 deg to rad` names the unit degree: leave unit conversions alone.
+    let lowered = s.to_ascii_lowercase();
+    if lowered.starts_with("convert ")
+        || [" to ", " in ", " as "].iter().any(|w| lowered.contains(w))
+    {
+        return None;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let (mut out, mut i, mut changed) = (String::new(), 0usize, false);
+    while i < chars.len() {
+        let starts_number = chars[i].is_ascii_digit()
+            && (i == 0
+                || !(chars[i - 1].is_alphanumeric() || chars[i - 1] == '_' || chars[i - 1] == '.'));
+        if starts_number {
+            let mut end = i;
+            while end < chars.len() && (chars[end].is_ascii_digit() || chars[end] == '.') {
+                end += 1;
+            }
+            let mut after = end;
+            while after < chars.len() && chars[after] == ' ' {
+                after += 1;
+            }
+            let unit_len = if chars.get(after) == Some(&'°') {
+                Some(1)
+            } else {
+                ["degrees", "degree", "deg"].iter().find_map(|word| {
+                    let w: Vec<char> = word.chars().collect();
+                    let boundary = chars
+                        .get(after + w.len())
+                        .is_none_or(|c| !(c.is_alphanumeric() || *c == '_'));
+                    (chars[after.min(chars.len())..].starts_with(&w) && boundary).then_some(w.len())
+                })
+            };
+            if let Some(len) = unit_len {
+                let number: String = chars[i..end].iter().collect();
+                out.push_str(&format!("({number}*π/180)"));
+                i = after + len;
+                changed = true;
+                continue;
+            }
+            let number: String = chars[i..end].iter().collect();
+            out.push_str(&number);
+            i = end;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    changed.then_some(out)
 }

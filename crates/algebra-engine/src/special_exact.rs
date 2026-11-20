@@ -200,7 +200,15 @@ pub fn roots_as_sqrt(graph: &ExprGraph, expr: ExprId) -> ExprId {
                 .collect::<Vec<_>>(),
         ),
         ExprKind::Sub(a, b) => graph.sub(roots_as_sqrt(graph, a), roots_as_sqrt(graph, b)),
-        ExprKind::Div(a, b) => graph.div(roots_as_sqrt(graph, a), roots_as_sqrt(graph, b)),
+        ExprKind::Div(a, b) => {
+            let (numerator, denominator) = (roots_as_sqrt(graph, a), roots_as_sqrt(graph, b));
+            // x / -y prints as -x / y (so `-1 / -(1/a + 1/b)` becomes `1 / (1/a + 1/b)`).
+            if let ExprKind::Neg(inner) = graph.get(denominator).kind.clone() {
+                graph.div(graph.neg(numerator), inner)
+            } else {
+                graph.div(numerator, denominator)
+            }
+        }
         ExprKind::Neg(a) => graph.neg(roots_as_sqrt(graph, a)),
         ExprKind::Function { name, args } => {
             let new_args: Vec<ExprId> = args.iter().map(|&a| roots_as_sqrt(graph, a)).collect();

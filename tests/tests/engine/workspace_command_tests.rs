@@ -7220,3 +7220,51 @@ fn likelihood_ratio_tests_match_the_g_statistics_and_add_up_over_nested_models()
             .is_error
     );
 }
+
+#[test]
+fn linear_regression_information_criteria_follow_from_the_residual_sum_of_squares() {
+    let field = |text: &str, key: &str| -> f64 {
+        let after = text.split(key).last().unwrap();
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ';', ')'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let x: [[i64; 2]; 7] = [[1, 2], [2, 1], [3, 5], [4, 3], [5, 8], [6, 4], [7, 9]];
+    let y = [3i64, 4, 8, 7, 14, 9, 16];
+    let xs = format!(
+        "[{}]",
+        x.iter()
+            .map(|r| format!("[{},{}]", r[0], r[1]))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let ys = format!(
+        "[{}]",
+        y.iter()
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let out = run(&format!("mregress({xs}, {ys})"));
+    // SSE from R^2: SSE = (1 - R^2) SST.
+    let mean = y.iter().sum::<i64>() as f64 / 7.0;
+    let sst: f64 = y.iter().map(|v| (*v as f64 - mean).powi(2)).sum();
+    let r2 = field(&out, "; R^2 =");
+    let sse = (1.0 - r2) * sst;
+    let n = 7.0f64;
+    let ll = -n / 2.0 * ((2.0 * std::f64::consts::PI).ln() + (sse / n).ln() + 1.0);
+    assert!(
+        (field(&out, "AIC =") - (-2.0 * ll + 8.0)).abs() < 1e-3,
+        "{out}"
+    );
+    assert!(
+        (field(&out, "BIC =") - (-2.0 * ll + 4.0 * n.ln())).abs() < 1e-3,
+        "{out}"
+    );
+    // Exact fits have no finite likelihood and print no criteria.
+    assert!(!run("mregress([[1,0],[0,1],[1,1],[2,1],[3,5]],[3,4,6,8,22])").contains("AIC"));
+}

@@ -659,15 +659,30 @@ fn multiple_regression(
     } else {
         0.0
     };
+    // Gaussian log-likelihood at the maximum: -n/2 (ln 2 pi + ln(SSE / n) + 1); parameters are the coefficients and the variance.
+    let criteria = if f(&sse) > 0.0 {
+        let n_f = n as f64;
+        let log_likelihood =
+            -n_f / 2.0 * ((2.0 * std::f64::consts::PI).ln() + (f(&sse) / n_f).ln() + 1.0);
+        let parameters = (k + 2) as f64;
+        format!(
+            ", AIC = {}, BIC = {}",
+            num(-2.0 * log_likelihood + 2.0 * parameters),
+            num(-2.0 * log_likelihood + parameters * n_f.ln())
+        )
+    } else {
+        String::new()
+    };
     Ok(format!(
-        "{}; R^2 = {}, adjusted R^2 = {}, F = {} on ({}, {}) df, p = {}",
+        "{}; R^2 = {}, adjusted R^2 = {}, F = {} on ({}, {}) df, p = {}{}",
         parts.join("; "),
         num(r2),
         num(adjusted),
         num(fstat),
         k,
         df,
-        num(fp.clamp(0.0, 1.0))
+        num(fp.clamp(0.0, 1.0)),
+        criteria
     ))
 }
 

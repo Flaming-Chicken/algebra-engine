@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Fixed: first-order equations whose `y'` has a coefficient other than 1 were solved as if it were 1 (`2*y' = y` gave `exp(x)`, `y + (x^2*y - x)*y' = 0` gave `ln(y) = -x + C1`); non-exact equations with an integrating factor `mu(x)` or `mu(y)` are solved; `exp(-2*ln(x))` simplifies to `x^(-2)`; `-(-1/2*x)` no longer prints a double minus.
 - Homogeneous and exact first-order ODEs: `dsolve(y' = (x^2+y^2)/(x*y))` and `dsolve((2*x*y + 1) + (x^2 + 2*y)*y' = 0)` were answered with a classification only; they now have solutions (explicit or implicit).
 - Forced linear systems of ODEs: `dsolve([x' = x + 1, y' = y])`, `dsolve([x' = y, y' = -x + sin(2*t)], x(0) = 0, y(0) = 0)`. The forcing term may be a constant, a power of t, an exponential, a sine or a cosine.
 - `amortization(principal, annual rate, years[, rows])`: the monthly payment and a schedule of interest, principal repaid and balance, to the cent.

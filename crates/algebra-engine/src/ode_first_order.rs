@@ -95,26 +95,68 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         .eval(&format!("simplify(diff(({m}), {y}) - diff(({n}), {x}))"))
         .ok()?;
     if closed.trim() == "0" {
-        let phi_x = session.eval(&format!("integrate(({m}), {x})")).ok()?;
-        let phi_x = strip_variable_note(&phi_x);
-        let remainder = session
-            .eval(&format!("simplify(({n}) - diff(({phi_x}), {y}))"))
-            .ok()?;
-        let h = session
-            .eval(&format!("integrate(({remainder}), {y})"))
-            .ok()?;
-        let h = strip_variable_note(&h);
-        let phi = session.eval(&format!("({phi_x}) + ({h})")).ok()?;
+        let phi = potential(session, &m, &n, &x, &y)?;
         return Some(Ok(format!(
             "{phi} = C1  (implicit solution of the exact equation)"
         )));
     }
 
     // Homogeneous: y' = F(x, y) = -M / N with F(x, v x) free of x; v' x = F - v is separable.
+    if let Some(solution) = homogeneous(session, &m, &n, &x, &y) {
+        return Some(Ok(solution));
+    }
+
+    // Integrating factors: mu(x) when (M_y - N_x) / N is free of y, mu(y) when (N_x - M_y) / M is free of x.
+    for (divisor, other, variable, sign) in [(&n, &y, &x, ""), (&m, &x, &y, "-")] {
+        let quotient = session
+            .eval(&format!("simplify({sign}({closed})/({divisor}))"))
+            .ok()?;
+        if symbols_of(session, &quotient)?.contains(other) {
+            continue;
+        }
+        let integral = session
+            .eval(&format!("integrate(({quotient}), {variable})"))
+            .ok()?;
+        let integral = strip_variable_note(&integral);
+        let mu = session.eval(&format!("exp({integral})")).ok()?;
+        let new_m = session.eval(&format!("expand(({mu})*({m}))")).ok()?;
+        let new_n = session.eval(&format!("expand(({mu})*({n}))")).ok()?;
+        let check = session
+            .eval(&format!(
+                "simplify(diff(({new_m}), {y}) - diff(({new_n}), {x}))"
+            ))
+            .ok()?;
+        if check.trim() != "0" {
+            continue;
+        }
+        let phi = potential(session, &new_m, &new_n, &x, &y)?;
+        return Some(Ok(format!(
+            "{phi} = C1  (implicit solution; integrating factor {mu})"
+        )));
+    }
+    None
+}
+
+/// The potential `phi` of an exact `M dx + N dy`: `phi_x = M`, `phi_y = N`.
+fn potential(session: &mut UraeSession, m: &str, n: &str, x: &str, y: &str) -> Option<String> {
+    let phi_x = session.eval(&format!("integrate(({m}), {x})")).ok()?;
+    let phi_x = strip_variable_note(&phi_x);
+    let remainder = session
+        .eval(&format!("expand(({n}) - diff(({phi_x}), {y}))"))
+        .ok()?;
+    let h = session
+        .eval(&format!("integrate(({remainder}), {y})"))
+        .ok()?;
+    let h = strip_variable_note(&h);
+    session.eval(&format!("({phi_x}) + ({h})")).ok()
+}
+
+/// The solution of a homogeneous equation as text, or `None` when the equation is not homogeneous or cannot be integrated.
+fn homogeneous(session: &mut UraeSession, m: &str, n: &str, x: &str, y: &str) -> Option<String> {
     let f = session.eval(&format!("simplify(-({m})/({n}))")).ok()?;
     let substituted = session.eval(&format!("subs(({f}), {y} = v*{x})")).ok()?;
     let g = session.eval(&format!("simplify({substituted})")).ok()?;
-    if symbols_of(session, &g)?.contains(&x) {
+    if symbols_of(session, &g)?.contains(x) {
         return None;
     }
     let integrand = session
@@ -138,13 +180,13 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
             solutions.push(format!("{y}({x}) = {value}"));
         }
         if !solutions.is_empty() {
-            return Some(Ok(solutions.join("  or  ")));
+            return Some(solutions.join("  or  "));
         }
     }
     let implicit = session
         .eval(&format!("subs(({integral}), v = {y}/{x})"))
         .ok()?;
-    Some(Ok(format!(
+    Some(format!(
         "{implicit} = ln({x}) + C1  (implicit solution: y cannot be isolated in closed form)"
-    )))
+    ))
 }

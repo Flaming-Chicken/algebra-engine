@@ -4703,3 +4703,184 @@ fn chi_square_proportion_anova_and_one_sided_tests_satisfy_their_identities() {
             .is_error
     );
 }
+
+#[test]
+fn fisher_correlation_and_rank_sum_tests_match_brute_force() {
+    let value = |text: &str, key: &str| -> f64 {
+        let after = text
+            .split(key)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{key} not in {text}"));
+        after
+            .trim_start_matches([' ', '='])
+            .split([',', ' ', ')', ';'])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    // The exact fraction a/b printed after "p = ... = ".
+    let fraction = |text: &str| -> (u128, u128) {
+        let after = text
+            .split("p = ")
+            .nth(1)
+            .unwrap()
+            .split(" = ")
+            .nth(1)
+            .unwrap()
+            .split(' ')
+            .next()
+            .unwrap();
+        let (a, b) = after.split_once('/').unwrap_or((after, "1"));
+        (a.parse().unwrap(), b.parse().unwrap())
+    };
+    let choose = |n: u128, k: u128| -> u128 {
+        if k > n {
+            0
+        } else {
+            (1..=k).fold(1u128, |acc, i| acc * (n - k + i) / i)
+        }
+    };
+    // Fisher: enumerate every table with the margins, summing the weights no larger than the observed one.
+    for (a, b, c, d) in [
+        (3u128, 1, 1, 3),
+        (7, 2, 3, 9),
+        (0, 5, 6, 1),
+        (12, 4, 5, 11),
+        (2, 8, 8, 2),
+    ] {
+        let (r1, r2, c1, n) = (a + b, c + d, a + c, a + b + c + d);
+        let weight = |k: u128| choose(r1, k) * choose(r2, c1 - k);
+        let observed = weight(a);
+        let extreme: u128 = (c1.saturating_sub(r2)..=c1.min(r1))
+            .map(weight)
+            .filter(|w| *w <= observed)
+            .sum();
+        let out = run(&format!("fisher_exact([[{a},{b}],[{c},{d}]])"));
+        let (num, den) = fraction(&out);
+        assert_eq!(
+            num * choose(n, c1),
+            extreme * den,
+            "fisher [[{a},{b}],[{c},{d}]]: {out}, expected {extreme}/{}",
+            choose(n, c1)
+        );
+    }
+    assert!(run("fisher_exact([[3,1],[1,3]])").contains("17/35"));
+    // Mann-Whitney: every assignment of the pooled values, ties included, by bitmask.
+    let cases: [(&[f64], &[f64]); 5] = [
+        (&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0]),
+        (&[1.0, 3.0, 5.0, 7.0], &[2.0, 4.0, 6.0, 8.0, 10.0]),
+        (&[1.0, 2.0, 2.0, 5.0], &[2.0, 3.0, 4.0, 6.0]),
+        (&[10.0, 12.0, 15.0], &[9.0, 11.0, 14.0, 16.0, 18.0, 20.0]),
+        (&[1.0, 1.0, 2.0], &[1.0, 2.0, 2.0, 3.0]),
+    ];
+    for (x, y) in cases {
+        let pooled: Vec<f64> = x.iter().chain(y).copied().collect();
+        let n = pooled.len();
+        let ranks: Vec<f64> = (0..n)
+            .map(|i| {
+                let less = pooled.iter().filter(|v| **v < pooled[i]).count() as f64;
+                let equal = pooled.iter().filter(|v| **v == pooled[i]).count() as f64;
+                less + (equal + 1.0) / 2.0
+            })
+            .collect();
+        let n1 = x.len();
+        let u_of = |mask: u32| -> f64 {
+            let w: f64 = (0..n)
+                .filter(|i| mask >> i & 1 == 1)
+                .map(|i| ranks[i])
+                .sum();
+            w - (n1 * (n1 + 1)) as f64 / 2.0
+        };
+        let observed = u_of((1u32 << n1) - 1);
+        let mean = (n1 * y.len()) as f64 / 2.0;
+        let (mut extreme, mut total) = (0u128, 0u128);
+        for mask in 0u32..(1 << n) {
+            if mask.count_ones() as usize != n1 {
+                continue;
+            }
+            total += 1;
+            if (u_of(mask) - mean).abs() >= (observed - mean).abs() - 1e-9 {
+                extreme += 1;
+            }
+        }
+        let list = |v: &[f64]| {
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let out = run(&format!("mann_whitney({}, {})", list(x), list(y)));
+        let (num, den) = fraction(&out);
+        assert_eq!(
+            num * total,
+            extreme * den,
+            "{x:?} vs {y:?}: {out}, expected {extreme}/{total}"
+        );
+        assert!((value(&out, "U =") - observed).abs() < 1e-9, "{out}");
+    }
+    // Pearson against the definition, its p against the t distribution, and Spearman as Pearson on average ranks.
+    let pearson = |x: &[f64], y: &[f64]| -> f64 {
+        let n = x.len() as f64;
+        let (mx, my) = (x.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
+        let sxy: f64 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
+        sxy / (x.iter().map(|a| (a - mx).powi(2)).sum::<f64>()
+            * y.iter().map(|b| (b - my).powi(2)).sum::<f64>())
+        .sqrt()
+    };
+    let ranks_of = |v: &[f64]| -> Vec<f64> {
+        v.iter()
+            .map(|e| {
+                v.iter().filter(|o| **o < *e).count() as f64
+                    + (v.iter().filter(|o| **o == *e).count() as f64 + 1.0) / 2.0
+            })
+            .collect()
+    };
+    let pairs: [(&[f64], &[f64]); 3] = [
+        (&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 5.0, 4.0, 5.0]),
+        (
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            &[6.0, 5.0, 7.0, 3.0, 2.0, 2.0],
+        ),
+        (&[2.0, 4.0, 4.0, 6.0, 9.0], &[1.0, 3.0, 2.0, 2.0, 8.0]),
+    ];
+    for (x, y) in pairs {
+        let list = |v: &[f64]| {
+            format!(
+                "[{}]",
+                v.iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let out = run(&format!("correlation_test({}, {})", list(x), list(y)));
+        let (r, df) = (pearson(x, y), x.len() as f64 - 2.0);
+        assert!(
+            (value(&out, "Pearson r =") - r).abs() < 1e-5,
+            "{out} vs {r}"
+        );
+        let t = r * (df / (1.0 - r * r)).sqrt();
+        assert!((value(&out, "t =") - t).abs() < 1e-4, "{out}");
+        let spearman = run(&format!("spearman({}, {})", list(x), list(y)));
+        assert!(
+            (value(&spearman, "Spearman rho =") - pearson(&ranks_of(x), &ranks_of(y))).abs() < 1e-5,
+            "{spearman}"
+        );
+    }
+    // Perfect correlation has p = 0, a constant variable is refused.
+    assert!(run("pearson([1,2,3],[2,4,6])").contains("p = 0"));
+    assert!(
+        UraeSession::new()
+            .execute_line("pearson([1,1,1],[1,2,3])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("fisher_exact([[1,2],[3]])")
+            .is_error
+    );
+}

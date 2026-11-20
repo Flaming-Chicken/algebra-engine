@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- `fisher_exact([[a, b], [c, d]])`, `correlation_test(x, y)`, `spearman(x, y)` and `mann_whitney(a, b)`: exact p-values by enumeration where the sample is small.
 - More tests: a trailing `greater` / `less` selects a one-sided alternative; `proportion_test(x, n, p0)`, `chi2_test(observed, expected)`, `chi2_test(table)` and `anova(a, b, c)`.
 - Statistical inference on data lists: `confidence_interval(data[, level])`, `t_test(data, mu)`, `t_test(a, b)` (Welch), `paired_t_test(a, b)`, `z_test(data, mu, sigma)`. Exact mean and variance, two-sided p-values.
 - Fixed: a rational beyond 64 bits as a power base or divisor printed without parentheses (`(a/b)^x` as `a/b^x`, a different expression) and gave a wrong value tail; such numbers are no longer turned into symbols by the simplifier.

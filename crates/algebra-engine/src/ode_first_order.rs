@@ -106,6 +106,11 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         return Some(Ok(solution));
     }
 
+    // Riccati: a quadratic right-hand side with a particular solution c x^k.
+    if let Some(solution) = riccati(session, &m, &n, &x, &y) {
+        return Some(solution);
+    }
+
     // Integrating factors: mu(x) when (M_y - N_x) / N is free of y, mu(y) when (N_x - M_y) / M is free of x.
     for (divisor, other, variable, sign) in [(&n, &y, &x, ""), (&m, &x, &y, "-")] {
         let quotient = session
@@ -224,4 +229,87 @@ fn clairaut(session: &mut UraeSession, equation: &str, y: &str) -> Option<Result
     Some(Ok(format!(
         "{line}  (Clairaut equation; singular solution {x} = {singular_x}, {y} = {singular_y}, parameter dydx)"
     )))
+}
+
+/// Substitute `value` for `variable` in `expression` (`subs` cannot be nested inside other calls), then simplify.
+fn substitute(
+    session: &mut UraeSession,
+    expression: &str,
+    variable: &str,
+    value: &str,
+) -> Option<String> {
+    let replaced = session
+        .eval(&format!("subs(({expression}), {variable} = ({value}))"))
+        .ok()?;
+    session.eval(&format!("simplify({replaced})")).ok()
+}
+
+/// Riccati equations `y' = q0 + q1 y + q2 y^2`: a particular solution `y_p = c x^k` is searched for; then `y = y_p + 1/v` turns
+/// the equation into the linear `v' = -(q1 + 2 q2 y_p) v - q2`.
+fn riccati(
+    session: &mut UraeSession,
+    m: &str,
+    n: &str,
+    x: &str,
+    y: &str,
+) -> Option<Result<String, String>> {
+    let f = session.eval(&format!("simplify(-({m})/({n}))")).ok()?;
+    let first = session.eval(&format!("diff(({f}), {y})")).ok()?;
+    let second = session.eval(&format!("diff(({first}), {y})")).ok()?;
+    let q2 = session.eval(&format!("simplify(({second})/2)")).ok()?;
+    if q2.trim() == "0" || symbols_of(session, &q2)?.contains(y) {
+        return None;
+    }
+    let q1 = substitute(session, &first, y, "0")?;
+    let q0 = substitute(session, &f, y, "0")?;
+    let rebuilt = session
+        .eval(&format!(
+            "simplify(({f}) - (({q0}) + ({q1})*{y} + ({q2})*{y}^2))"
+        ))
+        .ok()?;
+    if rebuilt.trim() != "0" {
+        return None;
+    }
+    // The residual y_p' - f(x, y_p) of a candidate, as an expression in x (and the constant c).
+    let residual_of = |session: &mut UraeSession, shape: &str| -> Option<String> {
+        let rhs = substitute(session, &f, y, shape)?;
+        session
+            .eval(&format!("simplify(diff({shape}, {x}) - ({rhs}))"))
+            .ok()
+    };
+    for power in [0i32, 1, -1, 2, -2, 3, -3] {
+        let shape = format!("c*{x}^({power})");
+        let residual = residual_of(session, &shape)?;
+        let at = substitute(session, &residual, x, "2")?;
+        let Ok(roots) = session.eval(&format!("solve(({at}) = 0, c)")) else {
+            continue;
+        };
+        let Some(list) = roots.split(": [").nth(1).and_then(|r| r.strip_suffix(']')) else {
+            continue;
+        };
+        for root in list.split(", ") {
+            let root = root.trim();
+            if root.is_empty() || root.contains("RootOf") || root.contains('i') {
+                continue;
+            }
+            let particular = substitute(session, &shape, "c", root)?;
+            let check = residual_of(session, &particular)?;
+            if check.trim() != "0" {
+                continue;
+            }
+            let coefficient = session
+                .eval(&format!("simplify(({q1}) + 2*({q2})*({particular}))"))
+                .ok()?;
+            let linear = session
+                .eval(&format!("dsolve(y' = -({coefficient})*y - ({q2}))"))
+                .ok()?;
+            let Some(v) = linear.strip_prefix("y(x) = ") else {
+                continue;
+            };
+            return Some(Ok(format!(
+                "y(x) = {particular} + 1/({v})  (Riccati equation; particular solution {particular})"
+            )));
+        }
+    }
+    None
 }

@@ -7027,3 +7027,17 @@ fn matrix_square_root_squares_back_and_is_exact_when_the_root_is_rational() {
             .is_error
     );
 }
+
+#[test]
+fn zz_probe_riccati() {
+    for q in [
+        "dsolve(y' = (2/x)*y + 1)",
+        "dsolve(y' = y^2 - 2/x^2)",
+        "dsolve(y' = -(1/x)*y - 1)",
+        "dsolve(y' + (3/x)*y = 1)",
+    ] {
+        let mut session = UraeSession::new();
+        let r = session.execute_line(q);
+        println!("{q} => {} / {}", r.output_text, r.is_error);
+    }
+}

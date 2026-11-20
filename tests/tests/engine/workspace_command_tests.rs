@@ -5978,7 +5978,7 @@ fn weighted_and_directed_graph_commands_match_brute_force() {
 #[test]
 fn inverse_z_transform_reproduces_the_series_of_x_of_z() {
     // (numerator, denominator) as descending coefficients of z; the text form is built from them.
-    let cases: [(&[f64], &[f64]); 7] = [
+    let cases: [(&[f64], &[f64]); 11] = [
         (&[1.0, 0.0], &[1.0, -1.0]),
         (&[1.0, 0.0], &[1.0, -3.0, 2.0]),
         (&[1.0, 0.0, 0.0], &[1.0, -1.0 / 6.0, -1.0 / 6.0]),
@@ -5986,6 +5986,10 @@ fn inverse_z_transform_reproduces_the_series_of_x_of_z() {
         (&[1.0, 0.0, 0.0], &[1.0, -3.0, 3.0, -1.0]),
         (&[1.0, 1.0], &[1.0, -1.0, -6.0]),
         (&[2.0, 1.0, 5.0], &[1.0, 0.0, -4.0]),
+        (&[1.0, 0.0], &[1.0, 0.0, 1.0]),
+        (&[1.0, 0.0, 0.0], &[1.0, -1.0, 1.0]),
+        (&[1.0, 0.0], &[1.0, 0.0, 0.0, -1.0]),
+        (&[1.0, 0.0], &[1.0, -1.0, 0.5]),
     ];
     let poly = |c: &[f64]| -> String {
         let d = c.len() - 1;
@@ -6071,7 +6075,7 @@ fn inverse_z_transform_reproduces_the_series_of_x_of_z() {
     }
     assert!(
         UraeSession::new()
-            .execute_line("inverse_ztransform(z/(z^2+1), z, n)")
+            .execute_line("inverse_ztransform(z/(z^2-2), z, n)")
             .is_error
     );
 }

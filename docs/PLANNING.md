@@ -86,7 +86,7 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R96` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R99` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
@@ -108,7 +108,7 @@ spellings a new user types first. The open list, by field:
   systems by the inverse Laplace transform; Clairaut equations (lines and singular envelope); Riccati equations with a particular solution `c x^k` (`R96`). Missing: other Riccati particular solutions and
   d'Alembert equations, other integrating factors, an
   explicit `tan` for `atan(y) = ...`, nonlinear systems, time-varying coefficients, forcing with a non-rational transform,
-  irreducible cubic factors in the inverse Laplace transform, the inverse Fourier transform, complex poles and left-sided sequences in the inverse Z transform (real poles are done), Z-transform of
+  irreducible cubic factors in the inverse Laplace transform, the inverse Fourier transform, repeated complex poles and left-sided sequences in the inverse Z transform (real and simple complex poles are done, `R99`), Z-transform of
   `sin`/`cos`, boundary value problems, systems for `rk4`, adaptive steps, variable-coefficient and nonlinear
   recurrences, exact `fft`.
 - **Statistics, probability and finance.** Done: the inference commands (`t_test`, `chi2_test`, `anova`, `fisher_exact`,

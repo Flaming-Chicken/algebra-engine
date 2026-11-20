@@ -233,11 +233,6 @@ fn invert_mode(
                     ));
                 }
                 2 => {
-                    if z_mode {
-                        return Err(
-                            "complex poles are not supported by the inverse Z-transform yet".into(),
-                        );
-                    }
                     if j > 1 {
                         return Err(
                             "repeated irreducible quadratic factors are not supported".into()
@@ -264,6 +259,21 @@ fn invert_mode(
                         magnitude.numer() * magnitude.denom(),
                         magnitude.denom()
                     );
+                    if z_mode {
+                        if hyperbolic {
+                            return Err("irrational real poles are not supported by the inverse Z-transform yet".into());
+                        }
+                        // Poles rho e^(+-i theta) with rho^2 = r, rho cos(theta) = -p/2: the term of X(z) = z (c1 z + c0) / q is
+                        // rho^n (c1 cos(n theta) + (c0 - c1 p / 2) / w sin(n theta)).
+                        let rho = format!("sqrt({})", q(&r));
+                        let cos_theta = format!("({}/{rho})", q(&(-&p * &half)));
+                        terms.push(format!(
+                            "{rho}^{t_name}*({}*cos({t_name}*acos({cos_theta})) + ({})/{w}*sin({t_name}*acos({cos_theta})))",
+                            q(&c1),
+                            sin_coefficient
+                        ));
+                        continue;
+                    }
                     let (cosine, sine) = if hyperbolic {
                         ("cosh", "sinh")
                     } else {

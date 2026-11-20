@@ -86,25 +86,40 @@ ordinary inputs from one field (calculus, linear algebra, number theory, solving
 answer against what a mathematician expects, and treats three outcomes as defects in this order: a wrong answer, an
 input echoed back unevaluated, an error for something that should work. Each defect gets a test with an independent
 oracle (a numerical value, a defining identity, a brute-force count, published digits), then a ledger entry
-(`R14`-`R43` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
+(`R14`-`R59` so far). It found more wrong answers in a day than the audit documents did, and most were in the plain
 spellings a new user types first. The open list, by field:
 
 - **Calculus and series.** Expansions at infinity of functions that are not power series in 1/x (`atan(x)`,
   `sqrt(x^2+1)/x`); integrals with non-linear arguments, `sqrt` of cubics and irreducible quartic denominators;
-  periodic inequalities; residues and poles.
+  periodic inequalities; one-sided `lim x->0+`; `d/dx x^2 + 1` without brackets; mixed partials `∂²f/∂x∂y`;
+  `converges` and `radius_of_convergence` of a sum; residues at symbolic points and of irrational value.
 - **Special functions.** Bessel `Y`, `K` and non-integer order, `polygamma` at negative `x`, `f_quantile` and discrete
-  quantiles, svd factors `U` and `V` (singular values exist).
-- **Numbers.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `sqrt` of negative non-squares, symbolic roots (`sqrt(x^2*y)`),
-  `exp(x)/exp(y)`, `oo * 0`, `lcm` of polynomials, Galois groups of degree 5 and up.
-- **Transforms, ODEs and recurrences.** Z-transform of `sin`/`cos`, boundary value problems, variable-coefficient,
-  nonlinear and system recurrences, `fft`, `dft`, `convolve`.
-- **Optimisation and numerical methods** (next probe). Linear programs are exact (`R43`); missing: free variables,
-  integer programming, Lagrange multipliers, quadratic programs, duals, `critical_points`, `extrema`, `linprog`, and the
-  named methods `newton_method`, `bisection`, `secant`, `simpson`, `trapezoid`, `rk4`, `euler_method`; also `arg`,
-  `modulus`, `polar`.
-- **Input forms.** Quantified formulas, LaTeX tables, `align` and `	ext{}` in formulas, English with several clauses.
+  quantiles, `poisson_cdf` in closed form, svd factors `U` and `V` (singular values exist).
+- **Numbers and algebra.** Roots of sums (`sqrt(3 + 2 sqrt 2)`), `4^(1/4)` to `sqrt(2)`, symbolic roots
+  (`sqrt(x^2*y)`), `exp(x)/exp(y)`, `oo * 0`, `lcm` and `gcd` of multivariate polynomials, `acos(1/sqrt 2)` as a
+  plain expression, Galois groups of degree 5 and up, `groebner`, `jordan`, a simplified `qr`.
+- **Solving.** General solutions of trigonometric equations (`+ 2 pi k`), numerical values beside a `RootOf`,
+  inequalities with a nonlinear objective (KKT), integer and quadratic programs, `extrema` of several variables.
+- **Transforms, ODEs and recurrences.** Z-transform of `sin`/`cos`, boundary value problems, systems and higher-order
+  equations for `rk4`, adaptive steps, variable-coefficient and nonlinear recurrences, exact `fft`.
+- **Statistics and probability.** `t_test`, `confidence_interval`, `geometric_cdf`, sentence forms such as
+  `P(X=3) binomial n=10 p=0.5`, joint and conditional distributions from tables.
+- **Discrete, logic and sets.** Graph theory (`chromatic_polynomial`, `spanning_trees`), `pascal_row`,
+  `partitions_list`, normal forms and simplification of formulas, quantifiers, `~a` and `base_convert` in arbitrary
+  bases, `multiset_permutations`.
+- **Input forms.** Quantified formulas, LaTeX tables, `align` and `\text{}` in formulas, English with several clauses
+  (`sum of 1 to 10`, `area of circle radius 3`), `sin x cos x`, unit arithmetic across dimensions (`3 m * 2 s`),
+  `|x| + 1`, the decimal tail for commands typed with decimals (`integrate(sin(x), x, 0, 0.5)`).
 - **Structure.** The two parser tables of command names (`parser.rs` and `numeric_commands.rs`) must stay in step; one
-  table would remove a class of mistakes. The `missing_docs` backlog.
+  table would remove a class of mistakes. The hooks at the top of `UraeSession::execute_line` (about fifteen now:
+  linear programs, logic, ODE methods, complex functions, stationary points, ...) should become one registry with a
+  stated order. The `missing_docs` backlog.
+
+**What the loop taught (so far).** Wrong answers came almost only from code that reinterprets input: an English or
+shorthand rewrite, a retry after a parse failure, or an alias that shadowed an existing function. Each such rewrite
+needs a guard (never retry across a bare function name or a multi-letter word, never join two numbers) and a test that
+pins what it must refuse as well as what it accepts. The cheap, high-yield probes are the spellings a first user types:
+`d/dx x^3`, `2 x`, `0xFF`, `5 km to m`, `sin(0.5)`.
 
 Also open and not scheduled: integrals of `x·sqrt(x²+1)` (a radical of a non-linear base); factoring beyond about 50-bit
 factors (an elliptic-curve method); the remainder of `R1` (arbitrary CAD surface meshes as solids).

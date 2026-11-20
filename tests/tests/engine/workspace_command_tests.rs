@@ -7220,3 +7220,69 @@ fn likelihood_ratio_tests_match_the_g_statistics_and_add_up_over_nested_models()
             .is_error
     );
 }
+
+#[test]
+fn left_sided_inverse_z_transform_reproduces_the_series_in_positive_powers_of_z() {
+    // Numerator and denominator as ascending coefficients of z; the denominator is non-zero at z = 0.
+    let cases: [(&[f64], &[f64]); 4] = [
+        (&[0.0, 1.0], &[-2.0, 1.0]),
+        (&[0.0, 1.0], &[2.0, -3.0, 1.0]),
+        (&[0.0, 0.0, 1.0], &[-1.0, 0.0, 4.0]),
+        (&[0.0, 1.0], &[4.0, -4.0, 1.0]),
+    ];
+    let poly = |c: &[f64]| -> String {
+        c.iter()
+            .enumerate()
+            .map(|(i, v)| format!("({v:?})*z^{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    for (num, den) in cases {
+        let out = run(&format!(
+            "inverse_ztransform(({})/({}), z, k, left)",
+            poly(num),
+            poly(den)
+        ));
+        assert!(out.contains("left-sided"), "{out}");
+        let body = out
+            .split("] = ")
+            .nth(1)
+            .unwrap()
+            .split(" for k <= -1")
+            .next()
+            .unwrap()
+            .to_string();
+        // Ascending division: sum c_m z^m = N / D, so x[-m] = c_m.
+        let mut c = [0.0f64; 9];
+        for m in 0..9 {
+            let mut acc = num.get(m).copied().unwrap_or(0.0);
+            for j in 1..=m.min(den.len() - 1) {
+                acc -= den[j] * c[m - j];
+            }
+            c[m] = acc / den[0];
+        }
+        assert!(c[0].abs() < 1e-12);
+        for m in 1..9 {
+            let value: f64 = run(&format!(
+                "evalf({})",
+                body.replace('k', &format!("({})", -(m as i64)))
+            ))
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{body}"));
+            assert!(
+                (value - c[m]).abs() < 1e-6 * (1.0 + c[m].abs()),
+                "X = ({})/({}), n = -{m}: {value} vs {}: {out}",
+                poly(num),
+                poly(den),
+                c[m]
+            );
+        }
+    }
+    // A pole at zero in X(z)/z would need an impulse at n = 0, so it is refused for the left-sided sequence.
+    assert!(
+        UraeSession::new()
+            .execute_line("inverse_ztransform(1/(z-2), z, n, left)")
+            .is_error
+    );
+}

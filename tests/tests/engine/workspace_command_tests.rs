@@ -1739,3 +1739,53 @@ fn linear_programs_match_vertex_enumeration() {
         "minimum value = 14/5 at x = 8/5, y = 6/5"
     );
 }
+
+#[test]
+fn stationary_points_and_quadrature_rules_match_their_oracles() {
+    // f' = k (x - r1)(x - r2)(x - r3) with distinct integer roots: the critical points are exactly the r_i and, for
+    // k > 0, the smallest and largest are minima and the middle one a maximum (the signs flip for k < 0).
+    for (k, roots) in [
+        (1i64, [-2i64, 0, 3]),
+        (2, [-1, 1, 4]),
+        (-1, [-3, -1, 2]),
+        (4, [0, 2, 5]),
+    ] {
+        let [r1, r2, r3] = roots;
+        // f = k * integral of (x-r1)(x-r2)(x-r3) = k * (x^4/4 - s1 x^3/3 + s2 x^2/2 - s3 x)
+        let s1 = r1 + r2 + r3;
+        let s2 = r1 * r2 + r1 * r3 + r2 * r3;
+        let s3 = r1 * r2 * r3;
+        let f = format!("{k}*(x^4/4 - {s1}*x^3/3 + {s2}*x^2/2 - {s3}*x)");
+        let out = run(&format!("extrema({f})"));
+        for (i, r) in roots.iter().enumerate() {
+            let outer = i != 1;
+            let kind = if outer == (k > 0) {
+                "local minimum"
+            } else {
+                "local maximum"
+            };
+            let part = format!("x = {r}: {kind}");
+            assert!(out.contains(&part), "{f}: expected `{part}` in `{out}`");
+        }
+        assert_eq!(out.matches("x = ").count(), 3, "{out}");
+    }
+    assert_eq!(run("critical_points(x^3-3x)"), "critical points (x): 1, -1");
+    // Quadrature rules against closed forms: Simpson is exact for cubics, the trapezoid error is -(b-a)h^2 f''/12,
+    // and Simpson on sin over [0, pi] with n = 10 is the published 2.0001095173.
+    let value = |text: String| -> f64 { text.rsplit(": ").next().unwrap().trim().parse().unwrap() };
+    assert!((value(run("simpson(x^3 - 2*x, 0, 2, 2)")) - 0.0).abs() < 1e-12);
+    assert!((value(run("simpson(sin(x), 0, pi, 10)")) - 2.0001095173150043).abs() < 1e-12);
+    let n = 100.0;
+    let trapezoid = value(run("trapezoid(x^2, 0, 1, 100)"));
+    assert!(
+        (trapezoid - (1.0 / 3.0 + 1.0 / (6.0 * n * n))).abs() < 1e-12,
+        "{trapezoid}"
+    );
+    let midpoint = value(run("midpoint(x^2, 0, 1, 100)"));
+    assert!(
+        (midpoint - (1.0 / 3.0 - 1.0 / (12.0 * n * n))).abs() < 1e-12,
+        "{midpoint}"
+    );
+    assert!(run("newton_method(x^2 - 2, 1)").contains("1.41421356237309"));
+    assert!(run("bisection(x^3 - x - 2, 1, 2)").contains("1.52137970680"));
+}

@@ -1630,7 +1630,11 @@ fn arithmetic_function_name(name: &str) -> Option<&'static str> {
 /// The canonical name of a numerical or statistical command, if `name` is one of its spellings.
 fn numeric_command_name(name: &str) -> Option<&'static str> {
     Some(match name.to_ascii_lowercase().as_str() {
-        "nsolve" | "findroot" | "find_root" => "nsolve",
+        "nsolve" | "findroot" | "find_root" | "newton_method" | "newton" | "secant"
+        | "bisection" | "bisect" | "regula_falsi" => "nsolve",
+        "simpson" | "simpsons" | "simpson_rule" => "simpson",
+        "trapezoid" | "trapezoidal" | "trapezium" | "trapezoid_rule" => "trapezoid",
+        "midpoint" | "midpoint_rule" => "midpoint",
         "nintegrate" | "nint" | "numeric_integrate" => "nintegrate",
         "minimize" | "argmin" => "minimize",
         "maximize" | "argmax" => "maximize",

@@ -4,6 +4,7 @@
 //! `matrix_exp` (`expm`) and `eig`.
 
 use crate::session::UraeSession;
+use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{One, Signed, ToPrimitive, Zero};
 
@@ -336,6 +337,8 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
         "matrix_exp",
         "expm",
         "eig",
+        "jordan",
+        "jordan_form",
         "mregress",
         "multiple_regression",
         "ols",
@@ -367,6 +370,7 @@ fn evaluate(
             logistic_regression(session, a, args)
         }
         "poisson_regress" | "poisson_regression" => poisson_regression(session, a, args),
+        "jordan" | "jordan_form" => jordan(session, a),
         "rowspace" | "row_space" => {
             let (reduced, pivots) = rref(a);
             display(session, &reduced[..pivots.len()].to_vec())
@@ -891,5 +895,105 @@ fn poisson_regression(
         "{}; log-likelihood = {}",
         parts.join("; "),
         num(log_likelihood)
+    ))
+}
+
+/// `jordan(A)`: the Jordan normal form of a square rational matrix whose eigenvalues are all rational. The number of blocks of
+/// size at least `k` for an eigenvalue `l` is `rank (A - l I)^(k-1) - rank (A - l I)^k`.
+fn jordan(session: &mut UraeSession, a: &Matrix) -> Result<String, String> {
+    let n = a.len();
+    if a[0].len() != n {
+        return Err("jordan needs a square matrix".into());
+    }
+    // Characteristic polynomial by Faddeev-LeVerrier, then its rational roots from the rational factorisation.
+    let mut coefficients = vec![Q::zero(); n + 1]; // ascending powers of x
+    coefficients[n] = Q::one();
+    let mut m = zeros(n, n);
+    for k in 1..=n {
+        let previous = coefficients[n - k + 1].clone();
+        let mut next = multiply(a, &m).ok_or("shape mismatch")?;
+        for (r, row) in next.iter_mut().enumerate() {
+            row[r] += &previous;
+        }
+        let product = multiply(a, &next).ok_or("shape mismatch")?;
+        let trace = (0..n).fold(Q::zero(), |acc, r| acc + &product[r][r]);
+        coefficients[n - k] = -trace / Q::from_integer(BigInt::from(k));
+        m = next;
+    }
+    let polynomial = crate::poly::UniPoly::from_coeffs(coefficients);
+    let (_, factors) =
+        crate::poly::factor::factor_rational_polynomial(&polynomial).map_err(|e| e.to_string())?;
+    let mut values: Vec<Q> = Vec::new();
+    for (factor, _) in &factors {
+        if factor.degree() != 1 {
+            return Err("jordan needs rational eigenvalues: the characteristic polynomial has an irreducible factor of higher degree".into());
+        }
+        let root = -factor.coeffs[0].clone() / factor.coeffs[1].clone();
+        if !values.contains(&root) {
+            values.push(root);
+        }
+    }
+    values.sort();
+    let rank = |m: &Matrix| rref(m).1.len();
+    let mut blocks: Vec<(Q, usize)> = Vec::new();
+    for lambda in &values {
+        let shifted: Matrix = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| {
+                        if i == j {
+                            &a[i][j] - lambda
+                        } else {
+                            a[i][j].clone()
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut power = identity(n);
+        let mut ranks = vec![n];
+        for _ in 0..n {
+            power = multiply(&power, &shifted).ok_or("shape mismatch")?;
+            ranks.push(rank(&power));
+            if *ranks.last().unwrap_or(&0) == ranks[ranks.len() - 2] {
+                break;
+            }
+        }
+        // at_least[k] = blocks of size >= k+1.
+        let at_least: Vec<usize> = (0..ranks.len() - 1)
+            .map(|k| ranks[k] - ranks[k + 1])
+            .collect();
+        for size in (1..=at_least.len()).rev() {
+            let count = at_least[size - 1] - at_least.get(size).copied().unwrap_or(0);
+            for _ in 0..count {
+                blocks.push((lambda.clone(), size));
+            }
+        }
+    }
+    let total: usize = blocks.iter().map(|b| b.1).sum();
+    if total != n {
+        return Err(
+            "the eigenvalues are not all rational: the Jordan form needs the full spectrum".into(),
+        );
+    }
+    let mut j = zeros(n, n);
+    let mut at = 0;
+    for (lambda, size) in &blocks {
+        for k in 0..*size {
+            j[at + k][at + k] = lambda.clone();
+            if k + 1 < *size {
+                j[at + k][at + k + 1] = Q::from_integer(1.into());
+            }
+        }
+        at += size;
+    }
+    let sizes: Vec<String> = blocks
+        .iter()
+        .map(|(l, s)| format!("J{s}({})", show_q(l)))
+        .collect();
+    Ok(format!(
+        "{} with blocks {}",
+        display(session, &j)?,
+        sizes.join(", ")
     ))
 }

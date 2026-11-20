@@ -184,9 +184,18 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "hamiltonian_path" | "hamilton_path" => "hamiltonian_path",
         "hamiltonian_cycle" | "hamilton_cycle" | "hamiltonian_circuit" => "hamiltonian_cycle",
         "max_matching" | "maximum_matching" | "matching_number" => "matching",
+        "is_isomorphic" | "isomorphic" => "isomorphic",
+        "automorphisms" | "automorphism_count" | "aut" => "automorphisms",
         _ => return None,
     };
     let body = &t[open + 1..t.len() - 1];
+    if command == "isomorphic" {
+        let parts = crate::graph_commands::split_top(body);
+        let [a, b] = parts.as_slice() else {
+            return Some(Err("is_isomorphic(G, H)".into()));
+        };
+        return Some(parse_graph(a).and_then(|g| parse_graph(b).map(|h| isomorphic(&g, &h))));
+    }
     let g = match parse_graph(body) {
         Ok(g) => g,
         Err(e) => return Some(Err(e)),
@@ -196,6 +205,69 @@ pub fn run(input: &str) -> Option<Result<String, String>> {
         "euler_path" => euler(&g, true),
         "hamiltonian_path" => hamiltonian(&g, false),
         "hamiltonian_cycle" => hamiltonian(&g, true),
+        "automorphisms" => automorphisms(&g),
         _ => matching(&g),
     })
+}
+
+/// Adjacency bitmasks (vertices up to 64).
+fn masks(g: &Graph) -> Vec<u64> {
+    let mut m = vec![0u64; g.n()];
+    for &(a, b) in &g.edges {
+        m[a] |= 1 << b;
+        m[b] |= 1 << a;
+    }
+    m
+}
+
+/// Count (or find the first of) the bijections from `g` to `h` that preserve adjacency, extending partial maps vertex by vertex
+/// and pruning by degree and by adjacency to the vertices already placed.
+fn extend(g: &[u64], h: &[u64], map: &mut Vec<usize>, used: u64, count_all: bool, found: &mut u64) {
+    let k = map.len();
+    if k == g.len() {
+        *found += 1;
+        return;
+    }
+    for candidate in 0..h.len() {
+        if used >> candidate & 1 == 1 || g[k].count_ones() != h[candidate].count_ones() {
+            continue;
+        }
+        let consistent = (0..k).all(|j| (g[k] >> j & 1) == (h[candidate] >> map[j] & 1));
+        if !consistent {
+            continue;
+        }
+        map.push(candidate);
+        extend(g, h, map, used | 1 << candidate, count_all, found);
+        map.pop();
+        if !count_all && *found > 0 {
+            return;
+        }
+    }
+}
+
+fn isomorphic(g: &Graph, h: &Graph) -> String {
+    if g.n() != h.n() || g.edges.len() != h.edges.len() || g.n() > 64 {
+        return "false".into();
+    }
+    let (a, b) = (masks(g), masks(h));
+    let mut degrees_a: Vec<u32> = a.iter().map(|m| m.count_ones()).collect();
+    let mut degrees_b: Vec<u32> = b.iter().map(|m| m.count_ones()).collect();
+    degrees_a.sort_unstable();
+    degrees_b.sort_unstable();
+    if degrees_a != degrees_b {
+        return "false".into();
+    }
+    let mut found = 0;
+    extend(&a, &b, &mut Vec::new(), 0, false, &mut found);
+    (found > 0).to_string()
+}
+
+fn automorphisms(g: &Graph) -> Result<String, String> {
+    if g.n() > 12 {
+        return Err("automorphisms is limited to 12 vertices".into());
+    }
+    let a = masks(g);
+    let mut found = 0;
+    extend(&a, &a, &mut Vec::new(), 0, true, &mut found);
+    Ok(found.to_string())
 }

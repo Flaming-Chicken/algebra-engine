@@ -6470,3 +6470,119 @@ fn prediction_intervals_match_the_closed_form_and_the_intercept_interval() {
             .is_error
     );
 }
+
+#[test]
+fn graph_isomorphism_and_automorphism_counts_match_permutation_search() {
+    let mut state = 0xDEAD_BEEF_CAFE_F00Du64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    let text = |edges: &[(usize, usize)]| {
+        format!(
+            "[{}]",
+            edges
+                .iter()
+                .map(|(a, b)| format!("[v{a},v{b}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    };
+    fn each_permutation(k: usize, order: &mut Vec<usize>, visit: &mut dyn FnMut(&[usize])) {
+        if k == order.len() {
+            visit(order);
+            return;
+        }
+        for i in k..order.len() {
+            order.swap(k, i);
+            each_permutation(k + 1, order, visit);
+            order.swap(k, i);
+        }
+    }
+    for round in 0..30 {
+        let n = 4 + round % 3;
+        let random_edges = |next: &mut dyn FnMut(u64) -> u64| -> Vec<(usize, usize)> {
+            let mut edges = Vec::new();
+            for a in 0..n {
+                for b in a + 1..n {
+                    if next(100) < 50 {
+                        edges.push((a, b));
+                    }
+                }
+            }
+            edges
+        };
+        let g = random_edges(&mut next);
+        if g.len() < 2 {
+            continue;
+        }
+        // A relabelled copy is always isomorphic.
+        let mut perm: Vec<usize> = (0..n).collect();
+        for i in (1..n).rev() {
+            perm.swap(i, next(i as u64 + 1) as usize);
+        }
+        let copy: Vec<(usize, usize)> = g.iter().map(|&(a, b)| (perm[a], perm[b])).collect();
+        assert_eq!(
+            run(&format!("is_isomorphic({}, {})", text(&g), text(&copy))),
+            "true",
+            "{g:?} / {copy:?}"
+        );
+        // An independent random graph: compare with the permutation search over the vertices both lists mention.
+        let h = random_edges(&mut next);
+        if h.is_empty() {
+            continue;
+        }
+        let present = |e: &[(usize, usize)]| {
+            (0..n)
+                .filter(|v| e.iter().any(|&(a, b)| a == *v || b == *v))
+                .collect::<Vec<_>>()
+        };
+        let (pg, ph) = (present(&g), present(&h));
+        let mut expected = false;
+        if pg.len() == ph.len() && g.len() == h.len() {
+            let has_h = |a: usize, b: usize| h.contains(&(a.min(b), a.max(b)));
+            let mut order = ph.clone();
+            each_permutation(0, &mut order, &mut |o: &[usize]| {
+                // pg[i] -> o[i]
+                let image = |v: usize| o[pg.iter().position(|x| *x == v).unwrap()];
+                if g.iter().all(|&(a, b)| has_h(image(a), image(b))) {
+                    expected = true;
+                }
+            });
+        }
+        assert_eq!(
+            run(&format!("is_isomorphic({}, {})", text(&g), text(&h))) == "true",
+            expected,
+            "{g:?} / {h:?}"
+        );
+        // Automorphism count over the vertices of g.
+        let mut count = 0u64;
+        let mut order = pg.clone();
+        let has_g = |a: usize, b: usize| g.contains(&(a.min(b), a.max(b)));
+        each_permutation(0, &mut order, &mut |o: &[usize]| {
+            let image = |v: usize| o[pg.iter().position(|x| *x == v).unwrap()];
+            if g.iter().all(|&(a, b)| has_g(image(a), image(b))) {
+                count += 1;
+            }
+        });
+        assert_eq!(
+            run(&format!("automorphisms({})", text(&g))),
+            count.to_string(),
+            "{g:?}"
+        );
+    }
+    assert_eq!(run("automorphisms(K4)"), "24");
+    assert_eq!(run("automorphisms(C5)"), "10");
+    assert_eq!(run("automorphisms(P4)"), "2");
+    assert_eq!(run("automorphisms(S4)"), "24");
+    assert_eq!(
+        run("is_isomorphic(C6, [[1,2],[2,3],[3,4],[4,5],[5,6],[6,1]])"),
+        "true"
+    );
+    assert_eq!(
+        run("is_isomorphic(C6, [[1,2],[2,3],[3,1],[4,5],[5,6],[6,4]])"),
+        "false"
+    );
+}

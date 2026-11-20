@@ -3941,11 +3941,6 @@ fn linear_ode_systems_satisfy_their_equations_and_initial_conditions() {
     );
     assert!(
         UraeSession::new()
-            .execute_line("dsolve([x' = x + 1, y' = y])")
-            .is_error
-    );
-    assert!(
-        UraeSession::new()
             .execute_line("dsolve([x' = x*y, y' = y])")
             .is_error
     );
@@ -4022,5 +4017,107 @@ fn amortization_schedules_balance_to_zero() {
         level.starts_with("payment = 100.00 per month")
             && level.contains("3 | 0.00 | 100.00 | 900.00"),
         "{level}"
+    );
+}
+
+#[test]
+fn forced_linear_systems_satisfy_their_equations() {
+    let number = |text: String| -> f64 {
+        let t = text.rsplit(" ≈ ").next().unwrap().trim().to_string();
+        match t.split_once('/') {
+            Some((a, b)) => a.parse::<f64>().unwrap() / b.parse::<f64>().unwrap(),
+            None => t.parse().unwrap_or_else(|_| panic!("not a number: {text}")),
+        }
+    };
+    // Forcing terms with their values at t.
+    type Forcing = (&'static str, fn(f64) -> f64);
+    let forcings: [Forcing; 5] = [
+        ("1", |_| 1.0),
+        ("2*t", |t| 2.0 * t),
+        ("exp(t)", f64::exp),
+        ("sin(t)", f64::sin),
+        ("cos(2*t)", |t| (2.0 * t).cos()),
+    ];
+    let mut state = 0xBADC_0FFE_E0DD_F00Du64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % m) as i64
+    };
+    let mut solved = 0;
+    for _ in 0..14 {
+        let a: Vec<Vec<i64>> = (0..2)
+            .map(|_| (0..2).map(|_| next(5) - 2).collect())
+            .collect();
+        let (force_row, force_index) = (next(2) as usize, next(5) as usize);
+        let initial = [next(5) - 2, next(5) - 2];
+        let names = ["x", "y"];
+        let equations: Vec<String> = (0..2)
+            .map(|i| {
+                let mut rhs = format!("({})*x + ({})*y", a[i][0], a[i][1]);
+                if i == force_row {
+                    rhs.push_str(&format!(" + {}", forcings[force_index].0));
+                }
+                format!("{}' = {rhs}", names[i])
+            })
+            .collect();
+        let result = UraeSession::new().execute_line(&format!(
+            "dsolve([{}], x(0) = {}, y(0) = {})",
+            equations.join(", "),
+            initial[0],
+            initial[1]
+        ));
+        assert!(!result.is_error, "{equations:?}: {}", result.output_text);
+        solved += 1;
+        let functions: Vec<String> = result
+            .output_text
+            .split(", ")
+            .map(|p| p.split_once(" = ").unwrap().1.to_string())
+            .collect();
+        assert_eq!(functions.len(), 2, "{}", result.output_text);
+        let at = |i: usize, t: f64| number(run(&format!("subs(({}), t, {t:?})", functions[i])));
+        for (i, value) in initial.iter().enumerate() {
+            assert!(
+                (at(i, 0.0) - *value as f64).abs() < 1e-9,
+                "{equations:?}: {}(0)",
+                names[i]
+            );
+        }
+        for t in [0.4f64, 0.9] {
+            let h = 1e-5;
+            for i in 0..2 {
+                let derivative = (at(i, t + h) - at(i, t - h)) / (2.0 * h);
+                let mut right: f64 = (0..2).map(|j| a[i][j] as f64 * at(j, t)).sum();
+                if i == force_row {
+                    right += (forcings[force_index].1)(t);
+                }
+                assert!(
+                    (derivative - right).abs() < 1e-5 * (1.0 + right.abs()),
+                    "{equations:?} at t = {t}: {}' = {derivative}, expected {right}",
+                    names[i]
+                );
+            }
+        }
+    }
+    assert_eq!(solved, 14);
+    assert_eq!(
+        run("dsolve([x' = y, y' = 2*t])"),
+        "x(t) = C2 · t + C1 + 1/3 · t^3, y(t) = C2 + t^2"
+    );
+    assert_eq!(
+        run("dsolve([x' = -x + 1, y' = x - y], x(0) = 0, y(0) = 0)"),
+        "x(t) = -exp(-t) + 1, y(t) = -t · exp(-t) - exp(-t) + 1"
+    );
+    // Nonlinear terms and forcing that depends on the unknowns are still refused.
+    assert!(
+        UraeSession::new()
+            .execute_line("dsolve([x' = x*y, y' = y])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("dsolve([x' = x + a, y' = y])")
+            .is_error
     );
 }

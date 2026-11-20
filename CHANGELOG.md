@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Forced linear systems of ODEs: `dsolve([x' = x + 1, y' = y])`, `dsolve([x' = y, y' = -x + sin(2*t)], x(0) = 0, y(0) = 0)`. The forcing term may be a constant, a power of t, an exponential, a sine or a cosine.
 - `amortization(principal, annual rate, years[, rows])`: the monthly payment and a schedule of interest, principal repaid and balance, to the cent.
 
 ## [0.7.0] - 2026-11-20

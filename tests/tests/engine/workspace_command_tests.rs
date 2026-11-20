@@ -8006,3 +8006,84 @@ fn transportation_costs_match_exhaustive_integer_shipments() {
             .is_error
     );
 }
+
+#[test]
+fn min_cost_flow_matches_exhaustive_integer_flows() {
+    let mut state = 0x5151_6262_7373_8484u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    for round in 0..30 {
+        let n = 4usize;
+        // Random arcs among 4 nodes with capacities 1..3 and costs 0..6; the demand is one source n0 to one sink n3.
+        let mut arcs: Vec<(usize, usize, i64, i64)> = Vec::new();
+        for _ in 0..(5 + round % 2) {
+            let (a, b) = (next(n as u64) as usize, next(n as u64) as usize);
+            if a != b {
+                arcs.push((a, b, 1 + next(3) as i64, next(7) as i64));
+            }
+        }
+        // A guaranteed path 0 -> 1 -> 3 keeps the instance feasible for one unit.
+        arcs.push((0, 1, 2, 3));
+        arcs.push((1, 3, 2, 2));
+        let amount = 1 + (round % 2) as i64;
+        // Exhaustive search over every integer flow within the capacities.
+        let mut best = i64::MAX;
+        let total: usize = arcs.iter().map(|a| (a.2 + 1) as usize).product();
+        for code in 0..total {
+            let mut rest = code;
+            let mut balance = [0i64; 4];
+            let mut cost = 0;
+            for (a, b, cap, c) in &arcs {
+                let f = (rest % (*cap as usize + 1)) as i64;
+                rest /= *cap as usize + 1;
+                balance[*a] += f;
+                balance[*b] -= f;
+                cost += f * c;
+            }
+            if balance == [amount, 0, 0, -amount] {
+                best = best.min(cost);
+            }
+        }
+        let text = format!(
+            "[{}]",
+            arcs.iter()
+                .map(|(a, b, cap, c)| format!("[n{a},n{b},{cap},{c}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let out = run(&format!(
+            "min_cost_flow({text}, [[n0,{amount}],[n3,{}]])",
+            -amount
+        ));
+        let reported: i64 = out
+            .split("minimum cost ")
+            .nth(1)
+            .unwrap()
+            .split(':')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(reported, best, "{text}, amount {amount}: {out}");
+    }
+    // Capacities too small for the demand, and unbalanced demands.
+    assert!(
+        UraeSession::new()
+            .execute_line("min_cost_flow([[a,b,1,1]], [[a,2],[b,-2]])")
+            .is_error
+    );
+    assert!(
+        UraeSession::new()
+            .execute_line("min_cost_flow([[a,b,1,1]], [[a,2],[b,-1]])")
+            .is_error
+    );
+    // One unit along the cheaper of two parallel routes.
+    assert_eq!(
+        run("min_cost_flow([[s,t,1,5],[s,m,1,1],[m,t,1,2]], [[s,1],[t,-1]])"),
+        "minimum cost 3: 1 on s->m, 1 on m->t"
+    );
+}

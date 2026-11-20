@@ -55,6 +55,43 @@ impl SymbolSessionMeta {
     }
 }
 
+/// A command hook: `Some(result)` when the line is one of its commands, `None` to pass it on.
+type CommandHook = fn(&mut UraeSession, &str) -> Option<Result<String, String>>;
+
+/// The command hooks tried on every line, in this order, before the general parser: the order is part of the behaviour
+/// (the first hook that recognises the line wins), so a new hook goes where it cannot shadow an older one. A hook returns
+/// `None` quickly for lines that are not its commands.
+const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
+    (
+        "list utilities (sum, cumsum, sort, linspace, ...)",
+        crate::list_utils::run,
+    ),
+    (
+        "binomial equations (solve(x^8 = 1))",
+        crate::binomial_roots::run,
+    ),
+    (
+        "graphs (spanning_trees, chromatic_polynomial, ...)",
+        |_, line| crate::graph_commands::run(line),
+    ),
+    (
+        "propositional logic (truth_table, tautology, ...)",
+        |_, line| crate::logic_commands::run(line),
+    ),
+    (
+        "complex numbers, transforms, units, rewrites (arg, fft, residue, subs, round, ...)",
+        crate::complex_funcs::run,
+    ),
+    (
+        "fixed-step ODE methods (rk4, euler_method, ...)",
+        crate::ode_numeric::run,
+    ),
+    (
+        "stationary points (critical_points, extrema)",
+        crate::stationary::run,
+    ),
+];
+
 /// Centralized stateful execution engine session for URAE.
 #[derive(Debug)]
 pub struct UraeSession {
@@ -645,60 +682,14 @@ impl UraeSession {
             return result;
         }
 
-        // `sum([1,2,3])`, `cumsum`, `sort`, `len`, `unique`, `linspace`, `moving_average`, ...: exact list utilities.
-        if let Some(outcome) = crate::list_utils::run(self, trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `solve(x^8 = 1)`, `roots(x^6 - 64)`: exact roots of a binomial equation.
-        if let Some(outcome) = crate::binomial_roots::run(self, trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `spanning_trees(K4)`, `chromatic_polynomial(C5)`, `shortest_path(G, a, b)`: finite graphs.
-        if let Some(outcome) = crate::graph_commands::run(trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `truth_table(F)`, `tautology(F)`, `satisfiable(F)`, `equivalent(F, G)`: propositional logic.
-        if let Some(outcome) = crate::logic_commands::run(trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `arg`, `modulus`, `polar`, `atan2`, `convolve`, `dft`, `fft`.
-        if let Some(outcome) = crate::complex_funcs::run(self, trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `rk4`, `euler_method`: fixed-step numerical ODE solutions.
-        if let Some(outcome) = crate::ode_numeric::run(self, trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
-        }
-
-        // `critical_points(f)` / `extrema(f)`: stationary points and their kind.
-        if let Some(outcome) = crate::stationary::run(self, trimmed) {
-            return match outcome {
-                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
-                Err(e) => OperationResult::error(e),
-            };
+        // Command hooks on the raw line, in the order of `COMMAND_HOOKS`: the first that recognises the line answers it.
+        for (_, hook) in COMMAND_HOOKS {
+            if let Some(outcome) = hook(self, trimmed) {
+                return match outcome {
+                    Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                    Err(e) => OperationResult::error(e),
+                };
+            }
         }
 
         // `maximize 3x + 2y subject to x + y <= 4, ...`: exact linear programming.

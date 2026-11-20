@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: workspace commands `who` (also `list variables`), `show a`, `clear x y`, `delete a`, `reset`, and `%` for the previous result (`% + 1`); `reset` used to echo and not reset.
 - Fixed: matrix variables. `A = [[1,2],[3,4]]` stored nothing, so `A*A`, `det(A)`, `A^-1` and `A*v` failed; matrices and vectors can now be assigned to names and reused (`B = A*A`, `C = inverse(A)`).
 - Added: exact list utilities `sum`, `cumsum`, `cumprod`, `diff([...])`, `sort`, `reverse`, `len`, `unique`, `count`, `argmax`, `argmin`, `min([...])`, `range(n)`, `linspace`, `arange`, `sum_squares`, `geometric_mean`, `harmonic_mean`, `rms`, `weighted_mean`, `moving_average`, `rank_data`, `histogram`. `range(5)` is now `[0, 1, 2, 3, 4]` (it printed the statistical range, 0).
 - Fixed: `solve(x^8 = 1)` left `RootOf` entries and `solve(x^6 = 1)` printed nested radicals; binomial equations `a x^n + b = 0` now give exact roots for n = 3, 4, 6, 8, 12, 24 (and 3, 4, 6, 12 for a negative right-hand side), for example `1/2 · i · √(3) + 1/2` for `x^6 = 1`.

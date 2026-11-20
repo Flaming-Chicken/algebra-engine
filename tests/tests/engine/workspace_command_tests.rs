@@ -3375,3 +3375,56 @@ fn matrix_variables_keep_their_value_across_lines() {
     session.execute_line("x = 3");
     assert_eq!(session.execute_line("x + 1").output_text, "4");
 }
+
+#[test]
+fn workspace_commands_list_show_clear_and_reset() {
+    let mut s = UraeSession::new();
+    let mut say = |q: &str| -> String {
+        let r = s.execute_line(q);
+        assert!(!r.is_error, "{q}: {}", r.output_text);
+        r.output_text
+    };
+    assert_eq!(say("who"), "No variables defined.");
+    say("a = 5");
+    say("b = a^2 + 1");
+    say("p = (x+1)^2");
+    say("f(x) = x^2");
+    say("A = [[1,2],[3,4]]");
+    // who lists every kind of name, sorted: scalars, aliases, functions, matrices.
+    let listing = say("who");
+    let names: Vec<&str> = listing
+        .lines()
+        .map(|l| l.split(['=', '(']).next().unwrap().trim())
+        .collect();
+    assert_eq!(names, ["A", "a", "b", "f", "p"], "{listing}");
+    assert!(
+        listing.contains("A = [[1,2],[3,4]]")
+            && listing.contains("b = 26")
+            && listing.contains("f(x) = x^2"),
+        "{listing}"
+    );
+    assert_eq!(say("vars"), say("vars")); // the older command still answers
+    // show prints one name; an unknown name is not a command.
+    assert_eq!(say("show a"), "a = 5");
+    assert_eq!(say("show A"), "A = [[1,2],[3,4]]");
+    assert_eq!(say("show f"), "f(x) = x^2");
+    // clear / delete remove names of every kind and report the ones that were not defined.
+    assert_eq!(say("clear a"), "cleared a");
+    assert_eq!(say("delete p, f"), "cleared p, f");
+    assert_eq!(say("clear nothing"), "nothing not defined");
+    assert_eq!(say("clear A b"), "cleared A, b");
+    assert_eq!(say("who"), "No variables defined.");
+    // After clearing, the name is a plain symbol again.
+    assert_eq!(say("a + 1"), "a + 1");
+    // % is the previous result when it stands where an operand should; 17 % 5 is still a remainder.
+    assert_eq!(say("7"), "7");
+    assert_eq!(say("% + 1"), "8");
+    assert_eq!(say("%"), "8");
+    assert_eq!(say("% * 2"), "16");
+    assert_eq!(say("17 % 5"), "2");
+    // reset forgets everything.
+    say("c = 3");
+    assert_eq!(say("reset"), "Workspace reset.");
+    assert_eq!(say("who"), "No variables defined.");
+    assert_eq!(say("c + 1"), "c + 1");
+}

@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- More tests: a trailing `greater` / `less` selects a one-sided alternative; `proportion_test(x, n, p0)`, `chi2_test(observed, expected)`, `chi2_test(table)` and `anova(a, b, c)`.
 - Statistical inference on data lists: `confidence_interval(data[, level])`, `t_test(data, mu)`, `t_test(a, b)` (Welch), `paired_t_test(a, b)`, `z_test(data, mu, sigma)`. Exact mean and variance, two-sided p-values.
 - Fixed: a rational beyond 64 bits as a power base or divisor printed without parentheses (`(a/b)^x` as `a/b^x`, a different expression) and gave a wrong value tail; such numbers are no longer turned into symbols by the simplifier.
 - Fixed: separable first-order equations written with a quotient (`y' = 1/y^2`, `y' = 1/(y^2+1)`, `y' = (x^2+1)/(y^2+1)`, `y' = (1+y^2)*x`) printed only a classification; they are solved. The simplifier folds `(b^m)^n` for an integer `n`, `1/b^(-k)` and `(a/b)^(-k)`.

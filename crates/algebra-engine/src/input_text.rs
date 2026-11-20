@@ -648,7 +648,17 @@ pub fn english(input: &str) -> Option<String> {
 
 /// The rewritten input, or `None` if there is nothing to rewrite.
 pub fn normalise(input: &str) -> Option<String> {
-    let trimmed = input.trim();
+    let original = input.trim();
+    if let Some(short) = shorthand(original) {
+        return Some(short);
+    }
+    // Unicode operators become their LaTeX spellings and take the LaTeX route.
+    let mapped = original
+        .replace('∫', "\\int ")
+        .replace('∑', "\\sum")
+        .replace('∏', "\\prod")
+        .replace('∞', "\\infty ");
+    let trimmed = mapped.trim();
     if trimmed.contains('\\') {
         let converted = convert(trimmed);
         return (converted != trimmed).then_some(converted);
@@ -731,4 +741,137 @@ fn split_scope(body: &str) -> (String, String) {
         }
     }
     (body.to_string(), String::new())
+}
+
+// ------------------------------------------------------------------------------------------------------------
+// Shorthand a user types without brackets: `d/dx x^3`, `d^2/dx^2 sin(x)`, `lim x->0 sin(x)/x`, `sqrt 16`, `sin x`.
+// ------------------------------------------------------------------------------------------------------------
+
+fn digits_exponent(chars: &[char], i: &mut usize) -> Option<u32> {
+    match chars.get(*i) {
+        Some('²') => {
+            *i += 1;
+            Some(2)
+        }
+        Some('³') => {
+            *i += 1;
+            Some(3)
+        }
+        Some('^') => {
+            let start = *i + 1;
+            let mut j = start;
+            while chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+                j += 1;
+            }
+            if j == start {
+                return None;
+            }
+            let n: String = chars[start..j].iter().collect();
+            *i = j;
+            n.parse().ok()
+        }
+        _ => Some(1),
+    }
+}
+
+/// `d/dx f`, `d/dx(f)`, `d^2/dx^2 f`, `∂/∂x f` as `diff(f, x, n)`.
+fn derivative_shorthand(s: &str) -> Option<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let is_d = |c: char| c == 'd' || c == '∂';
+    let mut i = 0;
+    if !is_d(*chars.first()?) {
+        return None;
+    }
+    i += 1;
+    let order = digits_exponent(&chars, &mut i)?;
+    if chars.get(i) != Some(&'/') {
+        return None;
+    }
+    i += 1;
+    if !is_d(*chars.get(i)?) {
+        return None;
+    }
+    i += 1;
+    let variable = *chars.get(i)?;
+    if !variable.is_alphabetic() {
+        return None;
+    }
+    i += 1;
+    let denominator_order = digits_exponent(&chars, &mut i)?;
+    if denominator_order != order {
+        return None;
+    }
+    let rest: String = chars[i..].iter().collect();
+    let rest = rest.trim();
+    if rest.is_empty()
+        || rest.starts_with('=')
+        || !(chars[i..]
+            .first()
+            .is_some_and(|c| c.is_whitespace() || *c == '('))
+    {
+        return None;
+    }
+    Some(format!("diff({rest}, {variable}, {order})"))
+}
+
+/// `lim x->a f` and `limit x -> a f` as `limit(f, x, a)` (a two-sided limit).
+fn limit_shorthand(s: &str) -> Option<String> {
+    let rest = s.strip_prefix("limit").or_else(|| s.strip_prefix("lim"))?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let arrow = rest
+        .find("->")
+        .map(|at| (at, 2))
+        .or_else(|| rest.find('→').map(|at| (at, '→'.len_utf8())))?;
+    let variable = rest[..arrow.0].trim();
+    if variable.is_empty() || !variable.chars().all(|c| c.is_alphabetic() || c == '_') {
+        return None;
+    }
+    let after = rest[arrow.0 + arrow.1..].trim_start();
+    let end = after.find(char::is_whitespace)?;
+    let (target, function) = (&after[..end], after[end..].trim());
+    if function.is_empty() || target.ends_with('+') || target.ends_with('-') {
+        return None;
+    }
+    let target = if target == "inf" || target == "infinity" || target == "∞" {
+        "oo"
+    } else {
+        target
+    };
+    Some(format!("limit({function}, {variable}, {target})"))
+}
+
+/// `sqrt 16`, `sin x`: a known function followed by a single bare atom.
+fn function_space_shorthand(s: &str) -> Option<String> {
+    const NAMES: [&str; 19] = [
+        "sqrt", "sin", "cos", "tan", "sec", "csc", "cot", "asin", "acos", "atan", "sinh", "cosh",
+        "tanh", "ln", "exp", "abs", "log", "floor", "ceil",
+    ];
+    let (name, atom) = s.split_once(' ')?;
+    let atom = atom.trim();
+    if NAMES.contains(&name)
+        && !atom.is_empty()
+        && atom
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+    {
+        return Some(format!("{name}({atom})"));
+    }
+    None
+}
+
+/// Brackets-free calculus shorthand and a few spellings, or `None` when the input is not one of them.
+pub fn shorthand(input: &str) -> Option<String> {
+    let t = input.trim();
+    if let Some(rest) = t.strip_prefix("derivative(") {
+        return Some(format!("diff({rest}"));
+    }
+    if let Some(rest) = t.strip_prefix("nth_root(") {
+        return Some(format!("root({rest}"));
+    }
+    derivative_shorthand(t)
+        .or_else(|| limit_shorthand(t))
+        .or_else(|| function_space_shorthand(t))
 }

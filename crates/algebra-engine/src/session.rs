@@ -380,6 +380,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `maximize 3x + 2y subject to x + y <= 4, ...`: exact linear programming.
+        if let Some(outcome) = crate::simplex_exact::solve_text(&self.graph, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // LaTeX (an integral written with a backslash int, a backslash frac derivative) and plain English (`what is 2 plus 3`) are rewritten first.
         if let Some(plain) = crate::input_text::normalise(trimmed)
             && plain != trimmed

@@ -178,6 +178,38 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
     match name.as_str() {
         "arg" | "phase" | "argument" | "modulus" | "polar" | "atan2" | "convolve" | "conv"
         | "dft" | "fft" | "ifft" | "idft" | "residue" | "poles" => {}
+        "diff" | "derivative" | "partial" | "mixed_partial" | "pdiff" => {
+            // `diff(f, x, y)`, `diff(f, x, 2, y)`: derivatives with respect to several variables, applied in order.
+            // One variable (with an optional order) is the ordinary derivative, handled elsewhere.
+            if args.len() < 2 {
+                return None;
+            }
+            let mut steps: Vec<(String, u32)> = Vec::new();
+            for token in &args[1..] {
+                let token = token.trim();
+                if let Ok(order) = token.parse::<u32>() {
+                    steps.last_mut()?.1 = order;
+                } else if !token.is_empty()
+                    && token.chars().all(|c| c.is_alphanumeric() || c == '_')
+                {
+                    steps.push((token.to_string(), 1));
+                } else {
+                    return None;
+                }
+            }
+            if steps.len() < 2 && matches!(name.as_str(), "diff" | "derivative") {
+                return None;
+            }
+            let mut expression = args[0].clone();
+            for (variable, order) in steps {
+                expression =
+                    match session.eval(&format!("diff(({expression}), {variable}, {order})")) {
+                        Ok(next) => next,
+                        Err(e) => return Some(Err(e)),
+                    };
+            }
+            return Some(Ok(expression));
+        }
         "subs" | "substitute" | "replace" | "evaluate" | "eval" => {
             // `subs(f, x, 3)` or `subs(f, x = 3, y = 4)`: replace whole-word variables, then evaluate.
             if args.len() < 2 {

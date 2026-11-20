@@ -76,7 +76,10 @@ pub fn run(session: &mut UraeSession, input: &str) -> Option<Result<String, Stri
     }
     let curvature = session.eval(&format!("diff(({derivative}), dydx)")).ok()?;
     if curvature.trim() != "0" {
-        return clairaut(session, &equation, &name);
+        return match clairaut(session, &equation, &name) {
+            Some(solution) => Some(solution),
+            None => dalembert(session, &equation, &name),
+        };
     }
     let n = derivative;
     let symbols = symbols_of(session, &format!("({m}) + ({n})"))?;
@@ -321,4 +324,58 @@ fn riccati(
         }
     }
     None
+}
+
+/// d'Alembert (Lagrange) equations `y = x F(y') + G(y')` with `F(p) != p`: differentiating and taking `p` as the independent
+/// variable gives the linear `dx/dp = (F'(p) x + G'(p)) / (p - F(p))`, so the solution is parametric in `p`.
+fn dalembert(session: &mut UraeSession, equation: &str, y: &str) -> Option<Result<String, String>> {
+    let k = session.eval(&format!("diff(({equation}), {y})")).ok()?;
+    let k = k.trim().to_string();
+    if k == "0" || !symbols_of(session, &k)?.is_empty() {
+        return None;
+    }
+    let symbols = symbols_of(session, equation)?;
+    let independent: Vec<&String> = symbols.iter().filter(|s| *s != y && *s != "dydx").collect();
+    let [x] = independent.as_slice() else {
+        return None;
+    };
+    let x = (*x).clone();
+    // E / k = y - x F(p) - G(p).
+    let f = session
+        .eval(&format!("simplify(-diff(({equation})/({k}), {x}))"))
+        .ok()?;
+    let used = symbols_of(session, &f)?;
+    if used.contains(&x) || used.contains(y) {
+        return None;
+    }
+    let g = session
+        .eval(&format!("simplify({y} - {x}*({f}) - ({equation})/({k}))"))
+        .ok()?;
+    let used = symbols_of(session, &g)?;
+    if used.contains(&x) || used.contains(y) {
+        return None;
+    }
+    let gap = session.eval(&format!("simplify(dydx - ({f}))")).ok()?;
+    if gap.trim() == "0" {
+        return None;
+    }
+    let a = session
+        .eval(&format!("simplify(diff(({f}), dydx)/({gap}))"))
+        .ok()?;
+    let b = session
+        .eval(&format!("simplify(diff(({g}), dydx)/({gap}))"))
+        .ok()?;
+    let a = substitute(session, &a, "dydx", "x")?;
+    let b = substitute(session, &b, "dydx", "x")?;
+    let linear = session
+        .eval(&format!("dsolve(y' = ({a})*y + ({b}))"))
+        .ok()?;
+    let rhs = linear.strip_prefix("y(x) = ")?;
+    let x_of_p = substitute(session, rhs, "x", "dydx")?;
+    let y_of_p = session
+        .eval(&format!("simplify(({x_of_p})*({f}) + ({g}))"))
+        .ok()?;
+    Some(Ok(format!(
+        "{x} = {x_of_p}, {y} = {y_of_p}  (d'Alembert equation; parameter dydx)"
+    )))
 }

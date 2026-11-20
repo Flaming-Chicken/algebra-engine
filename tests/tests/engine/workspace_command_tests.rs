@@ -7581,6 +7581,68 @@ fn planarity_on_six_vertices_matches_oeis_a066537() {
 }
 
 #[test]
+fn dalembert_equations_give_a_parametric_solution_with_dy_equal_p_dx() {
+    type Fg = fn(f64) -> f64;
+    // y = x F(p) + G(p) for the listed (F, G).
+    let cases: [(&str, Fg, Fg); 3] = [
+        ("y = 2*x*y' + (y')^2", |p| 2.0 * p, |p| p * p),
+        ("y = x*(y')^2 + y'", |p| p * p, |p| p),
+        ("y = -x*y' + (y')^3", |p| -p, |p| p.powi(3)),
+    ];
+    for (equation, f, g) in cases {
+        let out = run(&format!("dsolve({equation})"));
+        assert!(out.contains("d'Alembert"), "{equation}: {out}");
+        let x_text = out
+            .strip_prefix("x = ")
+            .unwrap()
+            .split(", y = ")
+            .next()
+            .unwrap()
+            .to_string();
+        let y_text = out
+            .split(", y = ")
+            .nth(1)
+            .unwrap()
+            .split("  (d'Alembert")
+            .next()
+            .unwrap()
+            .to_string();
+        let value = |text: &str, p: f64, c: f64| -> f64 {
+            run(&format!(
+                "evalf({})",
+                text.replace("C1", &format!("({c:?})"))
+                    .replace("dydx", &format!("({p:?})"))
+            ))
+            .trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("{text}"))
+        };
+        for c in [0.7, 3.1] {
+            for p in [2.3, 3.1, 4.7] {
+                let (x, y) = (value(&x_text, p, c), value(&y_text, p, c));
+                // On the solution y = x F(p) + G(p) ...
+                assert!(
+                    (y - (x * f(p) + g(p))).abs() < 1e-8 * (1.0 + y.abs()),
+                    "{equation}: p = {p}, c = {c}: y = {y}, x F + G = {}: {out}",
+                    x * f(p) + g(p)
+                );
+                // ... and the curve (x(p), y(p)) has slope dy/dx = p.
+                let h = 1e-5;
+                let dx = (value(&x_text, p + h, c) - value(&x_text, p - h, c)) / (2.0 * h);
+                let dy = (value(&y_text, p + h, c) - value(&y_text, p - h, c)) / (2.0 * h);
+                assert!(
+                    (dy - p * dx).abs() < 1e-4 * (1.0 + dy.abs()),
+                    "{equation}: p = {p}, c = {c}: dy = {dy}, p dx = {}: {out}",
+                    p * dx
+                );
+            }
+        }
+    }
+    // F(p) = p is Clairaut's equation, which keeps its own answer.
+    assert!(run("dsolve(y = x*y' + (y')^2)").contains("Clairaut"));
+}
+
+#[test]
 fn assignment_costs_match_exhaustive_search() {
     let mut state = 0x0BAD_C0DE_1234_5678u64;
     let mut next = move |m: u64| {

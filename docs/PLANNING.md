@@ -105,8 +105,7 @@ spellings a new user types first. The open list, by field:
   inequalities with a nonlinear objective (KKT), integer and quadratic programs, `extrema` of several variables.
 - **ODEs, transforms and recurrences.** Done: first-order separable, linear, Bernoulli, homogeneous, exact and
   integrating-factor equations; constant-coefficient and Euler second-order equations; homogeneous and forced linear
-  systems by the inverse Laplace transform; Clairaut equations (lines and singular envelope); Riccati equations with a particular solution `c x^k` (`R96`). Missing: other Riccati particular solutions and
-  d'Alembert equations, other integrating factors, an
+  systems by the inverse Laplace transform; Clairaut equations (lines and singular envelope); Riccati equations with a particular solution `c x^k` (`R96`); d'Alembert equations (`R105`). Missing: other Riccati particular solutions, other integrating factors, an
   explicit `tan` for `atan(y) = ...`, nonlinear systems, time-varying coefficients, forcing with a non-rational transform,
   irreducible cubic factors in the inverse Laplace transform, the inverse Fourier transform, repeated complex poles and left-sided sequences in the inverse Z transform (real and simple complex poles are done, `R99`), Z-transform of
   `sin`/`cos`, boundary value problems, systems for `rk4`, adaptive steps, variable-coefficient and nonlinear

@@ -4373,3 +4373,66 @@ fn separable_equations_in_quotient_form_are_solved() {
     // (x^2)^(1/2) is not x: a fractional outer exponent is left alone.
     assert_eq!(run("(x^2)^(1/2)"), "(x^2)^(1/2)");
 }
+
+#[test]
+fn rationals_beyond_64_bits_stay_numbers_in_powers_and_quotients() {
+    // The e-graph carried such numbers as symbols named by their text: (a/b)^x came back as the symbol `a/b` to the power x,
+    // printed `a/b^x`, and the value tail computed from that text was wrong.
+    let big = "1263006600030000066000600000000003/200000000000000000000000000000000";
+    assert_eq!(run(&format!("({big})^x")), format!("({big})^x"));
+    assert_eq!(
+        run(&format!("({big})^(1/3)")).split(" ≈ ").next().unwrap(),
+        format!("({big})^(1/3)")
+    );
+    let (a, b) = (
+        1263006600030000066000600000000003.0f64,
+        200000000000000000000000000000000.0f64,
+    );
+    let tail: f64 = run(&format!("evalf(({big})^(1/3))"))
+        .rsplit(" ≈ ")
+        .next()
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(
+        (tail - (a / b).powf(1.0 / 3.0)).abs() < 1e-9 * tail,
+        "{tail}"
+    );
+    // The same through substitution, which is how the ODE checks found it.
+    let value: f64 = run("subs((3/2 · x^2 + 3 · C1)^(1/3), x = 1.1000100000000001, C1 = 1.5)")
+        .rsplit(" ≈ ")
+        .next()
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let x = 1.1000100000000001f64;
+    assert!(
+        (value - (1.5 * x * x + 4.5).powf(1.0 / 3.0)).abs() < 1e-9,
+        "{value}"
+    );
+    // Big integers and quotients of them keep their meaning too.
+    assert_eq!(
+        run("(2^100+1)/3^50"),
+        "1267650600228229401496703205377/717897987691852588770249"
+    );
+    for (n, d) in [
+        (
+            "1267650600228229401496703205377",
+            "717897987691852588770249",
+        ),
+        (
+            "340282366920938463463374607431768211457",
+            "18446744073709551629",
+        ),
+    ] {
+        let out = run(&format!("({n}/{d})^y"));
+        assert_eq!(out, format!("({n}/{d})^y"));
+        let denominator_out = run(&format!("x/({n}/{d})"));
+        assert!(
+            denominator_out.starts_with(&format!("{d}/{n}")),
+            "{denominator_out}"
+        );
+    }
+}

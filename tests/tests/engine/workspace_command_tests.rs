@@ -1789,3 +1789,122 @@ fn stationary_points_and_quadrature_rules_match_their_oracles() {
     assert!(run("newton_method(x^2 - 2, 1)").contains("1.41421356237309"));
     assert!(run("bisection(x^3 - x - 2, 1, 2)").contains("1.52137970680"));
 }
+
+#[test]
+fn complex_functions_and_transforms_match_their_definitions() {
+    // Parse "a", "bi", "a + bi", "a - bi" back into (re, im).
+    fn parse_complex(text: &str) -> (f64, f64) {
+        let t = text.trim();
+        if let Some(body) = t.strip_suffix('i') {
+            // Split at the last sign that is not the first character.
+            if let Some(at) = body
+                .rfind([' '])
+                .and_then(|_| body.rfind(" + ").or(body.rfind(" - ")))
+            {
+                let re: f64 = body[..at].trim().parse().unwrap();
+                let sign = if &body[at..at + 3] == " - " {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let im: f64 = body[at + 3..].trim().parse().unwrap();
+                return (re, sign * im);
+            }
+            let im: f64 = if body.is_empty() {
+                1.0
+            } else if body == "-" {
+                -1.0
+            } else {
+                body.parse().unwrap()
+            };
+            return (0.0, im);
+        }
+        (t.parse().unwrap(), 0.0)
+    }
+    fn parse_list(text: &str) -> Vec<(f64, f64)> {
+        text.trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(", ")
+            .map(parse_complex)
+            .collect()
+    }
+    // fft / dft against the defining sum X_k = sum_j x_j e^{-2 pi i jk/n}, for lengths 1..=9 (powers of two and not).
+    let mut state = 0xD1B5_4A32_D192_ED03u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % 19) as i64 - 9
+    };
+    for n in 1..=9usize {
+        let x: Vec<i64> = (0..n).map(|_| next()).collect();
+        let literal = format!(
+            "[{}]",
+            x.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        for name in ["fft", "dft"] {
+            let got = parse_list(&run(&format!("{name}({literal})")));
+            assert_eq!(got.len(), n);
+            for (k, g) in got.iter().enumerate() {
+                let (mut re, mut im) = (0.0f64, 0.0f64);
+                for (j, v) in x.iter().enumerate() {
+                    let a = -2.0 * std::f64::consts::PI * ((j * k) % n) as f64 / n as f64;
+                    re += *v as f64 * a.cos();
+                    im += *v as f64 * a.sin();
+                }
+                assert!(
+                    (g.0 - re).abs() < 1e-9 && (g.1 - im).abs() < 1e-9,
+                    "{name}{literal}[{k}]: {g:?} vs ({re}, {im})"
+                );
+            }
+        }
+        // Parseval: sum |X_k|^2 = n sum |x_j|^2; and the inverse recovers the input.
+        let spectrum = parse_list(&run(&format!("fft({literal})")));
+        let energy: f64 = spectrum.iter().map(|c| c.0 * c.0 + c.1 * c.1).sum();
+        let direct: f64 = x.iter().map(|v| (*v * *v) as f64).sum::<f64>() * n as f64;
+        assert!(
+            (energy - direct).abs() < 1e-6 * (1.0 + direct),
+            "Parseval {literal}"
+        );
+        let back = parse_list(&run(&format!("ifft(fft({literal}))")));
+        for (b, v) in back.iter().zip(&x) {
+            assert!(
+                (b.0 - *v as f64).abs() < 1e-9 && b.1.abs() < 1e-9,
+                "ifft(fft({literal}))"
+            );
+        }
+    }
+    // convolve is polynomial multiplication: (1 + 2x + 3x^2)(1 - x) has coefficients [1, 1, 1, -3].
+    assert_eq!(run("convolve([1, 2, 3], [1, -1])"), "[1, 1, 1, -3]");
+    assert_eq!(run("convolve([2, 0, 1], [3])"), "[6, 0, 3]");
+    // arg, modulus and polar.
+    for (z, expected) in [
+        ("1", "0"),
+        ("i", "π/2"),
+        ("-1", "π"),
+        ("-i", "-π/2"),
+        ("1+i", "π/4"),
+        ("-1+i", "3*π/4"),
+        ("-1-i", "-3*π/4"),
+        ("1-i", "-π/4"),
+        ("sqrt(3)+i", "π/6"),
+        ("1+sqrt(3)*i", "π/3"),
+    ] {
+        assert_eq!(run(&format!("arg({z})")), expected, "arg({z})");
+    }
+    let numeric: f64 = run("arg(3+4i)").parse().unwrap();
+    assert!((numeric - 4.0f64.atan2(3.0)).abs() < 1e-12);
+    for (z, r) in [
+        ("3+4i", "5"),
+        ("5+12i", "13"),
+        ("-8+15i", "17"),
+        ("1+i", "√(2)"),
+    ] {
+        assert_eq!(run(&format!("modulus({z})")), r, "modulus({z})");
+    }
+    assert_eq!(run("polar(1+i)"), "√(2)·e^(i·π/4)");
+    assert_eq!(run("atan2(1, -1)"), "3*π/4");
+}

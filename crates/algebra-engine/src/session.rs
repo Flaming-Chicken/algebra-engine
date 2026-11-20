@@ -380,6 +380,14 @@ impl UraeSession {
 
         self.history.push(trimmed.to_string());
 
+        // `arg`, `modulus`, `polar`, `atan2`, `convolve`, `dft`, `fft`.
+        if let Some(outcome) = crate::complex_funcs::run(self, trimmed) {
+            return match outcome {
+                Ok(text) => OperationResult::success(text.clone(), text.clone(), text),
+                Err(e) => OperationResult::error(e),
+            };
+        }
+
         // `critical_points(f)` / `extrema(f)`: stationary points and their kind.
         if let Some(outcome) = crate::stationary::run(self, trimmed) {
             return match outcome {

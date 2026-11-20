@@ -326,13 +326,36 @@ fn discrete_log(g: u64, h: u64, p: u64) -> Option<u64> {
 /// Evaluate `name(args)` exactly, or `None` if the function is not one of these or the arguments are out of range.
 pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
     let integer_result = |n: BigInt| Some(Q::from_integer(n));
-    match (name, args) {
+    let lowered = name.to_ascii_lowercase();
+    match (lowered.as_str(), args) {
         ("fibonacci" | "fib", [n]) => integer_result(fibonacci_pair(as_u64(n, 200_000)?).0),
         ("lucas", [n]) => {
             let n = as_u64(n, 200_000)?;
             let (a, b) = fibonacci_pair(n);
             // L(n) = 2 F(n+1) - F(n)
             integer_result(b * 2 - a)
+        }
+        ("tribonacci", [n]) => {
+            let n = as_u64(n, 100_000)?;
+            let (mut a, mut b, mut c) = (BigInt::zero(), BigInt::zero(), BigInt::one());
+            for _ in 0..n {
+                (a, b, c) = (b.clone(), c.clone(), &a + &b + &c);
+            }
+            integer_result(a)
+        }
+        ("compositions", [n]) => {
+            let n = as_u64(n, 100_000)?;
+            if n == 0 {
+                return integer_result(BigInt::one());
+            }
+            integer_result(BigInt::one() << (n - 1) as usize)
+        }
+        ("compositions", [n, k]) => {
+            let (n, k) = (as_u64(n, 100_000)?, as_u64(k, 100_000)?);
+            if k == 0 || k > n {
+                return Some(Q::from_integer(BigInt::from((n == 0 && k == 0) as u8)));
+            }
+            integer_result(binomial(n - 1, k - 1))
         }
         ("catalan", [n]) => {
             let n = as_u64(n, 20_000)?;
@@ -343,14 +366,14 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
         ("stirling2", [n, k]) => integer_result(stirling2(as_u64(n, 600)?, as_u64(k, 600)?)),
         ("stirling1", [n, k]) => integer_result(stirling1(as_u64(n, 600)?, as_u64(k, 600)?)),
         ("derangements" | "subfactorial", [n]) => integer_result(derangements(as_u64(n, 20_000)?)),
-        ("permutations" | "perm", [n, k]) => {
+        ("permutations" | "perm" | "npr", [n, k]) => {
             let (n, k) = (as_u64(n, 100_000)?, as_u64(k, 100_000)?);
             if k > n {
                 return Some(Q::zero());
             }
             integer_result((n - k + 1..=n).fold(BigInt::one(), |p, v| p * v))
         }
-        ("combinations" | "choose" | "binomial", [n, k]) => {
+        ("combinations" | "choose" | "binomial" | "ncr", [n, k]) => {
             let (n, k) = (as_u64(n, 200_000)?, as_u64(k, 200_000)?);
             integer_result(binomial(n, k))
         }
@@ -368,7 +391,7 @@ pub fn evaluate(name: &str, args: &[Q]) -> Option<Q> {
             let n = as_u64(n, 20_000)?;
             Some((1..=n).fold(Q::zero(), |s, k| s + Q::new(BigInt::one(), int(k))))
         }
-        ("primepi", [n]) => {
+        ("primepi" | "prime_pi", [n]) => {
             let n = as_u64(n, 20_000_000)? as usize;
             Some(Q::from_integer(BigInt::from(
                 sieve(n).iter().filter(|c| !**c).count(),

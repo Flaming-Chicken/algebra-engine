@@ -2064,3 +2064,57 @@ fn constrained_extrema_match_closed_forms() {
     let top: f64 = out.rsplit("f = ").next().unwrap().trim().parse().unwrap();
     assert!((top - 4.0 * (-2.0f64).exp()).abs() < 1e-9, "{out}");
 }
+
+#[test]
+fn combinatorial_spellings_match_enumeration() {
+    let int = |q: &str| -> i64 { run(q).parse().unwrap() };
+    // Compositions of n into k positive parts, counted by brute force over all parts lists.
+    fn count(n: i64, k: i64) -> i64 {
+        if k == 0 {
+            return (n == 0) as i64;
+        }
+        (1..=n).map(|first| count(n - first, k - 1)).sum()
+    }
+    for n in 1..=9i64 {
+        let total: i64 = (1..=n).map(|k| count(n, k)).sum();
+        assert_eq!(
+            int(&format!("compositions({n})")),
+            total,
+            "compositions({n})"
+        );
+        for k in 1..=n {
+            assert_eq!(
+                int(&format!("compositions({n}, {k})")),
+                count(n, k),
+                "compositions({n}, {k})"
+            );
+        }
+    }
+    // Tribonacci by its recurrence T(n) = T(n-1) + T(n-2) + T(n-3), T(0) = T(1) = 0, T(2) = 1.
+    let mut t = vec![0i64, 0, 1];
+    for n in 3..=30 {
+        t.push(t[n - 1] + t[n - 2] + t[n - 3]);
+    }
+    for (n, v) in t.iter().enumerate() {
+        assert_eq!(int(&format!("tribonacci({n})")), *v);
+    }
+    // nCr / nPr agree with choose / perm and with Pascal's rule; prime_pi with primepi.
+    for n in 1..=12i64 {
+        for k in 1..n {
+            assert_eq!(
+                int(&format!("nCr({n}, {k})")),
+                int(&format!("choose({n}, {k})"))
+            );
+            assert_eq!(
+                int(&format!("nCr({n}, {k})")),
+                int(&format!("nCr({}, {})", n - 1, k - 1)) + int(&format!("nCr({}, {k})", n - 1))
+            );
+            assert_eq!(
+                int(&format!("nPr({n}, {k})")),
+                int(&format!("nCr({n}, {k})")) * (1..=k).product::<i64>()
+            );
+        }
+    }
+    assert_eq!(int("prime_pi(100)"), 25);
+    assert_eq!(int("Fibonacci(10)"), 55);
+}

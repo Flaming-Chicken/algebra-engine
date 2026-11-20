@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added and fixed
 
+- Added: `nCr`, `nPr`, `prime_pi`, `tribonacci`, `compositions(n)` and `compositions(n, k)`; discrete function names are case-insensitive. They were echoed back unevaluated.
 - Added: constrained extrema by Lagrange multipliers (`maximize x*y subject to x + y = 10`, `minimize x^2 + y^2 subject to 3*x + 4*y = 10`), classified as local maximum or minimum; `extrema` and `critical_points` now work when the derivative cannot be factored exactly (`x^2*exp(-x)`).
 - Added: `rk4`, `euler_method`, `heun` and `midpoint_method` for `y' = f(x, y)` with a chosen number of steps.
 - Added: `residue(f, x, a)` (real or complex point; exact rationals when recognised), `poles(f)` with orders, and `abs` of a complex constant (`abs(1+i)` is `√(2)`).

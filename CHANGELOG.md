@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Sema
 
 ### Added
 
+- Weighted and directed graphs: `dijkstra`, `minimum_spanning_tree`, `max_flow` (with minimum cut), `topological_sort`, `strongly_connected_components`.
 - `dsolve` solves Clairaut equations `y = x y' + f(y')`: the family of lines and the singular envelope.
 - `mregress(X, y)` / `ols`: multiple linear regression with coefficient inference, R^2 and the F test.
 - `kendall(x, y)`: Kendall's tau-b with exact or tie-corrected normal p-value.

@@ -75,6 +75,10 @@ const COMMAND_HOOKS: &[(&str, CommandHook)] = &[
         |_, line| crate::graph_commands::run(line),
     ),
     (
+        "weighted and directed graphs (dijkstra, max_flow, mst, ...)",
+        |_, line| crate::weighted_graph::run(line),
+    ),
+    (
         "propositional logic (truth_table, tautology, ...)",
         |_, line| crate::logic_commands::run(line),
     ),

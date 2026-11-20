@@ -120,6 +120,7 @@ pub mod units;
 pub mod urscript_pose;
 pub mod vectorcalc;
 pub mod visualizer;
+pub mod weighted_graph;
 pub mod weyl_dmodules;
 pub mod workbench;
 pub mod zeilberger;

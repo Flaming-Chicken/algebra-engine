@@ -8087,3 +8087,99 @@ fn min_cost_flow_matches_exhaustive_integer_flows() {
         "minimum cost 3: 1 on s->m, 1 on m->t"
     );
 }
+
+#[test]
+fn maximum_weight_matching_matches_exhaustive_edge_subsets() {
+    let mut state = 0x9090_A0A0_B0B0_C0C0u64;
+    let mut next = move |m: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % m
+    };
+    for round in 0..40 {
+        let n = 4 + round % 4;
+        let mut edges: Vec<(usize, usize, i64)> = Vec::new();
+        for a in 0..n {
+            for b in a + 1..n {
+                if next(100) < 55 {
+                    edges.push((a, b, next(21) as i64 - 4));
+                }
+            }
+        }
+        if edges.is_empty() || edges.len() > 16 {
+            continue;
+        }
+        // Every set of pairwise disjoint edges.
+        let mut best = 0i64;
+        for mask in 0u32..1 << edges.len() {
+            let mut used = 0u32;
+            let mut total = 0;
+            let mut ok = true;
+            for (i, &(a, b, w)) in edges.iter().enumerate() {
+                if mask >> i & 1 == 1 {
+                    if used >> a & 1 == 1 || used >> b & 1 == 1 {
+                        ok = false;
+                        break;
+                    }
+                    used |= 1 << a | 1 << b;
+                    total += w;
+                }
+            }
+            if ok {
+                best = best.max(total);
+            }
+        }
+        let text = format!(
+            "[{}]",
+            edges
+                .iter()
+                .map(|(a, b, w)| format!("[v{a},v{b},{w}]"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let out = run(&format!("max_weight_matching({text})"));
+        let reported: i64 = out
+            .split("weight ")
+            .nth(1)
+            .unwrap()
+            .split(':')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(reported, best, "{text}: {out}");
+        // The reported pairs are disjoint edges of the graph and add up to the weight.
+        if !out.ends_with("no edges") {
+            let mut used = Vec::new();
+            let mut sum = 0i64;
+            for pair in out.split(": ").nth(1).unwrap().split(", ") {
+                let ends = pair.split(' ').next().unwrap();
+                let (a, b) = ends.split_once('-').unwrap();
+                let (a, b): (usize, usize) = (a[1..].parse().unwrap(), b[1..].parse().unwrap());
+                assert!(!used.contains(&a) && !used.contains(&b), "{out}");
+                used.extend([a, b]);
+                sum += edges
+                    .iter()
+                    .filter(|e| (e.0, e.1) == (a.min(b), a.max(b)))
+                    .map(|e| e.2)
+                    .max()
+                    .unwrap();
+            }
+            assert_eq!(sum, best, "{out}");
+        }
+    }
+    // A triangle has no perfect matching; the best single edge wins. Negative edges are never used.
+    assert_eq!(
+        run("max_weight_matching([[a,b,3],[b,c,5],[a,c,4]])"),
+        "weight 5: b-c (5)"
+    );
+    assert_eq!(run("max_weight_matching([[a,b,-3]])"), "weight 0: no edges");
+    assert_eq!(
+        run("max_weight_matching([[a,b,1],[c,d,1],[b,c,5]])")
+            .split(':')
+            .next()
+            .unwrap(),
+        "weight 5"
+    );
+}

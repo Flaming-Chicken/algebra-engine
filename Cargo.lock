@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "algebra-advanced"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "algebra-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "auto-promoters",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "algebra-engine"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "auto-promoters"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "bnum",
  "criterion",
@@ -893,9 +893,9 @@ dependencies = [
 
 [[package]]
 name = "candle-nn"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa10b6ccc365b33210ce404fbf45e60d3e0bdac1004463cf1052e6ee1c1739a"
+checksum = "437fabe77547c2447c7bdf3cc946e19db29a2832440176b419f77c80b0a9a05e"
 dependencies = [
  "candle-core",
  "half",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "cat-anytime"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -939,7 +939,7 @@ dependencies = [
 
 [[package]]
 name = "cat-bridge"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -954,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "cat-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "dashmap",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "cat-egraph"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "cat-lang"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "algebra-core",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "cat-numbers"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "cat-tangent"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "cat-core",
@@ -1924,7 +1924,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2886,7 +2886,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3427,7 +3427,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4337,7 +4337,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4687,7 +4687,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5049,7 +5049,7 @@ dependencies = [
 [[package]]
 name = "sml-lake"
 version = "0.2.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -5067,7 +5067,7 @@ dependencies = [
 [[package]]
 name = "sml-runtime"
 version = "0.2.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "ahash 0.8.12",
  "byteorder",
@@ -5099,7 +5099,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5126,7 +5126,7 @@ dependencies = [
 [[package]]
 name = "spodeian-cache"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "base64 0.22.1",
  "js-sys",
@@ -5143,7 +5143,7 @@ dependencies = [
 [[package]]
 name = "spodeian-export"
 version = "2.0.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "bson",
  "miniz_oxide 0.8.9",
@@ -5155,7 +5155,7 @@ dependencies = [
 [[package]]
 name = "spodeian-parallel"
 version = "1.0.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "rayon",
 ]
@@ -5163,7 +5163,7 @@ dependencies = [
 [[package]]
 name = "spodeian-telemetry"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -5177,7 +5177,7 @@ dependencies = [
 [[package]]
 name = "spodeian-tokens"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "serde",
  "serde_json",
@@ -5186,7 +5186,7 @@ dependencies = [
 [[package]]
 name = "spodeian-web-utils"
 version = "1.1.0"
-source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.0.0#45316eb60a9d821041abdbed8e10a0ecbcbf4db4"
+source = "git+https://github.com/Spodeian/spodeian-core?tag=v3.1.0#6704614ca800bf092216e9a49ff7b67aefd98c7e"
 dependencies = [
  "base64 0.22.1",
  "js-sys",
@@ -5309,7 +5309,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5768,7 +5768,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5818,7 +5818,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "urae"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "algebra-advanced",
  "algebra-core",
@@ -5831,7 +5831,7 @@ dependencies = [
 
 [[package]]
 name = "urae-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "algebra-advanced",
  "algebra-core",
@@ -5846,7 +5846,7 @@ dependencies = [
 
 [[package]]
 name = "urae-ffi"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "algebra-core",
  "algebra-engine",
@@ -5855,7 +5855,7 @@ dependencies = [
 
 [[package]]
 name = "urae-kernel"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5865,7 +5865,7 @@ dependencies = [
 
 [[package]]
 name = "urae-lsp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "mimalloc",
  "serde",
@@ -5876,7 +5876,7 @@ dependencies = [
 
 [[package]]
 name = "urae-notebook"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "android-activity",
  "base64 0.22.1",
@@ -5910,7 +5910,7 @@ dependencies = [
 
 [[package]]
 name = "urae-py"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5920,7 +5920,7 @@ dependencies = [
 
 [[package]]
 name = "urae-tests"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "ahash 0.8.12",
  "algebra-advanced",
@@ -5951,7 +5951,7 @@ dependencies = [
 
 [[package]]
 name = "urae-wasm"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "algebra-core",
  "algebra-engine",
@@ -6522,7 +6522,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7190,7 +7190,7 @@ dependencies = [
  "memchr",
  "nix",
  "typed-path",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

@@ -234,7 +234,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Determine wasm-bindgen Version from Cargo.lock
         id: wb
-        run: echo "version=$(grep -A 1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version =' | head -n 1 | cut -d '"' -f 2)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(tr -d '\r' < Cargo.lock | grep -A 1 '^name = "wasm-bindgen"$' | grep '^version =' | head -n 1 | cut -d '"' -f 2)" >> "$GITHUB_OUTPUT"
       - name: Cache wasm-bindgen-cli Binary
         id: cache-wb
         uses: actions/cache@v6
@@ -243,7 +243,10 @@ jobs:
           key: ${{ runner.os }}-wasm-bindgen-${{ steps.wb.outputs.version }}
       - name: Install wasm-bindgen-cli (matched to Cargo.lock)
         if: steps.cache-wb.outputs.cache-hit != 'true'
-        run: cargo install wasm-bindgen-cli --version "${{ steps.wb.outputs.version }}" --locked
+        run: |
+          if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "${{ steps.wb.outputs.version }}" ]; then
+            cargo install wasm-bindgen-cli --version "${{ steps.wb.outputs.version }}" --locked --force
+          fi
 
       - name: Determine Browser by Market Share (96% Chrome / 4% Firefox)
         id: select-browser

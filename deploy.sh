@@ -52,6 +52,14 @@ fi
 export PATH="$CARGO_HOME/bin:$HOME/.cargo/bin:/opt/buildhome/.cargo/bin:$PATH"
 mkdir -p "$CARGO_HOME/bin"
 
+SPODEIAN_GIT_TOKEN="${SPODEIAN_CORE_TOKEN:-${PRIVATE_READ_ACCESS:-${GH_PAT:-}}}"
+if [ -n "$SPODEIAN_GIT_TOKEN" ]; then
+    export CARGO_NET_GIT_FETCH_WITH_CLI=true
+    export GIT_CONFIG_COUNT=1
+    export GIT_CONFIG_KEY_0="url.https://x-access-token:${SPODEIAN_GIT_TOKEN}@github.com/.insteadOf"
+    export GIT_CONFIG_VALUE_0="https://github.com/"
+fi
+
 if [ -f "$CARGO_HOME/env" ]; then
     . "$CARGO_HOME/env"
 elif [ -f "$HOME/.cargo/env" ]; then
@@ -330,60 +338,23 @@ except ImportError:
         fi
     fi
 
-    # 8. Configure Cloudflare Deployment Mode (Static-Only vs Full-Stack Edge Worker)
+    # 8. Configure Cloudflare Workers Static Assets + Edge Worker deployment
     cp -f crates/urae-wasm/public/_headers "$DIST_DIR/_headers" 2>/dev/null || true
     cp -f crates/urae-wasm/public/_redirects "$DIST_DIR/_redirects" 2>/dev/null || true
-
-    if [ "$ENABLE_EDGE_API" = "true" ]; then
-        echo "Configuring Cloudflare Pages Edge Worker (_worker.js & _routes.json)..."
-        # Adapt relative import paths for _worker.js when placed inside public/
-        sed -e 's|\./public/pkg/|\./pkg/|g' crates/urae-wasm/worker.js > "$DIST_DIR/_worker.js"
-
-        cat << 'EOF' > "$DIST_DIR/_routes.json"
-{
-  "version": 1,
-  "include": [
-    "/api/*"
-  ],
-  "exclude": [
-    "/pkg/*",
-    "/index.html",
-    "/favicon.ico",
-    "/manifest.json",
-    "/sw.js",
-    "/env.js",
-    "/*.wasm",
-    "/*.js",
-    "/*.css"
-  ]
-}
-EOF
-        echo "Edge Worker API enabled for /api/* routes."
-    else
-        # Ensure pure static site deployment: remove any worker artifacts
-        rm -f "$DIST_DIR/_worker.js" "$DIST_DIR/_routes.json"
-        echo "Pure static site deployment confirmed (Zero serverless worker overhead)."
-    fi
+    # Ensure Worker entrypoints and legacy Pages routing manifests are never exposed as static assets
+    rm -f "$DIST_DIR/_worker.js" "$DIST_DIR/_routes.json"
 fi
 
 echo "=== Build Completed Successfully! Output directory ready in: '$DIST_DIR' ==="
 
 # 9. Deployment Context Router
-if [ "$CLOUDFLARE_WORKER_DEPLOY" = "true" ]; then
-    echo "Wrangler Worker deployment context detected."
-    if ! command -v wrangler &> /dev/null; then
-        if command -v npm &> /dev/null; then
-            echo "Installing Cloudflare Wrangler globally via npm..."
-            npm install -g wrangler
-        else
-            echo "ERROR: npm is required to install Wrangler for Worker deployments."
-            exit 1
-        fi
+if [ "${CLOUDFLARE_WORKER_DEPLOY:-false}" = "true" ]; then
+    echo "Executing Cloudflare Workers Deploy..."
+    if command -v wrangler &> /dev/null; then
+        wrangler deploy
+    else
+        npx --yes wrangler@4 deploy
     fi
-    echo "Executing Wrangler Deploy..."
-    cd crates/urae-wasm
-    wrangler deploy
-    cd ../..
 else
-    echo "Pages / Static CDN deployment context detected. Ready for publishing to Cloudflare Pages."
+    echo "Workers Static Assets build complete. Deploy with: npx --yes wrangler@4 deploy"
 fi
